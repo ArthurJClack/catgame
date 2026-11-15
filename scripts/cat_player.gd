@@ -687,7 +687,9 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	var bob := 0.0
 	if is_on_floor():
 		# a cat's head is stabilised: only a whisper of bob, mostly at the gallop
-		bob = (rig.gait_w.y * 0.0015 * cos(rig.phase * TAU * 2.0) + rig.gait_w.z * 0.006 * sin(rig.phase * TAU + 0.7)) * clampf(hspd / 1.0, 0, 1)
+		# gait hooks: the camera rides on the rig's head, which the neck already holds steady.
+		# head_bob is what little vertical movement is left after that
+		bob = rig.head_bob
 
 	# blend weights for the special states
 	w_climb = LowPoly.damp(w_climb, 1.0 if climbing else 0.0, 12.0, dt)
@@ -770,6 +772,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	# gait hooks: first person paws follow the rig's planted front paws
 	paws.foot = rig.fp_foot
 	paws.use_feet = rig.use_planting and w_face < 0.02
+	rig.gravity = G
 
 
 func _process(_dt: float) -> void:

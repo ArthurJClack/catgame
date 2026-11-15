@@ -562,6 +562,81 @@ func _run() -> void:
 		Engine.time_scale = 1.0
 		_end()
 
+	if _want("sit"):
+		_spawn(Vector3(40, 0, 0))
+		cam_dist = 0.9
+		await _settle(0.6)
+		caption.text = "sit down, lie down, get up (in stages)"
+		Engine.time_scale = slow
+		_begin("sit")
+		var t := 0.0
+		while t < 9.0 * slow:
+			var ph := t / slow
+			cat.sit = 1.0 if (ph > 0.5 and ph < 6.6) else 0.0
+			cat.loaf = 1.0 if (ph > 3.2 and ph < 5.6) else 0.0
+			t += await _step(0.0)
+		Engine.time_scale = 1.0
+		_end()
+
+	if _want("fall"):
+		_spawn(Vector3(44, 0, 0))
+		cam_dist = 1.7
+		await _settle(0.4)
+		caption.text = "falls: on its back (righting twist), then a long drop"
+		Engine.time_scale = slow
+		_begin("fall")
+		var t := 0.0
+		var n := 0
+		while t < 5.0 * slow:
+			var ph := t / slow
+			if (n == 0 and ph > 0.3) or (n == 1 and ph > 2.6):
+				cat.position.y = 1.9 if n == 0 else 1.5
+				vel = Vector3(0, 0, -0.9) if n == 1 else Vector3.ZERO
+				airborne = true
+				cat.drive_velocity = vel
+				cat.on_floor = false
+				if n == 0:
+					cat.tumble(0.5)
+				n += 1
+			t += await _step(0.9 if (n == 2 and airborne) else 0.0, 0.0, 0.0 if airborne else 12.0)
+		Engine.time_scale = 1.0
+		_end()
+
+	if _want("hear"):
+		_spawn(Vector3(48, 0, 0))
+		cam_dist = 0.8
+		await _settle(0.6)
+		caption.text = "a quiet noise on the left (ears), a loud one behind right (head too)"
+		Engine.time_scale = slow
+		_begin("hear")
+		var t := 0.0
+		var n := 0
+		while t < 5.0 * slow:
+			var ph := t / slow
+			if n == 0 and ph > 0.6:
+				n = 1
+				cat.hear(cat.to_global(Vector3(-2.0, 0.1, -0.5)), 0.4)
+			if n == 1 and ph > 2.4:
+				n = 2
+				cat.hear(cat.to_global(Vector3(1.5, 0.1, 1.2)), 0.95)
+			t += await _step(0.0)
+		Engine.time_scale = 1.0
+		_end()
+
+	if _want("beam"):
+		_block(Vector3(52, 0.15, -1.5), Vector3(0.09, 0.3, 5.0), Color(0.5, 0.4, 0.3))
+		_spawn(Vector3(52, 0.3, 0.6))
+		cam_dist = 1.1
+		await _settle(0.8)
+		caption.text = "narrow beam, 0.5 m/s: paws in line, tail out"
+		Engine.time_scale = slow
+		_begin("beam")
+		var t := 0.0
+		while t < 5.0 * slow:
+			t += await _step(0.5)
+		Engine.time_scale = 1.0
+		_end()
+
 	if report_path != "":
 		var f := FileAccess.open(report_path, FileAccess.WRITE)
 		f.store_string(JSON.stringify(results, "  "))
