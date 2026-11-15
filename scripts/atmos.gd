@@ -69,9 +69,11 @@ var leaves: CPUParticles3D
 var cloud_mat: StandardMaterial3D
 var fog_density := 0.0032
 var _applied := -99.0
+var _compat := false
 
 
 func _ready() -> void:
+	_compat = RenderingServer.get_rendering_device() == null
 	var we := WorldEnvironment.new()
 	env = Environment.new()
 	var sky := Sky.new()
@@ -287,7 +289,8 @@ func apply_time() -> void:
 	sky_mat.set_shader_parameter("moon_dir", md)
 	sky_mat.set_shader_parameter("stars", st)
 	env.ambient_light_color = ac
-	env.ambient_light_energy = ae
+	# the web / compatibility renderer has no ssao or fog to fill the shadows in, so give it more sky light
+	env.ambient_light_energy = ae * (1.9 if _compat else 1.0)
 	env.fog_light_color = fc
 	env.fog_density = fog_density * (1.0 + (1.0 - daylight()) * 0.8)
 	env.volumetric_fog_density = lerpf(0.003, 0.006, daylight())

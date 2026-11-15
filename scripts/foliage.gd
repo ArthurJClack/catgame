@@ -237,6 +237,7 @@ func _mm(mesh: Mesh, xfs: Array, cols: Array, mat: Material, far: float, center:
 		return
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
 	mm.use_custom_data = true
 	mm.mesh = mesh
 	mm.instance_count = xfs.size()
@@ -244,6 +245,7 @@ func _mm(mesh: Mesh, xfs: Array, cols: Array, mat: Material, far: float, center:
 		var t: Transform3D = xfs[i]
 		t.origin -= center
 		mm.set_instance_transform(i, t)
+		mm.set_instance_color(i, Color.WHITE)
 		mm.set_instance_custom_data(i, cols[i])
 	var mmi := MultiMeshInstance3D.new()
 	mmi.multimesh = mm
@@ -295,7 +297,7 @@ func _build_grass(density: float) -> void:
 					continue
 				var col := ForestLevel.ground_color(x, z, h, rng)
 				col = col.lerp(Color(0.5, 0.66, 0.24), 0.25 + rng.randf() * 0.25)
-				col = col.lerp(Color(0.3, 0.52, 0.16), 0.3)
+				col = Color(col.r * 0.72, col.g * 0.9, col.b * 0.6).lerp(Color(0.3, 0.52, 0.16), 0.3)
 				var kind := 0
 				var s := rng.randf_range(0.07, 0.15)
 				var roll := rng.randf()
