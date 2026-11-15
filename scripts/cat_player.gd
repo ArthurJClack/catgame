@@ -773,6 +773,10 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	paws.foot = rig.fp_foot
 	paws.use_feet = rig.use_planting and w_face < 0.02
 	rig.gravity = G
+	# multiplayer: hand this tick's rig inputs to the network (no-op when nobody else is here)
+	var net := get_node_or_null("/root/Net")
+	if net:
+		net.capture(self, dt)
 
 
 func _process(_dt: float) -> void:

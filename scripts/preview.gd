@@ -48,6 +48,10 @@ func _ready() -> void:
 	cat.position = Vector3(40, 0, 30)
 	main.player.bot = {"move": Vector2.ZERO}
 	main.player.log_events = true
+	if "--nettest" in OS.get_cmdline_user_args():
+		var nt := NetTest.new()
+		nt.main = main
+		add_child(nt)
 	var args := OS.get_cmdline_user_args()
 	var si := args.find("--still")
 	if si >= 0:
