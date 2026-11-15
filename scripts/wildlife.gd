@@ -272,11 +272,33 @@ func _pick_wander(radius := 6.0) -> void:
 	target = home
 
 
+static var _ogrid := {}
+static var _ogrid_n := -1
+const OCELL := 4.0
+
+
+## obstacles bucketed into 4 m cells (each one listed in every cell it can push from), rebuilt when the level changes
+static func _near_obstacles(p: Vector2) -> Array:
+	if _ogrid_n != ForestLevel.obstacles.size():
+		_ogrid_n = ForestLevel.obstacles.size()
+		_ogrid.clear()
+		for o in ForestLevel.obstacles:
+			var c: Vector2 = o[0]
+			var reach: float = o[1] + 1.3
+			for gx in range(floori((c.x - reach) / OCELL), floori((c.x + reach) / OCELL) + 1):
+				for gz in range(floori((c.y - reach) / OCELL), floori((c.y + reach) / OCELL) + 1):
+					var key := Vector2i(gx, gz)
+					if not _ogrid.has(key):
+						_ogrid[key] = []
+					_ogrid[key].append(o)
+	return _ogrid.get(Vector2i(floori(p.x / OCELL), floori(p.y / OCELL)), [])
+
+
 func _avoid(dir: Vector3) -> Vector3:
 	# steer around trunks / rocks / logs (ground animals)
 	var p := Vector2(position.x, position.z)
 	var push := Vector2.ZERO
-	for o in ForestLevel.obstacles:
+	for o in _near_obstacles(p):
 		var c: Vector2 = o[0]
 		var r: float = o[1] + (0.6 if kind == "deer" else 0.15)
 		var d := p - c
@@ -436,9 +458,32 @@ func released() -> void:
 		_flee_up_tree()
 
 
-func _physics_process(dt: float) -> void:
+var _lod_acc := 0.0
+var _lod_skip := 0
+static var _cam_pos := Vector3.ZERO
+static var _cam_frame := -1
+
+## runs once per drawn frame (not per physics tick: nothing here is a physics body), and animals that are
+## far from the camera only think every few frames, with the skipped time added up so they keep real speed
+func _process(dt: float) -> void:
 	if caught:
 		return
+	var fr := Engine.get_process_frames()
+	if _cam_frame != fr:
+		_cam_frame = fr
+		var cam := get_viewport().get_camera_3d()
+		if cam:
+			_cam_pos = cam.global_position
+	_lod_acc += dt
+	_lod_skip -= 1
+	if _lod_skip > 0:
+		return
+	var far := Vector2(position.x - _cam_pos.x, position.z - _cam_pos.z).length()
+	_lod_skip = 1 if far < 22.0 else (3 if far < 40.0 else 6)
+	if kind == "hawk":
+		_lod_skip = 1
+	dt = minf(_lod_acc, 0.1)
+	_lod_acc = 0.0
 	if _stun > 0.0:
 		_stun -= dt
 		return

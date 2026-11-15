@@ -21,15 +21,25 @@ var atmos: Atmos
 var water: Water
 var swarms: Array = []
 var _shift_t := 0.0
+var sound: Soundscape
+var _perf := false
+var _perf_n := 0
+var _perf_sum := 0.0
+var _load_ms := 0
 
 
 func _ready() -> void:
+	var t0 := Time.get_ticks_msec()
+	_perf = "--perf" in OS.get_cmdline_user_args()
 	_setup_env()
 	info = ForestLevel.build(self)
 	_dress()
 	critters = Critter.spawn_all(self)
 	critters.append_array(Fauna.spawn_all(self, atmos))
 	swarms = Swarms.spawn_all(self, atmos)
+	sound = Soundscape.new()
+	sound.atmos = atmos
+	add_child(sound)
 	_spawn_mice()
 	player = CatPlayer.new()
 	player.position = info.spawn
@@ -39,6 +49,7 @@ func _ready() -> void:
 		player.set_style.call_deferred(Engine.get_meta("cat_style"))
 	_build_gate_trigger()
 	_build_hud()
+	_load_ms = Time.get_ticks_msec() - t0
 	var args := OS.get_cmdline_user_args()
 	var si := args.find("--still")
 	if si >= 0 or "--tour" in args or "--watch" in args:
@@ -82,6 +93,9 @@ func _setup_env() -> void:
 	if hi >= 0:
 		atmos.hour = float(OS.get_cmdline_user_args()[hi + 1])
 		atmos.apply_time()
+		var ds := OS.get_cmdline_user_args().find("--dayspeed")
+		if ds >= 0:
+			atmos.day_speed = float(OS.get_cmdline_user_args()[ds + 1])
 	else:
 		# a full day takes about half an hour of play
 		atmos.day_speed = 0.012
@@ -146,7 +160,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -112
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the forest: deer + rabbits in the meadow, ducks + fish on the pond, crows, a hawk overhead, hedgehogs, lizards on the rocks, grasshoppers + mice to hunt\nstalk (c) to sneak up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nt teleport to next landmark · n skip time (sunset, night, morning) · 1-8 swap cat · v camera · h hide help · walk out the gate behind you (or f5) = back to the yard"
+	help_label.text = "the forest: deer + rabbits in the meadow, ducks + fish on the pond, crows, a hawk overhead, hedgehogs, lizards on the rocks, grasshoppers + mice to hunt\nstalk (c) to sneak up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nt teleport to next landmark · n skip time (sunset, night, morning) · m mute · 1-8 swap cat · v camera · h hide help · walk out the gate behind you (or f5) = back to the yard"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -184,6 +198,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			player.last_event_t = 0.0
 		KEY_H:
 			help_label.visible = not help_label.visible
+		KEY_M:
+			sound.set_muted(not sound.muted)
+			player.last_event = "sound off" if sound.muted else "sound on"
+			player.last_event_t = 0.0
 		KEY_N:
 			# skip ahead: afternoon -> sunset -> night -> morning
 			atmos.skip = 3.0
@@ -219,7 +237,7 @@ func _zoo() -> void:
 		c.position = c.home
 		c.rotation.y = -0.7
 		c.visible = true
-		c.set_physics_process(false)
+		c.set_process(false)
 		x += 0.75 if big else 0.4
 		if k == "hedgehog":
 			x = -1.0
@@ -301,6 +319,13 @@ func _watch_cam(dt: float) -> void:
 
 func _process(dt: float) -> void:
 	t += dt
+	if _perf:
+		# `-- --perf`: script cost per frame (process + physics), printed after 6 s
+		_perf_n += 1
+		_perf_sum += Performance.get_monitor(Performance.TIME_PROCESS) + Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * Engine.physics_ticks_per_second / maxf(Engine.get_frames_per_second(), 1.0)
+		if t > 6.0:
+			print("perf: %.3f ms process, %.3f ms per physics tick, load %d ms" % [Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, _load_ms])
+			get_tree().quit()
 	_shift_t -= dt
 	if _shift_t < 0.0:
 		_shift_t = 2.0

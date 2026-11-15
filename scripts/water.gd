@@ -122,6 +122,8 @@ static func splash(pos: Vector3, strength := 0.6) -> void:
 	_rip[_next] = Vector4(pos.x, pos.z, _now, strength)
 	_next = (_next + 1) % _rip.size()
 	mat.set_shader_parameter("rip", _rip)
+	if strength >= 0.3:
+		Soundscape.play("splash" if strength > 0.6 else "plop", pos, strength, 1.0 + (0.6 - strength) * 0.5)
 
 
 func set_sky(c: Color) -> void:

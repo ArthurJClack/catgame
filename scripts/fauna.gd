@@ -83,8 +83,11 @@ func _shout() -> void:
 	get_tree().call_group("wild", "alarmed", global_position, kind, self)
 
 
-func _ears(loud: float) -> void:
+## a noise: the cat's ears turn to it, and it plays if there's a soundscape
+func _ears(loud: float, snd := "", pitch := 1.0) -> void:
 	get_tree().call_group("cat_ears", "hear", global_position, loud)
+	if snd != "":
+		Soundscape.play(snd, global_position, loud, pitch)
 
 
 # ------------------------------------------------------------------ models
@@ -492,7 +495,8 @@ func _take_off(th: Array) -> void:
 	fly_t = 0.0
 	cool = 0.0
 	head.rotation.y = 0.0
-	_ears(1.0)
+	_ears(1.0, "quack", 1.0 if has_meta("drake") and not get_meta("drake") else 0.85)
+	Soundscape.play("flap", global_position, 0.8)
 	_shout()
 	_set_state("takeoff", 99.0)
 
@@ -585,6 +589,7 @@ func _think_hedgehog(dt: float, th: Array) -> void:
 					_set_state("snuffle", rng.randf_range(5.0, 12.0))
 			if scared:
 				_set_state("ball", 2.5)
+				_ears(0.4, "sniff")
 				vel = Vector3.ZERO
 		"ball":
 			curl = LowPoly.damp(curl, 1.0, 14.0, dt)
@@ -661,7 +666,7 @@ func _think_hopper(dt: float, th: Array) -> void:
 				for w in wings:
 					(w.get_child(0) as Node3D).visible = true
 				if spring:
-					_ears(0.25)
+					_ears(0.25, "tick", rng.randf_range(0.9, 1.3))
 				_set_state("jump", 3.0)
 		"jump":
 			vel.y -= 9.8 * dt
@@ -704,7 +709,7 @@ func _think_hawk(dt: float, th: Array) -> void:
 					leader = null
 					set_meta("quarry", prey)
 					_launch(perch + Vector3(0, 0.6, 0), 15.0, 1.6)
-					_ears(1.0)
+					_ears(1.0, "hawk")
 					_set_state("stoop", 99.0)
 				else:
 					state_t = rng.randf_range(10.0, 20.0)
@@ -814,7 +819,7 @@ func _think_woodpecker(dt: float, th: Array) -> void:
 				cool -= dt
 				if hit and cool < 0.0:
 					cool = 1.8
-					_ears(0.7)
+					_ears(0.7, "drum")
 			elif state == "hitch":
 				cling_y += dt * 0.5
 				trunk_a += dt * 0.6 * (1.0 if int(home.x * 10.0) % 2 == 0 else -1.0)
@@ -947,8 +952,8 @@ func _think_crow(dt: float, th: Array) -> void:
 					body.rotation.x = 0.35
 					tail.rotation.x = -0.4
 					if cool < 0.0:
-						_ears(0.9)
-						cool = 0.6
+						_ears(0.9, "caw", rng.randf_range(0.9, 1.1))
+						cool = 2.6
 				else:
 					tail.rotation.x = 0.0
 				state_t = maxf(state_t, 1.0)
@@ -967,7 +972,7 @@ func _think_crow(dt: float, th: Array) -> void:
 			if c and fly_t < 0.8:
 				target = c.global_position + Vector3(0, 0.55, 0)
 			if _fly_step(dt, -0.3, 14.0, 0.7):
-				_ears(1.0)
+				_ears(1.0, "caw", 1.1)
 				_launch(perch, 8.0, 0.8)
 				_set_state("fly", 99.0)
 		"fly_down":
@@ -993,7 +998,7 @@ func _crow_up(th: Array, scared: bool) -> void:
 				p = q
 	_launch(p, 6.5, 0.7)
 	if scared:
-		_ears(0.8)
+		_ears(0.8, "caw")
 		_shout()
 	_set_state("fly", 99.0)
 
