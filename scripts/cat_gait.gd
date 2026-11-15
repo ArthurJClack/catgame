@@ -235,6 +235,11 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 			# under the body when it touches down), as far as the leg's reach allows
 			var back := minf(spd * _dur[i], 1.25 * Vector2(tl.x - fr.x, tl.z - fr.z).length())
 			p -= ldir * back * s * (2.0 * s - 1.0) * (s - 1.0)
+			# whatever ground speed that could not cover is matched right at the two ends, so the
+			# paw neither skids forward on touch down nor gets yanked off the ground at lift off
+			var rem := spd * _dur[i] - back
+			if rem > 0.0:
+				p += ldir * rem * ((1.0 - s) * smoothstep(0.7, 1.0, s) - s * (1.0 - smoothstep(0.0, 0.3, s)))
 			# lift early, reach late, plant softly. clear the higher of the two ends
 			var hi := maxf(fr.y, tl.y)
 			p.y = lerpf(p.y, hi, sin(PI * s)) + _lift[i] * sin(PI * pow(s, 0.65))
