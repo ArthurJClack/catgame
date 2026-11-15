@@ -1138,6 +1138,27 @@ func _think_bat(dt: float, th: Array) -> void:
 		body.rotation.z = clampf(-vel.cross(Vector3.UP).dot(want - vel) * 0.02, -0.7, 0.7)
 
 
+## day animals at night: songbirds go up to roost and stay there, butterflies tuck away
+static func night_shift(list: Array) -> void:
+	if atmos == null:
+		return
+	var night := atmos.is_night()
+	for c in list:
+		var cr := c as Critter
+		if cr == null or cr.caught:
+			continue
+		if cr.kind == "butterfly":
+			cr.visible = not night
+		elif cr.kind == "bird" and night:
+			if cr.state in ["idle", "peck", "hop"]:
+				cr._hushed = true
+				var a := cr.rng.randf() * TAU
+				cr._fly_to_perch([99.0, 0.0, false, 0.0, Vector3(cos(a), 0, sin(a))])
+				cr._hushed = false
+			elif cr.state == "perched":
+				cr.state_t = maxf(cr.state_t, 6.0)
+
+
 # ------------------------------------------------------------------ spawning
 static func spawn_all(parent: Node3D, sky: Atmos = null) -> Array:
 	atmos = sky

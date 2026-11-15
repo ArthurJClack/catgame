@@ -79,7 +79,7 @@ func _ready() -> void:
 			mmi.visibility_range_end = 7.0
 		"fireflies", "moths":
 			var q := BoxMesh.new()
-			q.size = Vector3.ONE * (0.012 if kind == "fireflies" else 0.02)
+			q.size = Vector3.ONE * (0.04 if kind == "fireflies" else 0.02)
 			mm.mesh = q if kind == "fireflies" else _bug_mesh(Color(0.85, 0.82, 0.75), Color(0.6, 0.55, 0.5), Color(0.92, 0.9, 0.85), 2.2)
 			if kind == "fireflies":
 				mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -149,7 +149,7 @@ static func _bug_mesh(a: Color, b: Color, wing: Color, wing_scale := 1.0) -> Arr
 
 
 func _fly_spot() -> Vector3:
-	var p := home + Vector3(rng.randf_range(-11, 11), 0, rng.randf_range(-11, 11))
+	var p := home + Vector3(rng.randf_range(-9, 9), 0, rng.randf_range(-9, 9))
 	p.x = clampf(p.x, -34, 34)
 	p.z = clampf(p.z, -34, 34)
 	p.y = maxf(ForestLevel.height(p.x, p.z), ForestLevel.WATER_Y) + rng.randf_range(0.12, 1.3)
@@ -365,10 +365,10 @@ func _fireflies(dt: float, cp: Vector3) -> void:
 		vel[i] = vel[i].lerp(want, 1.0 - exp(-2.0 * dt))
 		pos[i] += vel[i] * dt
 		# the flash: a quick rise, a slow fade, then dark for a few seconds, each on its own clock
-		var ph := fposmod(t * aux2[i] + aux[i], 3.6)
+		var ph := fposmod(t * aux2[i] + aux[i], 2.6)
 		var glow := smoothstep(0.0, 0.15, ph) * (1.0 - smoothstep(0.3, 1.1, ph))
-		mm.set_instance_color(i, Color(0.75, 1.0, 0.25) * (0.06 + glow * 3.2) * on)
-		mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ONE * (0.6 + glow * 0.9)), pos[i]))
+		mm.set_instance_color(i, Color(0.5, 1.0, 0.1) * (0.12 + glow * 1.5) * on)
+		mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ONE * (0.45 + glow * 0.9)), pos[i]))
 
 
 func _moths(dt: float, cp: Vector3) -> void:
@@ -422,7 +422,7 @@ static func spawn_all(parent: Node3D, sky: Atmos = null) -> Array:
 	add.call("bees", 10 if web else 18, Vector3(m.x, ForestLevel.height(m.x, m.y), m.y))
 	add.call("ants", 46, ForestLevel.ground(2.6, 26.5))
 	add.call("ants", 46, ForestLevel.ground(m.x - 5.0, m.y + 3.0))
-	add.call("fireflies", 30 if web else 50, Vector3(m.x, ForestLevel.height(m.x, m.y), m.y))
+	add.call("fireflies", 34 if web else 70, Vector3(m.x, ForestLevel.height(m.x, m.y), m.y))
 	add.call("fireflies", 24 if web else 40, ForestLevel.ground(2.0, 22.0))
 	add.call("fireflies", 20 if web else 36, ForestLevel.ground(pond.x - 4.0, pond.y + 2.0))
 	add.call("moths", 14, Vector3(m.x, ForestLevel.height(m.x, m.y), m.y))

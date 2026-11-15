@@ -20,6 +20,7 @@ var leaving := false
 var atmos: Atmos
 var water: Water
 var swarms: Array = []
+var _shift_t := 0.0
 
 
 func _ready() -> void:
@@ -81,6 +82,9 @@ func _setup_env() -> void:
 	if hi >= 0:
 		atmos.hour = float(OS.get_cmdline_user_args()[hi + 1])
 		atmos.apply_time()
+	else:
+		# a full day takes about half an hour of play
+		atmos.day_speed = 0.012
 
 
 ## grass, flowers, reeds, the water surface: everything that dresses the bare level
@@ -142,7 +146,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -112
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the forest: deer + rabbits in the meadow, squirrels up the trees, birds, foxes, frogs by the stream, field mice to hunt\nstalk (c) to sneak up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nt teleport to next landmark · 1-8 swap cat · v camera · h hide help · walk out the gate behind you (or f5) = back to the yard"
+	help_label.text = "the forest: deer + rabbits in the meadow, ducks + fish on the pond, crows, a hawk overhead, hedgehogs, lizards on the rocks, grasshoppers + mice to hunt\nstalk (c) to sneak up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nt teleport to next landmark · n skip time (sunset, night, morning) · 1-8 swap cat · v camera · h hide help · walk out the gate behind you (or f5) = back to the yard"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -180,6 +184,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			player.last_event_t = 0.0
 		KEY_H:
 			help_label.visible = not help_label.visible
+		KEY_N:
+			# skip ahead: afternoon -> sunset -> night -> morning
+			atmos.skip = 3.0
+			player.last_event = "time passes..."
+			player.last_event_t = 0.0
 		KEY_F5, KEY_TAB:
 			_go_home()
 
@@ -292,6 +301,12 @@ func _watch_cam(dt: float) -> void:
 
 func _process(dt: float) -> void:
 	t += dt
+	_shift_t -= dt
+	if _shift_t < 0.0:
+		_shift_t = 2.0
+		Fauna.night_shift(critters)
+		if water and atmos:
+			water.set_sky(atmos.sky_mat.get_shader_parameter("horizon"))
 	if _watch != null:
 		_watch_cam(dt)
 		return
@@ -315,7 +330,7 @@ func _process(dt: float) -> void:
 		if dd < best:
 			best = dd
 			near = "%s nearby (%s)" % [cr.kind, cr.state]
-	hud_label.text = "%d fps\n%.1f m/s   height %.2f m   kicks %d\n%s" % [Engine.get_frames_per_second(), hs, player.global_position.y - ForestLevel.height(player.global_position.x, player.global_position.z), player.kicks_left, near]
+	hud_label.text = "%d fps   %02d:%02d\n%.1f m/s   height %.2f m   kicks %d\n%s" % [Engine.get_frames_per_second(), int(atmos.hour), int(fmod(atmos.hour, 1.0) * 60.0), hs, player.global_position.y - ForestLevel.height(player.global_position.x, player.global_position.z), player.kicks_left, near]
 	if player.last_event_t < 1.2:
 		event_label.text = player.last_event
 		event_label.modulate.a = 1.0 - player.last_event_t / 1.2
