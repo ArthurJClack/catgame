@@ -201,6 +201,7 @@ func _build_banner() -> void:
 	_layer.visible = false
 	add_child(_layer)
 	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.anchor_left = 1.0
 	panel.anchor_right = 1.0
 	panel.offset_left = -16.0

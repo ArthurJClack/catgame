@@ -158,6 +158,7 @@ func _build_hud() -> void:
 	help_label.text = "the forest: deer + rabbits in the meadow, squirrels up the trees, birds, foxes, frogs by the stream, field mice to hunt\nstalk (c) to sneak up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nt teleport to next landmark · 1-8 swap cat · v camera · h hide help · walk out the gate behind you (or f5) = back to the yard"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
+	ch.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ch.color = Color(1, 1, 1, 0.7)
 	ch.size = Vector2(4, 4)
 	ch.anchor_left = 0.5

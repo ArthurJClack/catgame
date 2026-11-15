@@ -164,6 +164,7 @@ func _build_hud() -> void:
 		help_label.offset_top = -152
 	hud.add_child(help_label)
 	crosshair = ColorRect.new()
+	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE   # the captured cursor parks on it: STOP would eat every mouse move
 	crosshair.color = Color(1, 1, 1, 0.7)
 	crosshair.size = Vector2(4, 4)
 	crosshair.anchor_left = 0.5
