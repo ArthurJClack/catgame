@@ -41,6 +41,7 @@ var groom := 0.0         # sitting, licking a paw + face wipes
 var loaf := 0.0          # legs tucked under, eyes half shut
 var pin := 0.0           # forepaws slammed down together (pounce landing), decays by itself
 var claws_out := 0.0     # read only
+var slip_claws := 0.0    # 0..1 paws slipping on the floor: claws come out, paws stay down
 
 # ---------------- state (readable by others) ----------------
 var phase := 0.0
@@ -859,7 +860,7 @@ func animate(dt: float) -> void:
 	var hs := clampf(spd / 2.5, 0.0, 1.0)
 	var rise := clampf(_vy / 3.5, -1.0, 1.0)
 	var lp := to_local(ledge_world) if clamber > 0.0 else Vector3.ZERO
-	var claws := maxf(maxf(scramble, scratch), maxf(climb, clamber))
+	var claws := maxf(maxf(maxf(scramble, slip_claws), scratch), maxf(climb, clamber))
 	claws = maxf(claws, maxf(pin, _air_w * hs * clampf(rise + 0.8, 0.0, 1.0)))
 	claws_out = LowPoly.damp(claws_out, claws, 14.0, dt)
 	if (_swat_t >= 0.0 and _swat_t < 0.26) or claw_on:

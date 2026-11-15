@@ -84,6 +84,10 @@ func _ready() -> void:
 		p.bot.move = Vector2(0, float(args[args.find("--fpshot") + 2]))
 		p.cam.current = true
 		return
+	if "--pawtest" in args:
+		cat.visible = false
+		_run_pawtest()
+		return
 	if "--hoptest" in args:
 		cat.visible = false
 		_run_hoptest()
@@ -1215,4 +1219,64 @@ func _run_hoptest() -> void:
 		bot.move = Vector2.ZERO
 		bot.sprint = false
 		print("grip on %s->%s: speed %.2f  max slip %.2f  turf %d" % [sf0, p.surface, top, mx, p._tears.size()])
+	get_tree().quit()
+
+
+# front paws must stay on the ground while running and slipping on the floor (bug: low grip threw
+# them up into the wall-scramble pose). sprints on wood, yanks the heading round, starts/stops hard
+func _run_pawtest() -> void:
+	var p: CatPlayer = main.player
+	var bot: Dictionary = p.bot
+	p.set_view(0)
+	for spot in [Vector3(0.0, 0.02, -3.0), Vector3(0.0, 0.02, 9.0)]:
+		p.global_position = spot
+		p.velocity = Vector3.ZERO
+		bot.yaw = PI / 2
+		for i in 30:
+			await get_tree().physics_frame
+		var surf: String = p.surface
+		var hi := 0.0
+		var mslip := 0.0
+		var msc := 0.0
+		var n := 0
+		for step in [[Vector2(0, 1), true, PI / 2, 90], [Vector2(0, 1), true, -PI / 2, 70], [Vector2.ZERO, false, -PI / 2, 30], [Vector2(0, 1), true, 0.0, 50], [Vector2(0, 1), false, PI, 60], [Vector2.ZERO, false, PI, 30]]:
+			bot.move = step[0]
+			bot.sprint = step[1]
+			bot.yaw = step[2]
+			for i in step[3]:
+				await get_tree().physics_frame
+				if p.is_on_floor():
+					n += 1
+					mslip = maxf(mslip, p.slip)
+					msc = maxf(msc, p.rig.scramble)
+					hi = maxf(hi, maxf(p.rig.fp_foot[0].y, p.rig.fp_foot[1].y))
+		bot.move = Vector2.ZERO
+		bot.sprint = false
+		print("pawtest on %s: grounded frames %d  max slip %.2f  max scramble %.2f  max front paw height %.3f m" % [surf, n, mslip, msc, hi])
+	# land out of a wall slide: scramble must not stay on afterwards
+	p.global_position = Vector3(0.0, 0.02, -3.0)
+	p.velocity = Vector3.ZERO
+	for i in 20:
+		await get_tree().physics_frame
+	p.wall_sliding = true
+	bot.move = Vector2(0, 1)
+	var sc_end := 0.0
+	for i in 60:
+		await get_tree().physics_frame
+		sc_end = p.rig.scramble
+	bot.move = Vector2.ZERO
+	print("pawtest after landing from a wall slide: wall_sliding=%s scramble %.2f" % [p.wall_sliding, sc_end])
+	# baseline: plain straight trot, no slip
+	p.global_position = Vector3(0.0, 0.02, -3.0)
+	bot.yaw = PI / 2
+	for i in 30:
+		await get_tree().physics_frame
+	var hb := 0.0
+	bot.move = Vector2(0, 1)
+	for i in 120:
+		await get_tree().physics_frame
+		if i > 40:
+			hb = maxf(hb, maxf(p.rig.fp_foot[0].y, p.rig.fp_foot[1].y))
+	bot.move = Vector2.ZERO
+	print("pawtest baseline trot front paw height %.3f m" % hb)
 	get_tree().quit()

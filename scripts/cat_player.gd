@@ -634,6 +634,9 @@ func _physics_process(dt: float) -> void:
 			scramble_t = 0.0
 
 	# gravity
+	if grounded:
+		# landing out of a wall slide used to leave this stuck on, so the paws stayed in the scramble pose
+		wall_sliding = false
 	if not grounded:
 		velocity.y -= G * dt
 		# claws out: pushing into a wall while falling drags you down slowly
@@ -728,7 +731,11 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	# the head turns a little toward where you're looking
 	var lyaw := clampf(wrapf(orb_yaw - yaw, -PI, PI), -1.2, 1.2) * 0.7 * (1.0 - w_face)
 	rig.look_yaw = LowPoly.damp(rig.look_yaw, lyaw, 10.0, dt)
-	rig.scramble = LowPoly.damp(rig.scramble, 1.0 if scramble_t > 0.0 else (0.6 if wall_sliding else minf(slip * 1.3, 1.0)), 14.0, dt)
+	# wall scramble pose only. ground slip used to feed this too, which threw the front paws up into
+	# the wall-claw pose whenever grip ran out on the floor (hard starts / turns on wood or tile).
+	# slipping now just shows the claws and the paws stay on the ground.
+	rig.scramble = LowPoly.damp(rig.scramble, 1.0 if scramble_t > 0.0 else (0.6 if wall_sliding else 0.0), 14.0, dt)
+	rig.slip_claws = minf(slip * 1.3, 1.0) if is_on_floor() else 0.0
 	rig.climb = w_climb
 	rig.clamber = w_clamber
 	rig.clamber_pull = clampf(clamber_t / 0.55, 0.0, 1.0) if (clambering and clamber_phase == 2) else (1.0 if not clambering else 0.0)
