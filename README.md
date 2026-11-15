@@ -63,7 +63,7 @@ open the folder in godot 4.3+ and hit play (f5).
 ## views + levels
 
 - v cycles first person, third person and orbit cam. in orbit, the mouse orbits the cat, the scroll wheel zooms, wasd is camera relative and the cat turns to face where it goes. the camera never clips through walls.
-- the gap in the west yard fence (and f6) goes to the forest level. f7 goes to the stealth level.
+- the gap in the west yard fence (and f6) goes to the forest level. f7 goes to the stealth level, f8 the running trail.
 
 ## forest (res://forest.tscn)
 walk out the gap in the west yard fence (or f6 from the main map). f5 / the gate behind you goes back.
@@ -74,6 +74,21 @@ walk out the gap in the west yard fence (or f6 from the main map). f5 / the gate
   small state machine that reads the cat's distance / speed / crouch / height. stalk to sneak up, rush to scatter them
 - `scripts/field_mouse.gd` huntable prey (pounce = caught)
 - t teleports between landmarks. `-- --tour` renders the flythrough
+
+## trail (res://trail.tscn)
+f8 from the house. a ~137 m loop of dirt singletrack built to show off running: fine grained ground
+(0.5 m terrain grid with ruts and lumps, gravel, pebbles, leaf litter, twigs, moss) and sections of small stuff:
+roots under old oaks, fallen logs across the path, a rock garden with flat slabs, stone steps up a ridge,
+drop offs down the far side, a creek ditch, then a debris mix of stumps, logs, rocks and branches.
+- running over rough ground (`scripts/run_assist.gd`, on for the player everywhere, `auto_bound`):
+  - roots, branches and stone lips up to 11 cm: the body glides up while the paws step (no jump)
+  - at a run (> 1.1 m/s) anything bigger up to 60 cm, or a ditch: the cat reads the ground ahead, finds the
+    smallest real ballistic arc that clears it (or lands on top when the top is flat and wide enough)
+    and launches at the spot that arc needs, so it keeps its pace. the rig does the takeoff + landing
+  - taller than that it runs into it and the old mantle / clamber takes over
+- r restart · t next section · b auto bound on/off · f5 back to the house
+- `-- --runtest` (headless ok): a bot runs a lap and prints every bound and anywhere it got stuck
+  (`TRAIL_DBG=s0,s1` prints the ground read between those trail distances). `-- --run` = preview video
 
 ## install + auto updates (windows)
 
