@@ -26,6 +26,7 @@ var delay := 0.1
 # life events (glances, swats, ...) waiting for playback to reach their time
 var _events: Array = []        # [[id, t, ev], ...] sorted by t
 var _last_event_id := -1
+var _floor_flips: Array = []   # [[t, on_floor], ...] from "F" events, sorted
 
 
 ## local clock: game time (sum of frame deltas, advanced by Net every frame). not the wall
@@ -67,6 +68,12 @@ func push(s: CatNetState, send_interval: float) -> void:
 	for e in s.events:
 		if int(e[0]) > _last_event_id:
 			_last_event_id = int(e[0])
+			if str(e[2][0]) == "F":
+				_floor_flips.append([float(e[1]), bool(e[2][1])])
+				_floor_flips.sort_custom(func(x, y): return x[0] < y[0])
+				if _floor_flips.size() > 16:
+					_floor_flips.pop_front()
+				continue
 			var at := _events.size()
 			for i in _events.size():
 				if float(_events[i][1]) > float(e[1]):
@@ -106,7 +113,21 @@ func sample(rt: float) -> CatNetState:
 		snaps.pop_front()
 	var s := CatNetState.lerp_states(a, b, w)
 	_anim_clocks(s, rt)
+	_floor_at(s, rt, a, b)
 	return s
+
+
+## floor contact from the exact flip times (even if the snapshot at the flip got lost). until
+## the flip the velocity is the one it had before, after it the one it has after
+func _floor_at(s: CatNetState, rt: float, a: CatNetState, b: CatNetState) -> void:
+	var tf := -1.0
+	for f in _floor_flips:
+		if f[0] <= rt:
+			s.on_floor = f[1]
+		if f[0] > a.t and f[0] <= b.t:
+			tf = f[0]
+	if tf >= 0.0:
+		s.vel = a.vel if rt < tf else b.vel
 
 
 ## the rig's clocks were sampled at drawn frames (anim_t), not at ticks: interpolate them on

@@ -149,6 +149,11 @@ func capture(player: Node, dt: float) -> void:
 	_last = CatNetState.from_rig(rig, _sim_t, player.get("carried"), _disp_t)
 	_send_acc += dt
 	var urgent := _last.on_floor != _was_floor or _last.claw_on != _was_claw
+	if _last.on_floor != _was_floor:
+		# exact moment of take off / landing, repeated like the life events so a lost packet
+		# can't make the copy land late (the landing squash and paw plant hang off it)
+		_event_id += 1
+		_pending.append([_event_id, _sim_t, ["F", _last.on_floor], EVENT_REPEATS])
 	_was_floor = _last.on_floor
 	_was_claw = _last.claw_on
 	if _send_acc >= 1.0 / SEND_HZ or urgent or (not _pending.is_empty() and _pending[-1][3] == EVENT_REPEATS):

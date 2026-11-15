@@ -9,8 +9,8 @@
 # Override with GODOTSTEAM_URL=<zip url> to pin one.
 set -euo pipefail
 
-GODOT_VERSION="${GODOT_VERSION:-4.3}"
-API="https://codeberg.org/api/v1/repos/godotsteam/godotsteam/releases?limit=40"
+export GODOT_VERSION="${GODOT_VERSION:-4.3}"
+API="https://codeberg.org/api/v1/repos/godotsteam/godotsteam/releases?limit=50"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/addons/godotsteam"
 TMP="$(mktemp -d)"
@@ -48,14 +48,23 @@ if [ -n "${GODOTSTEAM_URL:-}" ]; then
   echo "GODOTSTEAM_URL didn't work"; exit 1
 fi
 
-curl -fsSL --retry 3 "$API" -o "$TMP/releases.json"
-python3 - "$TMP/releases.json" > "$TMP/urls.txt" <<'PY'
-import json, sys
-rel = json.load(open(sys.argv[1]))
+# newest first; the godot 4.3 builds are a few pages back
+for page in 1 2 3 4 5; do
+  curl -fsSL --retry 3 "$API&page=$page" -o "$TMP/releases_$page.json" || break
+done
+python3 - "$TMP"/releases_*.json > "$TMP/urls.txt" <<'PY'
+import json, os, re, sys
+want = tuple(int(x) for x in os.environ.get("GODOT_VERSION", "4.3").split(".")[:2])
+rel = []
+for f in sorted(sys.argv[1:], key=lambda x: int(x.rsplit("_", 1)[1].split(".")[0])):
+    rel += json.load(open(f))
 for r in rel:
     for a in r.get("assets", []):
         n = a["name"].lower()
         if n.endswith(".zip") and ("gdextension" in n or "gde" in n) and "server" not in n and "example" not in n:
+            m = re.search(r"plugin-(\d+)\.(\d+)", n)
+            if m and (int(m.group(1)), int(m.group(2))) > want:
+                continue   # built for a newer godot, says so in the name
             print(a["browser_download_url"], "#", r["tag_name"], a["name"], file=sys.stdout)
 PY
 echo "candidates:"; cat "$TMP/urls.txt"
