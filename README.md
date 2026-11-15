@@ -74,3 +74,26 @@ walk out the gap in the west yard fence (or f6 from the main map). f5 / the gate
   small state machine that reads the cat's distance / speed / crouch / height. stalk to sneak up, rush to scatter them
 - `scripts/field_mouse.gd` huntable prey (pounce = caught)
 - t teleports between landmarks. `-- --tour` renders the flythrough
+
+## install + auto updates (windows)
+
+- grab **CatGame-Setup.exe** from the [latest release](https://github.com/ArthurJClack/catgame/releases/latest) and run it.
+  one click, no admin prompt: it installs to `%LOCALAPPDATA%\Programs\CatGame`, adds a start menu +
+  desktop shortcut and starts the game. it's not code signed yet, so windows smartscreen may say
+  "windows protected your pc": hit "more info" then "run anyway".
+- the installed game checks github releases on launch. if there's a newer one it downloads it in the
+  background while you play (little banner top right). then f9 restarts into the new version, or just quit
+  and it installs silently on the way out. offline / no release / anything weird = it quietly keeps the
+  version you have. skip the check with `CatGame.exe -- --no-update`.
+- it never runs in the editor, the web build or preview renders.
+
+### how releases happen
+
+`.github/workflows/release.yml`: every push to `main` exports the windows build with godot 4.3, wraps it
+in an inno setup installer (`installer/catgame.iss`) and publishes release `v0.1.<run number>` with
+`CatGame-Setup.exe` + a plain `CatGame-windows.zip`. merge a pr = everyone gets it next launch. pull requests
+build the installer too (download it from the run's artifacts) but don't publish. readme-only pushes are skipped.
+
+- updater: `scripts/updater.gd` (autoload `Updater`), version lives in `application/config/version`
+  (ci stamps it, the repo copy stays `0.1.0`)
+- logic test: `godot --headless --path . -s tests/updater_test.gd`

@@ -1,0 +1,114 @@
+# Every push to main (or a manual run) builds the Windows game, wraps it in a one-click
+# installer and publishes a GitHub Release (pull requests only build it, as an artifact). Installed games see the new release on their
+# next launch and update themselves (scripts/updater.gd).
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "tests/**"]
+  pull_request:  # builds the installer as a downloadable artifact, doesn't publish
+    paths-ignore: ["**.md", "tests/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: ver
+        name: pick version
+        run: echo "version=0.1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: stamp version into project.godot
+        run: |
+          sed -i 's/^config\/version=.*/config\/version="${{ steps.ver.outputs.version }}"/' project.godot
+          grep config/version project.godot
+
+      - name: cache godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-win-templates
+
+      - name: get godot + windows export templates
+        run: |
+          mkdir -p ~/godot && cd ~/godot
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          if [ ! -f Godot_v${GODOT_VERSION}-stable_linux.x86_64 ]; then
+            curl -sSLo g.zip $base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && unzip -q g.zip && rm g.zip
+          fi
+          if [ ! -f templates/windows_release_x86_64.exe ]; then
+            curl -sSLo t.tpz $base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+            unzip -q t.tpz 'templates/windows_*' 'templates/version.txt' && rm t.tpz
+          fi
+          dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p $dest && cp templates/* $dest/
+
+      - name: export windows build
+        run: |
+          G=~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64
+          $G --headless --editor --path . --quit || true
+          mkdir -p build/win
+          $G --headless --path . --export-release "Windows" build/win/CatGame.exe
+          test -s build/win/CatGame.exe
+          ls -la build/win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CatGame-win
+          path: build/win/CatGame.exe
+          retention-days: 3
+
+  installer:
+    needs: export
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.export.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: CatGame-win
+          path: build/win
+
+      - name: build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DAppVersion=$env:VERSION" installer\catgame.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path build\win\CatGame.exe -DestinationPath build\installer\CatGame-windows.zip
+          Get-ChildItem build\installer
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CatGame-Setup
+          path: build/installer/CatGame-Setup.exe
+          retention-days: 7
+
+      - name: publish release
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          $notes = "Download **CatGame-Setup.exe** and run it (one click, no admin needed). Already installed? The game updates itself on launch.`n`nBuilt from ${{ github.sha }}."
+          gh release create "v$env:VERSION" build\installer\CatGame-Setup.exe build\installer\CatGame-windows.zip `
+            --target "${{ github.sha }}" --title "Cat Game v$env:VERSION" --notes "$notes" --latest
