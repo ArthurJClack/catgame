@@ -17,11 +17,14 @@ var t := 0.0
 var cam: Camera3D
 var tour := false
 var leaving := false
+var atmos: Atmos
+var water: Water
 
 
 func _ready() -> void:
 	_setup_env()
 	info = ForestLevel.build(self)
+	_dress()
 	critters = Critter.spawn_all(self)
 	_spawn_mice()
 	player = CatPlayer.new()
@@ -63,50 +66,26 @@ func _spawn_mice() -> void:
 
 
 func _setup_env() -> void:
-	var we := WorldEnvironment.new()
-	env = Environment.new()
-	var sky := Sky.new()
-	var psm := ProceduralSkyMaterial.new()
-	psm.sky_top_color = Color(0.32, 0.5, 0.78)
-	psm.sky_horizon_color = Color(0.78, 0.8, 0.72)
-	psm.ground_horizon_color = Color(0.45, 0.55, 0.4)
-	psm.ground_bottom_color = Color(0.2, 0.28, 0.18)
-	sky.sky_material = psm
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.62, 0.72, 0.62)
-	env.ambient_light_energy = 0.38
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_white = 6.0
-	env.ssao_enabled = true
-	env.ssao_radius = 0.6
-	env.ssao_intensity = 1.8
-	env.glow_enabled = true
-	env.glow_intensity = 0.3
-	env.glow_hdr_threshold = 1.2
-	# hazy green depth, the far trees melt into it
-	env.fog_enabled = true
-	env.fog_light_color = Color(0.7, 0.78, 0.75)
-	env.fog_density = 0.0045
-	env.fog_sky_affect = 0.0
-	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.008
-	env.volumetric_fog_albedo = Color(0.95, 0.95, 0.85)
-	env.volumetric_fog_length = 40.0
-	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.1
-	we.environment = env
-	add_child(we)
-	var sun := DirectionalLight3D.new()
-	sun.light_color = Color(1.0, 0.9, 0.72)
-	sun.light_energy = 1.7
-	sun.light_volumetric_fog_energy = 2.0
-	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 45.0
-	sun.shadow_blur = 1.5
-	sun.rotation = Vector3(deg_to_rad(-38), deg_to_rad(-140), 0)
-	add_child(sun)
+	atmos = Atmos.new()
+	add_child(atmos)
+	env = atmos.env
+	var hi := OS.get_cmdline_user_args().find("--hour")
+	if hi >= 0:
+		atmos.hour = float(OS.get_cmdline_user_args()[hi + 1])
+		atmos.apply_time()
+
+
+## grass, flowers, reeds, the water surface: everything that dresses the bare level
+func _dress() -> void:
+	var w := ForestLevel.lv.get_node_or_null("Water") as MeshInstance3D
+	if w:
+		water = Water.apply(w)
+	add_child(Foliage.new())
+	# deepen the ground: the bare terrain colours are pale next to real grass
+	var tm := LowPoly.mat(Color(0.8, 0.9, 0.7), 0.95)
+	for c in ForestLevel.lv.get_children():
+		if c is MeshInstance3D and String(c.name).begins_with("Terrain_"):
+			(c as MeshInstance3D).material_override = tm
 
 
 func _build_gate_trigger() -> void:

@@ -163,6 +163,7 @@ static func _terrain() -> void:
 	wm.metallic_specular = 0.8
 	w.material_override = wm
 	w.position.y = WATER_Y
+	w.name = "Water"
 	w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	lv.add_child(w)
 	# far hills + treeline beyond the edge so there's no void
@@ -552,6 +553,7 @@ static func _scatter() -> void:
 			mm.set_instance_color(i, cols[i])
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
+		mmi.name = "Scatter_" + key
 		mmi.material_override = LowPoly.mat(Color.WHITE, 0.9)
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		lv.add_child(mmi)
