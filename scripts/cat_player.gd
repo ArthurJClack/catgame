@@ -768,6 +768,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	elif third_person:
 		_third_person_cam(dt)
 	_hunt_scan()
+	dust.physics_tick(dt)
 	_phys_curr = global_position
 	_rig_base = rig.transform
 	_interp_ok = true
@@ -776,7 +777,6 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	paws.foot = rig.fp_foot
 	paws.use_feet = rig.use_planting and w_face < 0.02
 	rig.gravity = G
-	dust.physics_tick(dt)
 
 
 func _process(_dt: float) -> void:
