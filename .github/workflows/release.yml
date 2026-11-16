@@ -73,12 +73,12 @@ jobs:
       - name: export windows build
         run: |
           G=~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64
-          $G --headless --editor --path . --quit || true
+          timeout 600 $G --headless --editor --path . --quit || true
           cat .godot/extension_list.cfg || true
           # the extension loads and has every steam call the multiplayer code uses
-          $G --headless --path . --script res://tests/steam_check.gd
+          timeout 120 $G --headless --path . --script res://tests/steam_check.gd
           mkdir -p build/win
-          $G --headless --path . --export-release "Windows" build/win/CatGame.exe
+          timeout 900 $G --headless --path . --export-release "Windows" build/win/CatGame.exe
           test -s build/win/CatGame.exe
           # GodotSteam's dll + steam_api64.dll sit next to the exe; steam_appid.txt makes steam
           # treat it as the test app (480) when it's launched outside steam

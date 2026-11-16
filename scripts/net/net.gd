@@ -89,7 +89,9 @@ func _ready() -> void:
 
 
 func _quiet_run(args: PackedStringArray) -> bool:
-	# preview renders / test runs: never touch steam
+	# preview renders / test runs / headless (ci, scripts): never touch steam
+	if DisplayServer.get_name() == "headless":
+		return true
 	for f in ["--preview", "--tour", "--showcase", "--posetest", "--parkour", "--report"]:
 		if f in args:
 			return true

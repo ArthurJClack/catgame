@@ -18,7 +18,7 @@ const SIGNALS := [
 ]
 
 
-func _init() -> void:
+func _initialize() -> void:
 	if not Engine.has_singleton("Steam"):
 		print("FAIL: Steam singleton missing (GodotSteam extension didn't load)")
 		quit(1)

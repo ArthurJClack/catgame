@@ -12,6 +12,7 @@ var _local_hist: Array = []   # [[t, PackedVector3Array], ...]
 var _errs := PackedFloat32Array()
 var _part_err := {}           # group -> [sum, n, max]
 var _per_part := PackedFloat32Array()
+var _shift_errs := PackedFloat32Array()   # worst part per frame, allowing +-2 frames of timing
 var _part_names: Array = []
 var _frames := 0
 var _vp_l: SubViewport
@@ -109,8 +110,21 @@ func _process(_dt: float) -> void:
 	var fm := 0.0
 	for i in rp.size():
 		fm = maxf(fm, _errs[_errs.size() - 1 - i])
+	# same frame's worst part against the local cat 1-2 frames either side: if that's small the
+	# difference is only *when* (a frame early / late), not *what*
+	var best_shift := fm
+	for sh in [-2, -1, 1, 2]:
+		var j: int = k + sh
+		if j < 1 or j >= _local_hist.size():
+			continue
+		var wm := 0.0
+		for i in rp.size():
+			var want2: Vector3 = (_local_hist[j - 1][1][i] as Vector3).lerp(_local_hist[j][1][i], w)
+			wm = maxf(wm, want2.distance_to((rp[i] as Node3D).global_position))
+		best_shift = minf(best_shift, wm)
+	_shift_errs.append(best_shift)
 	if fm > 0.05:
-		print("[nettest] t=%.2f worst part %.0f mm  floor=%s/%s vel=%s" % [rt, fm * 1000.0, main.player.rig.on_floor, rc.rig.on_floor, rc.rig.drive_velocity.snapped(Vector3.ONE * 0.01)])
+		print("[nettest] t=%.2f worst part %.0f mm (%.0f mm a frame or two off)  floor=%s/%s vel=%s" % [rt, fm * 1000.0, best_shift * 1000.0, main.player.rig.on_floor, rc.rig.on_floor, rc.rig.drive_velocity.snapped(Vector3.ONE * 0.01)])
 	_report_t += _dt
 	if _report_t > 2.0:
 		_report_t = 0.0
@@ -128,6 +142,10 @@ func summary() -> String:
 	mean /= s.size()
 	var out := "[nettest] frames %d  parts err mm: mean %.2f  p50 %.2f  p95 %.2f  p99 %.2f  max %.1f" % [
 		_frames, mean * 1000.0, s[s.size() / 2] * 1000.0, s[int(s.size() * 0.95)] * 1000.0, s[int(s.size() * 0.99)] * 1000.0, s[-1] * 1000.0]
+	var ss := _shift_errs.duplicate()
+	ss.sort()
+	if ss.size() > 0:
+		out += "\n[nettest]   worst part per frame allowing +-2 frames timing: p50 %.1f  p95 %.1f  max %.1f mm" % [ss[ss.size() / 2] * 1000.0, ss[int(ss.size() * 0.95)] * 1000.0, ss[-1] * 1000.0]
 	for g in _part_err:
 		var acc: Array = _part_err[g]
 		out += "\n[nettest]   %-5s mean %.2f mm  max %.1f mm" % [g, acc[0] / maxf(acc[1], 1) * 1000.0, acc[2] * 1000.0]
