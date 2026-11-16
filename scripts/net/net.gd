@@ -317,6 +317,7 @@ func _process(dt: float) -> void:
 			rc.name = "RemoteCat_%d" % (id % 100000)
 			root.add_child(rc)
 			p.cat = rc
+			print("net: %s's cat is here" % p.name)
 		elif not want and is_instance_valid(p.cat):
 			p.cat.queue_free()
 			p.cat = null
