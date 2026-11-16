@@ -159,6 +159,11 @@ func capture(player: Node, dt: float) -> void:
 	# so the tick before goes out too and the copy gets both sides of the jump
 	var urgent := _last.on_floor != _was_floor or _last.claw_on != _was_claw
 	if prev and not urgent:
+		# a paw letting go of / coming back to the ground (FREE is mode 2 in both bits)
+		var fr_now := _last.pmode & 0xAA
+		var fr_prev := prev.pmode & 0xAA
+		urgent = fr_now != fr_prev
+	if prev and not urgent:
 		for i in mini(prev.dials.size(), _last.dials.size()):
 			if absf(_last.dials[i] - prev.dials[i]) > 0.2:
 				urgent = true

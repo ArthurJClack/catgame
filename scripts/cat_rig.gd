@@ -204,6 +204,8 @@ func apply_life(ev: Array) -> void:
 			swat(int(ev[1]), ev[2])
 		"h":
 			hear(ev[1], float(ev[2]))
+		"L":
+			gait.queue_lift(int(ev[1]), float(ev[2]), float(ev[3]))
 	_net_apply = false
 
 # ---------------- model style ----------------
@@ -868,6 +870,8 @@ func animate(dt: float) -> void:
 			inc += climb * (1.5 + 1.4 * speed_s) * move_amt * dt
 		gait.phase = fposmod(net_phase - inc, 1.0)
 		net_phase = -1.0
+	gait.remote = remote_life
+	gait.owner_modes = net_pmode if remote_life else -1
 	gait.update(dt, gxf, drive_velocity * nc, _yaw_rate, homes, want_free, lift_amt, on_floor)
 	if net_pmode >= 0 and net_paws.size() == 4:
 		# remote copy: a paw both copies have on the ground goes where the owner's is. it lands

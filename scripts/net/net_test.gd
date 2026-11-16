@@ -66,7 +66,7 @@ func _process(_dt: float) -> void:
 	pos.resize(lp.size())
 	for i in lp.size():
 		pos[i] = (lp[i] as Node3D).global_position
-	_local_hist.append([Net._disp_t, pos])
+	_local_hist.append([Net._disp_t, pos, _dbg(lrig)])
 	while _local_hist.size() > 400:
 		_local_hist.pop_front()
 	var rc := _remote()
@@ -123,12 +123,19 @@ func _process(_dt: float) -> void:
 			wm = maxf(wm, want2.distance_to((rp[i] as Node3D).global_position))
 		best_shift = minf(best_shift, wm)
 	_shift_errs.append(best_shift)
+	if fm > 0.05 and "--net-dbg" in OS.get_cmdline_user_args():
+		print("[nettest]   local  " + str(b[2]))
+		print("[nettest]   remote " + _dbg(rc.rig))
 	if fm > 0.05:
 		print("[nettest] t=%.2f worst part %.0f mm (%.0f mm a frame or two off)  floor=%s/%s vel=%s" % [rt, fm * 1000.0, best_shift * 1000.0, main.player.rig.on_floor, rc.rig.on_floor, rc.rig.drive_velocity.snapped(Vector3.ONE * 0.01)])
 	_report_t += _dt
 	if _report_t > 2.0:
 		_report_t = 0.0
 		print(summary())
+
+
+static func _dbg(r: CatRig) -> String:
+	return "land=%s %.3f air=%.2f launch=%.2f modes=%s vel=%s floor=%s ph=%.3f t=%.3f" % [r.land_known, r.land_t, r._air_w, r._launch, r.gait.mode, r.drive_velocity.snapped(Vector3.ONE * 0.01), r.on_floor, r.gait.phase, r._t]
 
 
 func summary() -> String:
