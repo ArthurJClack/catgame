@@ -192,7 +192,7 @@ func _build_split() -> void:
 		c.add_child(l)
 		return [vp, cam]
 	var L: Array = mk.call("your cat")
-	var R: Array = mk.call("what your friends see  (60 ms lag, jitter, 2% loss)")
+	var R: Array = mk.call("what your friends see  (60 ms lag + jitter + 2% loss)")
 	_vp_l = L[0]
 	_cam_l = L[1]
 	_vp_r = R[0]
@@ -206,6 +206,10 @@ static func _set_layers(rig: Node, bit: int) -> void:
 		(m as VisualInstance3D).layers = 1 << bit
 
 
+var _cam_hist: Array = []   # [[disp_t, Transform3D, fov], ...] of the main camera
+var _frame_i := 0
+
+
 func _update_split(lrig: CatRig, rc: RemoteCat) -> void:
 	_set_layers(lrig, 1)
 	var src := get_viewport().get_camera_3d()
@@ -213,10 +217,24 @@ func _update_split(lrig: CatRig, rc: RemoteCat) -> void:
 		return
 	_cam_l.global_transform = src.global_transform
 	_cam_l.fov = src.fov
-	if rc and rc.rig:
+	_cam_hist.append([Net._disp_t, src.global_transform, src.fov])
+	while _cam_hist.size() > 120:
+		_cam_hist.pop_front()
+	# the right view films the copy with the camera from the moment the copy is showing, so
+	# frame N on the right lines up with the left frame drawn at that time (paired up after,
+	# see the "[split]" log lines)
+	var rt := -1.0
+	if rc and rc.rig and rc.peer:
 		_set_layers(rc.rig, 2)
-		# same framing, moved by how far the delayed copy trails the real cat
-		_cam_r.global_transform = Transform3D(src.global_transform.basis, src.global_transform.origin + (rc.rig.global_position - lrig.global_position))
+		rt = rc.peer.render_time()
+		var best: Array = _cam_hist[0]
+		for c in _cam_hist:
+			if absf(c[0] - rt) < absf(best[0] - rt):
+				best = c
+		_cam_r.global_transform = best[1]
+		_cam_r.fov = best[2]
 	else:
 		_cam_r.global_transform = src.global_transform
-	_cam_r.fov = src.fov
+		_cam_r.fov = src.fov
+	print("[split] %d %.4f %.4f" % [_frame_i, Net._disp_t, rt])
+	_frame_i += 1

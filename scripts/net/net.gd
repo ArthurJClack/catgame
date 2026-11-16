@@ -33,6 +33,7 @@ var _sim_t := 0.0
 var _disp_t := 0.0
 var _send_acc := 0.0
 var _last: CatNetState
+var _last_sent := false
 var _event_id := 0
 var _pending: Array = []       # [[id, t, ev, sends_left]]
 var _hello_key := ""
@@ -148,9 +149,20 @@ func capture(player: Node, dt: float) -> void:
 		_event_id += 1
 		_pending.append([_event_id, _disp_t, ev, EVENT_REPEATS])
 	rig.life_log.clear()
+	var prev := _last
+	var prev_sent := _last_sent
 	_last = CatNetState.from_rig(rig, _sim_t, player.get("carried"), _disp_t)
+	_last_sent = false
 	_send_acc += dt
+	# something snapped this tick (take off, landing, claws, a pose dial jumping like the
+	# pounce charge letting go). linear playback would smear it over a whole send interval,
+	# so the tick before goes out too and the copy gets both sides of the jump
 	var urgent := _last.on_floor != _was_floor or _last.claw_on != _was_claw
+	if prev and not urgent:
+		for i in mini(prev.dials.size(), _last.dials.size()):
+			if absf(_last.dials[i] - prev.dials[i]) > 0.2:
+				urgent = true
+				break
 	if _last.on_floor != _was_floor:
 		# exact moment of take off / landing, repeated like the life events so a lost packet
 		# can't make the copy land late (the landing squash and paw plant hang off it)
@@ -158,13 +170,23 @@ func capture(player: Node, dt: float) -> void:
 		_pending.append([_event_id, _sim_t, ["F", _last.on_floor], EVENT_REPEATS])
 	_was_floor = _last.on_floor
 	_was_claw = _last.claw_on
+	if urgent and prev and not prev_sent:
+		_send_state(prev)
 	if _send_acc >= 1.0 / SEND_HZ or urgent or (not _pending.is_empty() and _pending[-1][3] == EVENT_REPEATS):
 		_send_acc = 0.0
 		_send_snapshot()
 	_check_hello()
 
 
+func _send_state(st: CatNetState) -> void:
+	st.events = []
+	var bytes := st.encode()
+	for id in transport.members():
+		transport.send(id, bytes, false)
+
+
 func _send_snapshot() -> void:
+	_last_sent = true
 	_last.events = []
 	for p in _pending:
 		_last.events.append([p[0], p[1], p[2]])

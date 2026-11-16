@@ -53,7 +53,7 @@ func start() -> bool:
 	# no steam_appid.txt next to the game (or running from the editor): tell the api which app
 	OS.set_environment("SteamAppId", str(STEAM_APP_ID))
 	OS.set_environment("SteamGameId", str(STEAM_APP_ID))
-	var r = _call("steamInitEx", [])
+	var r = _call("steamInitEx", _init_args())
 	var ok := false
 	if r is Dictionary:
 		ok = int(r.get("status", 1)) == 0
@@ -84,6 +84,22 @@ func start() -> bool:
 	if ci >= 0 and ci + 1 < args.size() and args[ci + 1].is_valid_int():
 		join_lobby.call_deferred(int(args[ci + 1]))
 	return true
+
+
+## steamInitEx's arguments changed over GodotSteam versions: (app_id) in 4.15, (retrieve_stats,
+## app_id[, embed_callbacks]) before that
+func _init_args() -> Array:
+	for m in steam.get_method_list():
+		if m.name != "steamInitEx":
+			continue
+		var out := []
+		for a in m.args:
+			match str(a.name):
+				"app_id": out.append(STEAM_APP_ID)
+				"retrieve_stats", "embed_callbacks": out.append(false)
+				_: break
+		return out
+	return []
 
 
 func kind() -> String:
