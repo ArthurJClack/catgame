@@ -34,6 +34,9 @@ const CHARGE_TIME := 0.45
 const KICK_UP := 4.4
 const KICK_OUT := 3.0
 const MAX_KICKS := 2
+const KICK_PLANT := 0.085     # paws on the wall before the push (real cats: ~0.08-0.15 s of wall contact)
+const NOSE_REACH := 0.29      # nose ahead of the capsule centre (x style length), for the clip guard
+const RUMP_REACH := 0.2       # rump behind it (the tail is allowed to brush things)
 const RADIUS := 0.085
 const STAND_H := 0.27
 const CROUCH_H := 0.17
@@ -143,6 +146,16 @@ var w_face := 0.0
 var w_climb := 0.0
 var w_clamber := 0.0
 var w_scratch := 0.0
+# wall kick: plant (all four paws on the wall, body flat against it) then push + twist away
+var kick_plant_t := 0.0
+var kick_n := Vector3.ZERO
+var w_kick := 0.0
+var _kick_hv := Vector3.ZERO
+var _kick_same := false
+var _kick_turn_t := 0.0
+# clip guard: the capsule is only as wide as the cat, so its head and rump stick out
+# front and back. the visible body slides back along its spine when either end would go into something
+var _clip_off := 0.0
 
 # swat / claw (left mouse = swat, hold right mouse = claws out: hook + drag)
 const PAW_MASS := 0.25          # effective mass behind a swatting forepaw (kg)
@@ -367,7 +380,7 @@ func _physics_process(dt: float) -> void:
 		# body only comes round once the look goes past what a neck can do
 		if view_mode == 2:
 			pitch = lerpf(pitch, orb_pitch * 0.5, clampf(dt * 6.0, 0, 1))
-		var busy := climbing or clambering or scratching or mantling
+		var busy := climbing or clambering or scratching or mantling or kick_plant_t > 0.0 or _kick_turn_t > 0.0
 		var face_look: bool = charging or clawing or inp.get("swat", false) or inp.get("scratch", false) or inp.get("aim", false)
 		if mv.length() > 0.05 and not busy:
 			var wd := Basis(Vector3.UP, orb_yaw) * Vector3(mv.x, 0, -mv.y)
@@ -381,6 +394,11 @@ func _physics_process(dt: float) -> void:
 				yaw += clampf(ld, -12.0 * dt, 12.0 * dt)
 			elif absf(ld) > 1.1:
 				yaw += clampf(ld - signf(ld) * 1.1, -6.0 * dt, 6.0 * dt)
+	_kick_turn_t = maxf(_kick_turn_t - dt, 0.0)
+	if _kick_turn_t > 0.0 and Vector2(velocity.x, velocity.z).length() > 0.5:
+		# coming off a wall kick the body twists round to where it's flying, however the keys are held
+		var ky := atan2(-velocity.x, -velocity.z)
+		yaw += clampf(wrapf(ky - yaw, -PI, PI), -16.0 * dt, 16.0 * dt)
 	rotation.y = yaw
 	last_event_t += dt
 	climb_cool = maxf(climb_cool - dt, 0.0)
@@ -474,6 +492,10 @@ func _physics_process(dt: float) -> void:
 		return
 	if scratching:
 		_scratch_step(dt, scratch_in, mv)
+		_post(dt, inp)
+		return
+	if kick_plant_t > 0.0:
+		_kick_plant_step(dt, wish_dir)
 		_post(dt, inp)
 		return
 
@@ -715,7 +737,11 @@ func _post(dt: float, _inp: Dictionary) -> void:
 		face_n = ledge_n
 	elif scratching:
 		face_n = scratch_n
-	w_face = maxf(w_climb, maxf(w_clamber, w_scratch))
+	# wall kick: snaps flat onto the wall for the plant, then peels off it during the push
+	w_kick = LowPoly.damp(w_kick, 1.0 if kick_plant_t > 0.0 else 0.0, 60.0 if kick_plant_t > 0.0 else 11.0, dt)
+	if w_kick > 0.002 and not (climbing or clambering or scratching):
+		face_n = kick_n
+	w_face = maxf(maxf(w_climb, w_kick), maxf(w_clamber, w_scratch))
 
 	# eye: stands up when scratching, peeks over the edge when hanging
 	var eye := Vector3(0, lerpf(EYE_STAND, EYE_CROUCH, crouch_amt) + land_dip + bob - charge * 0.03, 0)
@@ -752,7 +778,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	# slipping now just shows the claws and the paws stay on the ground.
 	rig.scramble = LowPoly.damp(rig.scramble, 1.0 if scramble_t > 0.0 else (0.6 if wall_sliding else 0.0), 14.0, dt)
 	rig.slip_claws = minf(slip * 1.3, 1.0) if is_on_floor() else 0.0
-	rig.climb = w_climb
+	rig.climb = maxf(w_climb, w_kick)
 	rig.clamber = w_clamber
 	rig.clamber_pull = clampf(clamber_t / 0.55, 0.0, 1.0) if (clambering and clamber_phase == 2) else (1.0 if not clambering else 0.0)
 	rig.ledge_world = ledge_point
@@ -769,7 +795,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	paws.crouch = crouch_amt
 	paws.charge = charge
 	paws.scramble = rig.scramble
-	paws.climb = w_climb
+	paws.climb = maxf(w_climb, w_kick * 0.5)
 	paws.hang = w_clamber
 	paws.hang_pull = rig.clamber_pull if clambering else 0.0
 	paws.scratch = w_scratch
@@ -812,8 +838,9 @@ func _process(_dt: float) -> void:
 ## the rig normally just follows the body. on walls it turns to face the surface,
 ## and when climbing it rotates 90 degrees so its feet are on the wall
 func _orient_rig() -> void:
+	_clip_guard()
 	if w_face < 0.002:
-		rig.transform = Transform3D.IDENTITY
+		rig.transform = Transform3D(Basis(), Vector3(0, 0, _clip_off))
 		return
 	var n := face_n
 	var up := Vector3.UP
@@ -821,9 +848,42 @@ func _orient_rig() -> void:
 	var climb_b := Basis(n.cross(Vector3.DOWN).normalized(), n, Vector3.DOWN)
 	var q := global_transform.basis.get_rotation_quaternion()
 	q = q.slerp(face.get_rotation_quaternion(), clampf(w_face, 0.0, 1.0))
-	q = q.slerp(climb_b.get_rotation_quaternion(), clampf(w_climb, 0.0, 1.0))
-	var pos := global_position.lerp(global_position + up * 0.05 - n * (RADIUS + 0.012), w_climb)
+	var wc := maxf(w_climb, w_kick)
+	q = q.slerp(climb_b.get_rotation_quaternion(), clampf(wc, 0.0, 1.0))
+	var pos := global_position.lerp(global_position + up * 0.05 - n * (RADIUS + 0.012), wc)
+	pos += global_transform.basis.z * _clip_off * (1.0 - clampf(w_face, 0.0, 1.0))
 	rig.global_transform = Transform3D(Basis(q), pos)
+
+
+## the capsule (r 8.5 cm) keeps the middle of the cat out of walls, but the head and the rump
+## stick out ~29 / 20 cm front and back (forepaws ~37 cm ahead in the air). ray along the spine at chest and head height and slide
+## the visible body back (or forward) so neither end sinks into a wall, door or shelf.
+## pops in instantly, eases back out
+func _clip_guard() -> void:
+	var L: float = rig.S_.get("len", 1.0) if rig.S_ is Dictionary else 1.0
+	var fwd := -global_transform.basis.z
+	# in the air the forelegs reach out ahead of the nose for the landing
+	var nose := (NOSE_REACH + (0.0 if is_on_floor() else 0.08)) * L
+	var rump := RUMP_REACH * L
+	var front := nose
+	var back := rump
+	for h in [0.03, 0.12, 0.22]:
+		var c: Vector3 = global_position + Vector3.UP * h
+		var hf := _ray(c, c + fwd * nose)
+		if not hf.is_empty() and not hf.collider is RigidBody3D:
+			front = minf(front, (hf.position - c).dot(fwd))
+		var hb := _ray(c, c - fwd * rump)
+		if not hb.is_empty() and not hb.collider is RigidBody3D:
+			back = minf(back, (c - hb.position).dot(fwd))
+	# +z is backwards in body space
+	var want := maxf(nose - front, 0.0)
+	# nothing behind: the body can slide as far back as it needs (it's only the visible cat)
+	var room := maxf(back - 0.01, 0.0) if back < rump else want
+	want = minf(want, room) if want > 0.0 else -minf(maxf(rump - back, 0.0), maxf(front - 0.01, 0.0))
+	if absf(want) > absf(_clip_off):
+		_clip_off = want
+	else:
+		_clip_off = LowPoly.damp(_clip_off, want, 10.0, get_physics_process_delta_time())
 
 
 ## swap the cat model (block, chamfer, facet, wedge, stepped) on the fly
@@ -970,10 +1030,15 @@ func _try_wall_kick(wish_dir: Vector3) -> void:
 	var into := hv.dot(n)
 	if into < 0.0:
 		hv -= n * into
-	hv = hv * 0.75 + n * KICK_OUT + wish_dir * 0.8
-	velocity.x = hv.x
-	velocity.z = hv.z
-	velocity.y = KICK_UP * (0.75 if same_wall else 1.0)
+	# a cat can't push off a wall it isn't touching: it plants all four paws on it first
+	# (the run up is soaked into flexed legs) and the push comes out of that crouch.
+	# the plant is short enough that the kick still answers the key straight away
+	_kick_hv = hv
+	_kick_same = same_wall
+	kick_n = n
+	kick_plant_t = KICK_PLANT
+	_snug_to_wall(n)
+	velocity = hv * 0.25 - n * 0.4 + Vector3.UP * clampf(velocity.y * 0.3, -0.4, 0.6)
 	kicks_left -= 1
 	last_kick_normal = n
 	scramble_t = 0.0
@@ -981,8 +1046,42 @@ func _try_wall_kick(wish_dir: Vector3) -> void:
 	var side := 1.0 if global_transform.basis.x.dot(-n) > 0.0 else -1.0
 	paws.kick(side)
 	cam_roll += side * 0.025
-	cam.fov += 6.0
 	_event("wall kick (%d left)" % kicks_left)
+
+
+## kick found its wall by the coyote ray: close the gap so the paws actually meet it
+func _snug_to_wall(n: Vector3) -> void:
+	var c := global_position + Vector3.UP * minf(capsule.height * 0.5, 0.12)
+	var hit := _ray(c, c - n * (RADIUS + 0.2))
+	if hit.is_empty():
+		return
+	var gap: float = (c - hit.position).dot(n) - RADIUS - 0.004
+	if gap > 0.0:
+		move_and_collide(-n * gap)
+
+
+## paws planted on the wall: stick to it, legs loading up, then the push
+func _kick_plant_step(dt: float, wish_dir: Vector3) -> void:
+	kick_plant_t -= dt
+	# along the wall the run up bleeds off into the legs, falling stops, a slight press keeps contact
+	var along := Vector3(velocity.x, 0, velocity.z)
+	along -= kick_n * along.dot(kick_n)
+	velocity = along * maxf(1.0 - 18.0 * dt, 0.0) - kick_n * 0.4 + Vector3.UP * move_toward(velocity.y, 0.0, 12.0 * dt)
+	move_and_slide()
+	_track_walls()
+	if kick_plant_t <= 0.0 or wall_time > 0.06:
+		_kick_release(wish_dir)
+
+
+func _kick_release(wish_dir: Vector3) -> void:
+	kick_plant_t = 0.0
+	var hv := _kick_hv * 0.75 + kick_n * KICK_OUT + wish_dir * 0.8
+	velocity.x = hv.x
+	velocity.z = hv.z
+	velocity.y = KICK_UP * (0.75 if _kick_same else 1.0)
+	_kick_turn_t = 0.3
+	jumped_this_air = true
+	cam.fov += 6.0
 
 
 # ------------------------------------------------------------------ ledges

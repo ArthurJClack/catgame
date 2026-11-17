@@ -12,10 +12,18 @@ extends RefCounted
 
 enum { PLANTED, SWING, FREE }
 
-# stride length (m) by speed (m/s). walk strides sit near 0.34 so the hind paw lands
-# in the front paw's print (direct register), then lengthen
-const STRIDE_V := [0.0, 0.5, 0.9, 1.5, 2.4, 3.2, 6.0, 11.0]
-const STRIDE_L := [0.30, 0.335, 0.42, 0.56, 0.80, 1.10, 1.75, 2.60]
+# stride length (m) by speed (m/s), from treadmill cats (goslow et al. 1973, halbertsma 1983:
+# cycle ~1.0 s at 0.5 m/s, ~0.7 s at 1 m/s, ~0.45 s trotting at 2 m/s, ~0.3 s galloping) scaled
+# by froude to this cat's ~0.88x leg. stride frequency: 0.9 hz stalking, 1.2 walk, 2.0 trot, 3.3+ gallop.
+# swing time stays near 0.22-0.26 s at every walk/trot speed (stance is what shrinks), as in real cats.
+# direct register at a walk comes from where the stance sits under each girdle (STANCE_BIAS), not short steps
+const STRIDE_V := [0.0, 0.25, 0.5, 0.9, 1.5, 2.4, 3.2, 6.0, 11.0]
+const STRIDE_L := [0.26, 0.27, 0.36, 0.50, 0.66, 0.90, 1.14, 1.78, 2.65]
+# where each paw's stance sits relative to its girdle, as a fraction of stance length (+ = forward).
+# a cat's forepaw touches down well ahead of the shoulder (the blade swings it forward) and leaves
+# just behind it; the hind paw lands only a little ahead of the hip and drives back far behind it.
+# that offset is what lets the hind paw land in the forepaw's print at a real walking stride
+const STANCE_BIAS := [-0.06, -0.06, -0.2, -0.2]
 # fraction of the stride each paw spends on the ground
 const DUTY_V := [0.0, 0.3, 0.5, 0.9, 1.5, 2.4, 3.2, 6.0, 11.0]
 const DUTY_D := [0.80, 0.76, 0.70, 0.62, 0.48, 0.40, 0.36, 0.28, 0.20]
@@ -27,6 +35,7 @@ var phase := 0.0
 var stride := 0.3
 var duty := 0.7
 var freq := 0.0
+var bias_w := 1.0     # how much of STANCE_BIAS applies at this speed
 var lag := 0.25       # fore paw touches down this fraction of a stride after the hind on its side
 var gallop := 0.0     # 0..1
 var moving := 0.0     # 0..1
@@ -129,6 +138,8 @@ func plan(speed: float, dt: float) -> void:
 	freq = speed / stride
 	# walk: fore follows the hind on its side by a quarter stride. trot: by half (diagonals in step)
 	lag = lerpf(0.25, 0.5, smoothstep(0.85, 1.35, speed))
+	# stance offsets fade out toward the trot (diagonal pairs push together) and are gone in the gallop
+	bias_w = lerpf(1.0, 0.45, smoothstep(0.85, 1.35, speed)) * (1.0 - gallop)
 	var g := gallop
 	offs[2] = 0.0
 	offs[3] = lerpf(0.5, 0.10, g)
@@ -242,7 +253,7 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 			# the swing is planned in body space: from where the paw left the ground (as the body
 			# saw it then) to its rest spot plus half a stance ahead. at touch down the hip is
 			# exactly half a stance behind the paw, whatever the body did in between
-			var tl: Vector3 = (homes[i] as Vector3) + ldir * stance_len * 0.5 * _vary[i]
+			var tl: Vector3 = (homes[i] as Vector3) + ldir * stance_len * (0.5 * _vary[i] + STANCE_BIAS[i] * bias_w)
 			if not _ray2[i] and sw_t[i] > 0.45:
 				_ray2[i] = true
 				_gy[i] = (inv * _ground(xf * tl, xf.origin.y, i)).y

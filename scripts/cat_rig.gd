@@ -684,7 +684,7 @@ func _setup_gait() -> void:
 	_loaf_s = loaf
 	add_to_group("cat_ears")
 	gait.rig = self
-	gait.max_stance = MAX_STANCE * 0.64
+	gait.max_stance = MAX_STANCE * 0.74
 	gait.max_stance_gallop = MAX_STANCE * 0.78
 	# don't let the paws stand on whatever body carries the rig (the player capsule)
 	var n: Node = get_parent()
@@ -1501,8 +1501,11 @@ func _paw_pose(i: int) -> Array:
 		# end of stance: the paw peels off heel first, wrist breaks over
 		prot = -smoothstep(0.7, 1.0, s) * 0.55 * mv
 	else:
-		# hock rises and the weight rolls onto the toes before push off
-		heel = smoothstep(0.5, 1.0, s) * 0.45 * mv
+		# E2 yield: right after touch down the ankle gives (hock sinks) as the leg takes the
+		# weight, peaking ~25% into stance (~10 deg walking, ~18 trotting), then the hock rises and
+		# the weight rolls onto the toes for the E3 push off
+		var yld := (0.17 + 0.14 * gait.w_trot) * sin(PI * clampf(s / 0.55, 0.0, 1.0))
+		heel = (smoothstep(0.5, 1.0, s) * 0.45 - yld) * mv
 		prot = -smoothstep(0.75, 1.0, s) * 0.4 * mv
 	return [prot, heel, lerpf(0.6, sin(PI * s), mv)]
 
