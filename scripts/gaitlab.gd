@@ -310,6 +310,12 @@ func _camera() -> void:
 			cam.look_at(p + Vector3(0, 0.12, 0), Vector3.UP)
 		"fixed":
 			pass
+		"face":
+			var hp := cat.head.global_position
+			var right := Vector3(cos(yaw), 0, -sin(yaw))
+			var tgt := Vector3(p.x, lerpf(hp.y, p.y + 0.2, 0.5), p.z) + fwd * 0.08
+			cam.global_position = cam.global_position.lerp(tgt + fwd * 0.62 * cam_dist + right * 0.36 * cam_dist + Vector3(0, 0.1, 0), 0.25)
+			cam.look_at(tgt, Vector3.UP)
 		_:
 			cam.global_position = Vector3(p.x + 1.15 * cam_dist, 0.2 + p.y * 0.6, p.z)
 			cam.look_at(Vector3(p.x, 0.13 + p.y * 0.8, p.z), Vector3.UP)
@@ -634,6 +640,113 @@ func _run() -> void:
 		var t := 0.0
 		while t < 5.0 * slow:
 			t += await _step(0.5)
+		Engine.time_scale = 1.0
+		_end()
+
+	# ---- the living layer (cat_soma.gd). on a rig without it these just show the cat standing
+	if _want("life"):
+		_spawn(Vector3(56, 0, 0))
+		cam_dist = 0.9
+		await _settle(0.6)
+		Engine.time_scale = slow
+		_begin("life")
+		var so = cat.get("soma")
+		cat.idle_life = false   # scripted here, not left to chance
+		var acts := [[0.5, "sniff", 0.0, "sniff"], [2.4, "tilt", 1.0, "head tilt"], [4.2, "yawn", 0.0, "yawn"], [6.8, "shake", 0.0, "shake it off"], [8.4, "blink", 0.0, "slow blink"], [10.2, "stretch", 0.0, "stretch"], [13.4, "sit", 0.0, "sit down by itself"], [15.6, "groom", 6.8, "groom"], [23.0, "blink", 0.0, "slow blink"], [24.8, "yawn", 0.0, "yawn"]]
+		var n := 0
+		var t := 0.0
+		caption.text = "standing around"
+		while t < 31.0 * slow:
+			var ph := t / slow
+			if n < acts.size() and ph > acts[n][0]:
+				caption.text = acts[n][3]
+				if so != null:
+					so.act(acts[n][1], acts[n][2])
+				n += 1
+			if ph > 27.5:
+				caption.text = "told to move: up at once"
+			t += await _step(0.9 if ph > 27.5 else 0.0)
+		Engine.time_scale = 1.0
+		_end()
+
+	if _want("scare"):
+		_spawn(Vector3(60, 0, 0))
+		cam_dist = 1.0
+		await _settle(0.6)
+		Engine.time_scale = slow
+		_begin("scare")
+		var t := 0.0
+		var n := 0
+		caption.text = "a loud bang right behind it"
+		while t < 6.0 * slow:
+			var ph := t / slow
+			if n == 0 and ph > 1.0:
+				n = 1
+				cat.hear(cat.to_global(Vector3(0.5, 0.1, 1.0)), 1.0)
+			t += await _step(0.0)
+		Engine.time_scale = 1.0
+		_end()
+
+	if _want("pant"):
+		_spawn(Vector3(64, 0, 0))
+		cam_dist = 1.2
+		await _settle(0.5)
+		Engine.time_scale = slow
+		_begin("pant")
+		var so = cat.get("soma")
+		var t := 0.0
+		caption.text = "after a long sprint: breathing hard, then settling"
+		while t < 9.0 * slow:
+			var ph := t / slow
+			if so != null and ph < 2.0:
+				so.exertion = 1.0   # stands in for ~9 s of flat out galloping
+			t += await _step(11.0 if ph < 2.0 else 0.0, 0.0, 30.0)
+		Engine.time_scale = 1.0
+		_end()
+
+	if _want("wet"):
+		_spawn(Vector3(72, 0, 0))
+		cam_dist = 0.9
+		await _settle(0.5)
+		Engine.time_scale = slow
+		_begin("wet")
+		var so = cat.get("soma")
+		cat.idle_life = true
+		if so != null:
+			so.wet = [1.0, 1.0, 1.0, 1.0] as Array[float]
+			so._sit_at = 99.0
+			so._next_act = 99.0
+		var t := 0.0
+		caption.text = "wet paws: flicked on every step, then shaken off one by one"
+		while t < 9.0 * slow:
+			var ph := t / slow
+			t += await _step(0.6 if ph < 3.0 else 0.0)
+		Engine.time_scale = 1.0
+		_end()
+
+	if _want("stalk2"):
+		# a toy to hunt: the head locks on and follows it, whiskers forward, pupils wide
+		_spawn(Vector3(68, 0, 0))
+		cam_dist = 1.0
+		await _settle(0.6)
+		var toy := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.025
+		sm.height = 0.05
+		toy.mesh = sm
+		toy.add_to_group("prey")
+		add_child(toy)
+		Engine.time_scale = slow
+		_begin("stalk2")
+		var t := 0.0
+		caption.text = "something to hunt: head locks on, whiskers forward, pupils wide"
+		while t < 7.0 * slow:
+			var ph := t / slow
+			toy.global_position = Vector3(68.0 + 0.7 * sin(ph * 1.3), 0.03 + 0.25 * maxf(0.0, sin(ph * 2.9)), -1.0 + 0.3 * sin(ph * 0.7))
+			cat.crouch = smoothstep(2.5, 3.2, ph)
+			cat.charge = smoothstep(5.2, 5.8, ph)
+			t += await _step(0.0)
+		toy.queue_free()
 		Engine.time_scale = 1.0
 		_end()
 
