@@ -46,6 +46,11 @@ var _stagger_t := 0.55
 var hits := 0                 # for tests
 var bites := 0
 var _hit_flash := 0.0
+# held down under a cat's fore paws (two paw grip): can't move or bite, wriggles free after break_t
+var held_by: Node3D = null
+var hold_point := Vector3.ZERO
+var held_t := 0.0
+var break_t := 1.6
 
 # rig
 var torso: Node3D
@@ -186,7 +191,8 @@ func behind(from: Vector3) -> bool:
 	return to.normalized().dot(fwd) < -0.3
 
 
-func take_hit(dmg: float, from: Vector3, heavy := false) -> void:
+## poise_mul: how much this hit counts toward a stagger (rakes 0.5, grip squeezes 0)
+func take_hit(dmg: float, from: Vector3, heavy := false, poise_mul := 1.0) -> void:
 	if state == DEAD:
 		return
 	var back := behind(from)
@@ -195,22 +201,55 @@ func take_hit(dmg: float, from: Vector3, heavy := false) -> void:
 	hp -= dmg
 	hits += 1
 	_hit_flash = 1.0
-	_poise += 2.0 if (back or heavy) else 1.0
+	_poise += (2.0 if (back or heavy) else 1.0) * poise_mul
 	var away := global_position - from
 	away.y = 0.0
-	velocity += away.normalized() * (1.4 if heavy else 0.7)
+	if held_by == null:
+		velocity += away.normalized() * (1.4 if heavy else 0.7)
 	if target and target.has_method("_event"):
 		target.call("_event", ("backstab! " if back else "hit! ") + "rat %d/%d" % [maxi(ceili(hp), 0), int(max_hp)])
 	if hp <= 0.0:
 		_die()
-	elif _poise >= poise or back or heavy:
+	elif held_by != null:
+		pass     # it's pinned already
+	elif _poise >= poise or ((back or heavy) and poise_mul > 0.0):
 		_poise = 0.0
 		state = STAGGER
 		st_t = 0.0
 		_stagger_t = 0.55 if not heavy else 0.9
 
 
+## pinned under both fore paws of a cat (CatCombat grip). bigger rats wriggle out sooner
+func grab(by: Node3D) -> void:
+	if state == DEAD:
+		return
+	held_by = by
+	held_t = 0.0
+	hold_point = global_position
+	break_t = 1.6 / s
+	state = STAGGER
+	st_t = 0.0
+
+
+func ungrab(by: Node3D) -> void:
+	if held_by == by:
+		_break_free(false)
+
+
+func _break_free(struggled: bool) -> void:
+	held_by = null
+	state = STAGGER
+	st_t = 0.0
+	_stagger_t = 0.25 if struggled else 0.5
+	_poise = 0.0
+	if struggled and is_instance_valid(target):
+		var away := global_position - target.global_position
+		away.y = 0.0
+		velocity += away.normalized() * 1.2
+
+
 func _die() -> void:
+	held_by = null
 	state = DEAD
 	st_t = 0.0
 	remove_from_group("prey")
@@ -239,6 +278,27 @@ func _physics_process(dt: float) -> void:
 		to.y = 0.0
 		dist = to.length()
 		ang = fwd.signed_angle_to(to, Vector3.UP) if dist > 0.01 else 0.0
+	if held_by != null:
+		if not is_instance_valid(held_by) or state == DEAD:
+			held_by = null
+		else:
+			held_t += dt
+			if held_t >= break_t:
+				_break_free(true)
+				if target and target.has_method("_event"):
+					target.call("_event", "the rat wriggles free!")
+	if held_by != null:
+		# pinned: dragged to where the paws hold it, legs scrabbling (the stagger anim)
+		state = STAGGER
+		st_t = 0.0
+		var pull := hold_point - global_position
+		pull.y = 0.0
+		velocity.x = pull.x * 10.0
+		velocity.z = pull.z * 10.0
+		velocity.y = -0.1 if is_on_floor() else velocity.y - 9.8 * dt
+		move_and_slide()
+		_speed = LowPoly.damp(_speed, 0.6, 12.0, dt)
+		return
 	# a cat that ends up on its back gets bucked off (no standing on the rats)
 	if is_instance_valid(target) and state != DEAD:
 		var rel := target.global_position - global_position

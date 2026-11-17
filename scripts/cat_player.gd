@@ -12,7 +12,8 @@ extends CharacterBody3D
 ## scratch: hold F facing a wall / couch / post. pounce: hold C + space (or aim) and release,
 ##   forepaws slam down and pin whatever's under them.
 ## controls: wasd move, shift canter (double tap = gallop), ctrl/c stalk, space jump/kick, q / mouse3 aim leap,
-## f scratch, mouse1 swat, v third person, esc mouse
+## f scratch, mouse1 / mouse2 left / right paw (tap swat, hold rake / claw hook, both = rear up + grip,
+## cat_combat.gd), v third person, esc mouse
 
 const G := 9.8
 const STALK_SPEED := 0.7
@@ -162,7 +163,8 @@ const KICK_LEAN := 0.32           # body tipped back toward the wall so the hind
 # front and back. the visible body slides back along its spine when either end would go into something
 var _clip_off := 0.0
 
-# swat / claw (left mouse = swat, hold right mouse = claws out: hook + drag)
+# swat / claw: left mouse = left paw, right mouse = right paw (tap swat, hold rake / claw hook,
+# both = rear up + two paw grip). the button logic lives in cat_combat.gd
 const PAW_MASS := 0.25          # effective mass behind a swatting forepaw (kg)
 const PAW_SPEED := 4.0          # paw tip speed at impact (m/s)
 const CLAW_FORCE := 6.0         # max pull one hooked forepaw manages (N)
@@ -171,6 +173,7 @@ var _swat_hit_t := -1.0
 var _swat_rb: RigidBody3D
 var _swat_side := 1.0
 var prev_claw := false
+var combat: CatCombat
 var clawing := false
 var claw_rb: RigidBody3D
 var claw_local := Vector3.ZERO    # hook point in the body's local space
@@ -250,6 +253,9 @@ func _ready() -> void:
 	dash = CatDash.new()
 	dash.player = self
 	add_child(dash)
+	combat = CatCombat.new()
+	combat.player = self
+	add_child(combat)
 	health = CatHealth.new()
 	health.player = self
 	add_child(health)
@@ -354,9 +360,9 @@ func _read_input() -> Dictionary:
 		"sprint": shift and _galloping,
 		"crouch": Input.is_physical_key_pressed(KEY_CTRL) or Input.is_physical_key_pressed(KEY_C),
 		"jump": Input.is_physical_key_pressed(KEY_SPACE),
-		"swat": Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT),
+		"paw_l": Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT),
+		"paw_r": Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT),
 		"aim": Input.is_physical_key_pressed(KEY_Q) or Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE),
-		"claw": Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT),
 		"scratch": Input.is_physical_key_pressed(KEY_F),
 		"toggle_view": Input.is_physical_key_pressed(KEY_V),
 		"drop": Input.is_physical_key_pressed(KEY_E),
@@ -377,6 +383,12 @@ func _event(name: String) -> void:
 func _physics_process(dt: float) -> void:
 	_phys_prev = global_position
 	var inp := _read_input()
+	if combat.locks_move():
+		# both fore paws are holding something: a cat can't walk, hop or dodge on its hind legs alone
+		inp = inp.duplicate()
+		for k in ["jump", "aim", "dash", "scratch", "sprint", "canter", "crouch"]:
+			inp[k] = false
+		inp["move"] = Vector2.ZERO
 	var prev_yaw := yaw
 	var prev_pitch := pitch
 	if inp.has("yaw"):
@@ -406,8 +418,8 @@ func _physics_process(dt: float) -> void:
 		# body only comes round once the look goes past what a neck can do
 		if view_mode == 2:
 			pitch = lerpf(pitch, orb_pitch * 0.5, clampf(dt * 6.0, 0, 1))
-		var busy := climbing or clambering or scratching or mantling or dash.busy() or kick_plant_t > 0.0 or _kick_turn_t > 0.0
-		var face_look: bool = charging or clawing or inp.get("swat", false) or inp.get("scratch", false) or inp.get("aim", false)
+		var busy := climbing or clambering or scratching or mantling or dash.busy() or kick_plant_t > 0.0 or _kick_turn_t > 0.0 or combat.locks_move()
+		var face_look: bool = charging or clawing or combat.any_down() or inp.get("scratch", false) or inp.get("aim", false)
 		if mv.length() > 0.05 and not busy:
 			var wd := Basis(Vector3.UP, orb_yaw) * Vector3(mv.x, 0, -mv.y)
 			var ty := atan2(-wd.x, -wd.z)
@@ -458,20 +470,14 @@ func _physics_process(dt: float) -> void:
 	var jump_pressed := jump_held and not prev_jump
 	var jump_released := (not jump_held) and prev_jump
 	prev_jump = jump_held
-	var swat_held: bool = inp.get("swat", false)
-	if swat_held and not prev_swat and stamina.spend(CatStamina.SWAT):
-		_do_swat()
-	prev_swat = swat_held
+	# paws: left mouse = left paw, right mouse = right paw ("swat" = left paw for old bot scripts)
+	var paw_l: bool = inp.get("paw_l", false) or inp.get("swat", false)
+	var paw_r: bool = inp.get("paw_r", false)
+	combat.tick(dt, paw_l, paw_r)
 	if _swat_hit_t >= 0.0:
 		_swat_hit_t -= dt
 		if _swat_hit_t < 0.0:
 			_swat_impact()
-	var claw_held: bool = inp.get("claw", false)
-	if claw_held and not prev_claw:
-		_claw_start()
-	elif not claw_held and prev_claw:
-		_claw_release()
-	prev_claw = claw_held
 	if clawing:
 		_claw_step(dt)
 	var drop_in: bool = inp.get("drop", false)
@@ -481,7 +487,7 @@ func _physics_process(dt: float) -> void:
 	# auto swat: anything loose (or prey) right under the crosshair and in paw reach gets swatted
 	_auto_t -= dt
 	_auto_last_t += dt
-	if bot.is_empty() and _auto_t <= 0.0 and not clawing and _swat_hit_t < 0.0 and not (climbing or clambering or mantling or scratching or charging):
+	if bot.is_empty() and _auto_t <= 0.0 and not clawing and not combat.any_down() and not combat.busy() and _swat_hit_t < 0.0 and not (climbing or clambering or mantling or scratching or charging):
 		_auto_t = 0.1
 		var at := _paw_target(SWAT_RANGE * 0.85, 0.17)
 		if not at.is_empty():
@@ -821,6 +827,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	var eye := Vector3(0, lerpf(EYE_STAND, EYE_CROUCH, crouch_amt) + land_dip + bob - charge * 0.03, 0)
 	var inv := global_transform.basis.inverse()
 	eye = eye.lerp(Vector3(0, 0.41, 0) + inv * (-face_n * 0.05), w_scratch)
+	# rearing up for a two paw grab: up on the hind legs, then down over the target
+	eye.y += combat.rear_w * 0.14 - combat.grip_w * 0.05
 	if clambering:
 		var pull := clampf(clamber_t / 0.55, 0.0, 1.0) if clamber_phase == 2 else 0.0
 		var hang_eye := Vector3(0, HANG + 0.07, 0) + inv * (-ledge_n * 0.07)
@@ -858,8 +866,12 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.clamber = w_clamber
 	rig.clamber_pull = clampf(clamber_t / 0.55, 0.0, 1.0) if (clambering and clamber_phase == 2) else (1.0 if not clambering else 0.0)
 	rig.ledge_world = ledge_point
-	rig.rear = maxf(w_scratch, w_kick * 0.85)
+	rig.rear = maxf(maxf(w_scratch, w_kick * 0.85), combat.rear_w * 0.85)
 	rig.scratch = w_scratch
+	if "grip" in rig:
+		rig.grip = combat.grip_w
+		if combat.grip_w > 0.001 and not clawing:
+			rig.claw_target = combat.grip_point
 	rig.scratch_dist = SCRATCH_DIST
 	_orient_rig()
 
@@ -1952,9 +1964,13 @@ func _paw_target(reach: float, cone: float) -> Dictionary:
 			best = {"rb": null, "point": c, "normal": -to_c.normalized(), "prey": n}
 	return best
 
-func _do_swat() -> void:
-	# random paw, like a real cat
-	var paw := randi() % 2
+var _swat_rake := false
+
+## paw 0 = left, 1 = right, -1 = random (auto swat). rake = one of a held paw's repeated rakes
+func _do_swat(paw := -1, rake := false) -> void:
+	if paw < 0:
+		paw = randi() % 2
+	_swat_rake = rake
 	_swat_side = -1.0 if paw == 0 else 1.0
 	var t := _paw_target(SWAT_RANGE, 0.5)
 	var wt: Vector3
@@ -1996,7 +2012,9 @@ func _swat_impact() -> void:
 			hits.append(r.collider)
 	# prey gets knocked silly (a stunned mouse is an easy pounce)
 	if is_instance_valid(_swat_prey) and _swat_prey.global_position.distance_to(_eye_pos()) < SWAT_RANGE + 0.15:
-		if _swat_prey.has_method("stun"):
+		if _swat_rake and _swat_prey.has_method("take_hit"):
+			_swat_prey.call("take_hit", CatCombat.RAKE_DMG, global_position, false, CatCombat.RAKE_POISE)
+		elif _swat_prey.has_method("stun"):
 			_swat_prey.call("stun", 1.6)
 		_event("swatted the " + _prey_name(_swat_prey) + "!")
 	if hits.is_empty():
@@ -2019,9 +2037,9 @@ func _swat_impact() -> void:
 	_event("swat!")
 
 
-func _claw_start() -> void:
+func _claw_start(paw := -1) -> void:
 	clawing = true
-	paws.claw_i = randi() % 2
+	paws.claw_i = paw if paw >= 0 else randi() % 2
 	paws.claw_on = true
 	if "claw_on" in rig:
 		rig.claw_on = true

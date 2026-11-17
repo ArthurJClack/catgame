@@ -117,6 +117,10 @@ var claw_on := false
 var claw_i := 1
 var claw_target := Vector3.ZERO
 var _claw_w := [0.0, 0.0]
+## two paw grip (both mouse buttons): both fore paws clamp down on claw_target (world) and hold.
+## grip_squeeze() pulses them (claws dig in) on every bite / squeeze
+var grip := 0.0
+var _squeeze_t := -1.0
 var _swat_t := -1.0
 var _swat_i := 1
 var _swat_target := Vector3.ZERO
@@ -205,6 +209,8 @@ func apply_life(ev: Array) -> void:
 			_twitch(float(ev[1]))
 		"s":
 			swat(int(ev[1]), ev[2])
+		"q":
+			grip_squeeze()
 		"h":
 			hear(ev[1], float(ev[2]))
 		"L":
@@ -681,6 +687,14 @@ func is_swatting() -> bool:
 	return _swat_t >= 0.0
 
 
+## grip: both clamped fore paws dig in for a moment
+func grip_squeeze() -> void:
+	if remote_life and not _net_apply:
+		return
+	_log(["q"])
+	_squeeze_t = 0.0
+
+
 func _setup_gait() -> void:
 	_gait_setup = true
 	_sit_s = sit
@@ -1129,8 +1143,12 @@ func animate(dt: float) -> void:
 	claws = maxf(claws, maxf(pin, _air_w * hs * clampf(rise + 0.8, 0.0, 1.0)))
 	claws_out = LowPoly.damp(claws_out, claws, 14.0, dt)
 	var land_l := rinv * land_point
-	if (_swat_t >= 0.0 and _swat_t < 0.26) or claw_on:
+	if (_swat_t >= 0.0 and _swat_t < 0.26) or claw_on or grip > 0.3:
 		claws_out = maxf(claws_out, 1.0)
+	if _squeeze_t >= 0.0:
+		_squeeze_t += dt
+		if _squeeze_t > 0.25:
+			_squeeze_t = -1.0
 	for i in 4:
 		var front := i < 2
 		var side := -1.0 if i % 2 == 0 else 1.0
@@ -1286,6 +1304,14 @@ func animate(dt: float) -> void:
 			if _claw_w[i] > 0.001:
 				foot = foot.lerp(to_local(claw_target), _claw_w[i])
 				prot = lerpf(prot, 0.5, _claw_w[i])
+			# two paw grip: both paws clamped either side of the target's spine, digging in
+			if grip > 0.001:
+				var gp := to_local(claw_target) + Vector3(side * 0.032, 0.0, 0.0)
+				if _squeeze_t >= 0.0:
+					var k := sin(clampf(_squeeze_t / 0.25, 0.0, 1.0) * PI)
+					gp += Vector3(-side * 0.012, -0.012, 0.018) * k
+				foot = foot.lerp(gp, grip)
+				prot = lerpf(prot, 0.65, grip)
 			# swat: wind out to the side, whip across, recover
 			if _swat_t >= 0.0 and _swat_i == i:
 				var wind := Vector3(side * 0.105, BODY_H * 0.62, home.z - 0.07)
