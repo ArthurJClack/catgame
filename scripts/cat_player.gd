@@ -153,6 +153,11 @@ var w_kick := 0.0
 var _kick_hv := Vector3.ZERO
 var _kick_same := false
 var _kick_turn_t := 0.0
+var kick_dir := Vector3.ZERO      # where the push goes: the camera / steering direction, kept off the wall
+var _kick_aim := Vector3.FORWARD  # camera relative steering (or the look direction) this tick
+var _kick_wall_pt := Vector3.ZERO
+var _kick_paws_set := 0
+const KICK_LEAN := 0.32           # body tipped back toward the wall so the hind paws reach it (rad)
 # clip guard: the capsule is only as wide as the cat, so its head and rump stick out
 # front and back. the visible body slides back along its spine when either end would go into something
 var _clip_off := 0.0
@@ -372,6 +377,9 @@ func _physics_process(dt: float) -> void:
 		else:
 			pitch = clampf(pitch + kl.y * 1.6 * dt, -1.45, 1.45)
 	var mv: Vector2 = inp.get("move", Vector2.ZERO)
+	# the way a wall kick goes: where you steer relative to the camera, or where you look
+	var aim_yaw: float = yaw if inp.has("yaw") else orb_yaw
+	_kick_aim = Basis(Vector3.UP, aim_yaw) * (Vector3(mv.x, 0, -mv.y).normalized() if mv.length() > 0.05 else Vector3.FORWARD)
 	if inp.has("yaw"):
 		orb_yaw = yaw    # scripted bot: camera and body share one heading, old body-relative controls
 	else:
@@ -738,10 +746,10 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	elif scratching:
 		face_n = scratch_n
 	# wall kick: snaps flat onto the wall for the plant, then peels off it during the push
-	w_kick = LowPoly.damp(w_kick, 1.0 if kick_plant_t > 0.0 else 0.0, 60.0 if kick_plant_t > 0.0 else 11.0, dt)
-	if w_kick > 0.002 and not (climbing or clambering or scratching):
-		face_n = kick_n
-	w_face = maxf(maxf(w_climb, w_kick), maxf(w_clamber, w_scratch))
+	# wall kick: turns its back to the wall and rears up on the hind legs during the plant,
+	# then stays reared while the hind legs push it off
+	w_kick = LowPoly.damp(w_kick, 1.0 if kick_plant_t > 0.0 else 0.0, 90.0 if kick_plant_t > 0.0 else 7.0, dt)
+	w_face = maxf(w_climb, maxf(w_clamber, w_scratch))
 
 	# eye: stands up when scratching, peeks over the edge when hanging
 	var eye := Vector3(0, lerpf(EYE_STAND, EYE_CROUCH, crouch_amt) + land_dip + bob - charge * 0.03, 0)
@@ -778,11 +786,13 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	# slipping now just shows the claws and the paws stay on the ground.
 	rig.scramble = LowPoly.damp(rig.scramble, 1.0 if scramble_t > 0.0 else (0.6 if wall_sliding else 0.0), 14.0, dt)
 	rig.slip_claws = minf(slip * 1.3, 1.0) if is_on_floor() else 0.0
-	rig.climb = maxf(w_climb, w_kick)
+	rig.climb = w_climb
+	rig.kick_paw_w = clampf(w_kick * 1.6 - 0.25, 0.0, 1.0)
+	rig.kick_w = w_kick
 	rig.clamber = w_clamber
 	rig.clamber_pull = clampf(clamber_t / 0.55, 0.0, 1.0) if (clambering and clamber_phase == 2) else (1.0 if not clambering else 0.0)
 	rig.ledge_world = ledge_point
-	rig.rear = w_scratch
+	rig.rear = maxf(w_scratch, w_kick * 0.85)
 	rig.scratch = w_scratch
 	rig.scratch_dist = SCRATCH_DIST
 	_orient_rig()
@@ -795,7 +805,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	paws.crouch = crouch_amt
 	paws.charge = charge
 	paws.scramble = rig.scramble
-	paws.climb = maxf(w_climb, w_kick * 0.5)
+	paws.climb = w_climb
 	paws.hang = w_clamber
 	paws.hang_pull = rig.clamber_pull if clambering else 0.0
 	paws.scratch = w_scratch
@@ -839,6 +849,9 @@ func _process(_dt: float) -> void:
 ## and when climbing it rotates 90 degrees so its feet are on the wall
 func _orient_rig() -> void:
 	_clip_guard()
+	if w_kick > 0.002 and w_face < 0.002:
+		_orient_kick()
+		return
 	if w_face < 0.002:
 		rig.transform = Transform3D(Basis(), Vector3(0, 0, _clip_off))
 		return
@@ -848,11 +861,37 @@ func _orient_rig() -> void:
 	var climb_b := Basis(n.cross(Vector3.DOWN).normalized(), n, Vector3.DOWN)
 	var q := global_transform.basis.get_rotation_quaternion()
 	q = q.slerp(face.get_rotation_quaternion(), clampf(w_face, 0.0, 1.0))
-	var wc := maxf(w_climb, w_kick)
+	var wc := w_climb
 	q = q.slerp(climb_b.get_rotation_quaternion(), clampf(wc, 0.0, 1.0))
 	var pos := global_position.lerp(global_position + up * 0.05 - n * (RADIUS + 0.012), wc)
 	pos += global_transform.basis.z * _clip_off * (1.0 - clampf(w_face, 0.0, 1.0))
 	rig.global_transform = Transform3D(Basis(q), pos)
+
+
+## wall kick pose: back to the wall, facing the kick direction, reared up on the hind legs
+## (spine ~75 deg) with the whole body tipped back so the hind paws sit flat on the wall
+func _orient_kick() -> void:
+	var w := clampf(w_kick, 0.0, 1.0)
+	var d := kick_dir if kick_dir != Vector3.ZERO else kick_n
+	var fwd_b := Basis(Vector3.UP, atan2(-d.x, -d.z))
+	var kb := fwd_b * Basis(Vector3.RIGHT, KICK_LEAN)
+	var q := global_transform.basis.get_rotation_quaternion().slerp(kb.get_rotation_quaternion(), w)
+	var b := Basis(q)
+	var pos := global_position + global_transform.basis.z * _clip_off * (1.0 - w)
+	# keep the hips just off the wall: the hind paws reach back to it, the rump never goes in
+	var hip: Vector3 = b * Vector3(0, 0.1, 0.17)
+	var depth := -(pos + hip - _kick_wall_pt).dot(kick_n)
+	if depth > -0.03:
+		pos += kick_n * (depth + 0.03) * w
+	rig.global_transform = Transform3D(b, pos)
+	# hind paws pressed on the wall under the hips
+	for k in 2:
+		var side := -1.0 if k == 0 else 1.0
+		var p: Vector3 = pos + b * Vector3(side * 0.05, 0.0, 0.13)
+		p -= kick_n * (p - _kick_wall_pt).dot(kick_n) - kick_n * 0.045   # paw centre, so the toes rest on the face
+		if _kick_paws_set < 2:
+			rig.kick_paws[k] = p
+	_kick_paws_set = mini(_kick_paws_set + 1, 2) if kick_plant_t > 0.0 and w > 0.8 else _kick_paws_set
 
 
 ## the capsule (r 8.5 cm) keeps the middle of the cat out of walls, but the head and the rump
@@ -1038,6 +1077,12 @@ func _try_wall_kick(wish_dir: Vector3) -> void:
 	kick_n = n
 	kick_plant_t = KICK_PLANT
 	_snug_to_wall(n)
+	_kick_wall_pt = global_position - n * RADIUS
+	_kick_paws_set = 0
+	kick_dir = _kick_heading(n)
+	# the turn to put its back to the wall happens on the way in: by the time the paws
+	# touch it's done (blending it would sweep the rump and tail through the wall)
+	w_kick = 1.0
 	velocity = hv * 0.25 - n * 0.4 + Vector3.UP * clampf(velocity.y * 0.3, -0.4, 0.6)
 	kicks_left -= 1
 	last_kick_normal = n
@@ -1063,6 +1108,7 @@ func _snug_to_wall(n: Vector3) -> void:
 ## paws planted on the wall: stick to it, legs loading up, then the push
 func _kick_plant_step(dt: float, wish_dir: Vector3) -> void:
 	kick_plant_t -= dt
+	kick_dir = _kick_heading(kick_n)   # still aimable during the plant
 	# along the wall the run up bleeds off into the legs, falling stops, a slight press keeps contact
 	var along := Vector3(velocity.x, 0, velocity.z)
 	along -= kick_n * along.dot(kick_n)
@@ -1073,15 +1119,32 @@ func _kick_plant_step(dt: float, wish_dir: Vector3) -> void:
 		_kick_release(wish_dir)
 
 
-func _kick_release(wish_dir: Vector3) -> void:
+func _kick_release(_wish_dir: Vector3) -> void:
 	kick_plant_t = 0.0
-	var hv := _kick_hv * 0.75 + kick_n * KICK_OUT + wish_dir * 0.8
+	kick_dir = _kick_heading(kick_n)
+	# the hind legs drive the body out along the kick direction; a bit of the run up along
+	# the wall survives in the same direction
+	var carry := maxf(_kick_hv.dot(kick_dir), 0.0) * 0.4
+	var hv := kick_dir * (KICK_OUT + 0.6 + carry)
 	velocity.x = hv.x
 	velocity.z = hv.z
 	velocity.y = KICK_UP * (0.75 if _kick_same else 1.0)
-	_kick_turn_t = 0.3
+	# the body already faces the kick (it turned during the plant)
+	yaw = atan2(-kick_dir.x, -kick_dir.z)
+	rotation.y = yaw
+	_kick_turn_t = 0.15
 	jumped_this_air = true
 	cam.fov += 6.0
+
+
+## kick direction: camera / steering heading, bent away from the wall (at least ~17 deg off it)
+func _kick_heading(n: Vector3) -> Vector3:
+	var d := Vector3(_kick_aim.x, 0, _kick_aim.z)
+	var dn := d.dot(n)
+	if dn < 0.3:
+		var t := d - n * dn
+		d = t + n * 0.3 if t.length() > 0.2 else n
+	return d.normalized()
 
 
 # ------------------------------------------------------------------ ledges

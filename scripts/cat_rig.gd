@@ -30,6 +30,9 @@ var look_yaw := 0.0
 var look_pitch := 0.0
 # behaviours + parkour (all 0..1 blends set by the owner)
 var rear := 0.0          # up on the hind legs (scratching, peeking)
+var kick_paws := [Vector3.ZERO, Vector3.ZERO] # wall kick: where the hind paws press on the wall (world)
+var kick_paw_w := 0.0    # 0..1 hind paws held there (legs extend as the body leaves the wall)
+var kick_w := 0.0        # 0..1 in the wall kick pose (tail tucked down the spine line, off the wall)
 var scratch := 0.0       # raking claws down a vertical surface in front
 var scratch_dist := 0.16 # distance from the rig root (-z) to the scratched surface
 var climb := 0.0         # claws in, going up a vertical surface. owner rotates the rig onto the wall
@@ -1218,6 +1221,10 @@ func animate(dt: float) -> void:
 				afw = pc + Basis(Vector3(0, 0, 1), troll) * (afw - pc)
 			foot = foot.lerp(afw, aw)
 			prot = lerpf(prot, arot, aw)
+		if not front and kick_paw_w > 0.0:
+			# wall kick: hind paws flat on the wall behind, toes down, until the legs straighten off it
+			foot = foot.lerp(to_local(kick_paws[0 if side < 0.0 else 1]), kick_paw_w)
+			prot = lerpf(prot, -1.25, kick_paw_w)
 		if front and scramble > 0.0:
 			var claw := Vector3(side * 0.05, 0.2 + 0.05 * sin(_t * 15.0 + side * 1.6), -0.21)
 			foot = foot.lerp(claw, scramble)
@@ -1643,6 +1650,8 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	var loafp := PackedFloat32Array([-0.5, 0.05, 0.03, 0.8, 0.27])
 	var climbp := PackedFloat32Array([0.1, 0.0, 0.08, 1.4, 0.0])
 	var rearp := PackedFloat32Array([-0.95, 0.05, 0.08, 1.2, 0.0])
+	# wall kick: reared up with the rump against the wall, the tail hangs down the spine line, off the wall
+	var kickp := PackedFloat32Array([-0.42, 0.03, 0.04, 1.2, 0.0])
 	var hangp := PackedFloat32Array([-1.05, 0.02, 0.22, 1.7, 0.0])
 	var strp := PackedFloat32Array([0.75, -0.02, 0.04, 1.0, 0.0])
 	var balp := PackedFloat32Array([0.28, -0.012, 0.03, 1.1, 0.0])
@@ -1659,12 +1668,16 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 		v = lerpf(v, loafp[k], loaf)
 		v = lerpf(v, strp[k], stretch)
 		v = lerpf(v, rearp[k], rear)
+		v = lerpf(v, kickp[k], kick_w)
 		v = lerpf(v, climbp[k], climb)
 		v = lerpf(v, hangp[k], clamber * (1.0 - clamber_pull))
 		v = lerpf(v, balp[k], _bal_s * (1.0 - maxf(sit, loaf)))
 		target[k] = v
 	for k in 5:
 		_tail_p[k] = LowPoly.damp(_tail_p[k], target[k], 5.0, dt)
+		# wall kick: the body turns its back to the wall in a couple of frames and the tail
+		# goes with it right away (a lagging tail would sweep through the wall)
+		_tail_p[k] = lerpf(_tail_p[k], target[k], kick_w)
 
 	# inertia: accelerating forward / up makes the tail trail back and droop,
 	# lateral accel + turning swing it out. the chain springs follow their parent
@@ -1676,6 +1689,15 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	f_yaw += clampf(-_iner_v.x * 1.6, -0.35, 0.35) - clampf((_tum_c + _tum_p) * 0.5, -1.0, 1.0)
 	f_yaw += _bal_s * (clampf(-_cx * 22.0, -0.4, 0.4) + 0.22 * sin(_t * 5.3) * sin(_t * 1.7))
 	f_yaw = clampf(f_yaw, -1.2, 1.2)
+	# the kick's jolt doesn't throw the tail about (it would whip through the wall)
+	f_yaw *= 1.0 - kick_w
+	f_pitch *= 1.0 - kick_w
+	if kick_w > 0.0:
+		for i in TAIL_N:
+			_tp[i] *= 1.0 - kick_w
+			_ty[i] *= 1.0 - kick_w
+			_tpv[i] *= 1.0 - kick_w
+			_tyv[i] *= 1.0 - kick_w
 	_twitch_t -= dt * (1.0 + maxf(crouch, charge) * 3.0)
 	if _twitch_t < 0.0 and not remote_life:
 		_twitch_t = randf_range(1.2, 4.0)

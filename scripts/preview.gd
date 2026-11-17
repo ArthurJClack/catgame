@@ -1480,9 +1480,9 @@ func _run_kickshow(test: bool) -> void:
 		cam.fov = 40
 	var shots := [
 		# name, caption, start x, bot keys, seconds, kick when touching
-		["trot into a wall", "nose first at 3.2 m/s and keep pushing", 39.2, {"move": Vector2(0, 1)}, 1.6, false],
-		["wall kick", "run, hop at the wall, kick off it", 38.6, {"move": Vector2(0, 1), "sprint": false}, 1.5, true],
-		["wall kick (canter)", "", 39.6, {"move": Vector2(0, 1), "canter": true}, 1.5, true],
+		["trot into a wall", "nose first at 3.2 m/s and keep pushing", 39.2, {"move": Vector2(0, 1)}, 1.6, null],
+		["wall kick", "hop at the wall, rear up on it, hind legs kick off where you look", 38.6, {"move": Vector2(0, 1), "sprint": false}, 1.5, -PI / 2],
+		["wall kick, aimed off to the side", "look 45 deg off the wall: the kick goes that way", 39.6, {"move": Vector2(0, 1), "canter": true}, 1.5, -PI * 0.75],
 	]
 	Engine.time_scale = 1.0 if test else 0.3
 	var report := {}
@@ -1502,6 +1502,7 @@ func _run_kickshow(test: bool) -> void:
 			bot[k] = sh[3][k]
 		t = 0.0
 		var deep := 0.0
+		var upright := 0.0
 		var hopped := false
 		var kicked := false
 		var events := []
@@ -1510,18 +1511,26 @@ func _run_kickshow(test: bool) -> void:
 			var dt := get_physics_process_delta_time()
 			t += dt
 			bot.jump = false
-			if sh[5]:
+			if sh[5] != null:
 				var gap := p.global_position.x - wall_x
 				if not hopped and gap < 0.75 and p.is_on_floor():
 					bot.jump = true
 					hopped = true
 				elif hopped and not kicked and not p.is_on_floor() and p.wall_time < 0.05:
+					# look where the kick should go (the bot's yaw is its camera) and kick
 					bot.jump = true
+					bot.yaw = sh[5]
 					kicked = true
 					events.append("kick at t=%.2f vy=%.2f" % [t, p.velocity.y])
-				if kicked:
+				elif kicked:
+					if p.kick_plant_t <= 0.0 and events.size() == 1:
+						var hv := Vector2(p.velocity.x, p.velocity.z)
+						events.append("launch dir=(%.2f, %.2f) speed=%.2f vy=%.2f" % [hv.normalized().x, hv.normalized().y, hv.length(), p.velocity.y])
 					bot.move = Vector2.ZERO
 					bot.yaw = p.yaw
+			# measure what gets drawn: the rig poses itself (tail, legs) in _process, so wait for the draw
+			if test:
+				await RenderingServer.frame_pre_draw
 			# deepest point of the visible cat past the wall face (only parts that sit above
 			# the floor near the wall count)
 			for mi in p.rig.find_children("*", "MeshInstance3D", true, false):
@@ -1535,11 +1544,15 @@ func _run_kickshow(test: bool) -> void:
 						if OS.get_environment("KICK_DBG") != "" and wall_x - wp.x > 0.03:
 							print("  deep %.0fmm t=%.2f %s plant=%.2f wk=%.2f clip=%.3f px=%.3f py=%.3f floor=%s wf=%.2f" % [(wall_x - wp.x) * 1000.0, t, str(p.rig.get_path_to(m3)), p.kick_plant_t, p.w_kick, p._clip_off, p.global_position.x, p.global_position.y, p.is_on_floor(), p.w_face])
 						deep = maxf(deep, wall_x - wp.x)
+			if p.kick_plant_t > 0.0:
+				# spine angle above horizontal during the plant (chest relative to the hips)
+				var sp: Vector3 = p.rig.chest.global_position - p.rig.pelvis.global_position
+				upright = maxf(upright, rad_to_deg(atan2(sp.y, Vector2(sp.x, sp.z).length())))
 			if not test:
 				var pp := p.global_position
 				cam.global_position = Vector3(wall_x + 0.9, 50.35, 1.7)
 				cam.look_at(Vector3(wall_x + 0.45, maxf(pp.y, 50.0) + 0.12, 0), Vector3.UP)
-		report[sh[0]] = {"deepest_mm": snappedf(deep * 1000.0, 0.1), "events": events, "end_x": snappedf(p.global_position.x, 0.01)}
+		report[sh[0]] = {"deepest_mm": snappedf(deep * 1000.0, 0.1), "spine_deg": snappedf(upright, 1.0), "events": events, "end_x": snappedf(p.global_position.x, 0.01)}
 		print("KICK ", sh[0], " ", JSON.stringify(report[sh[0]]))
 	Engine.time_scale = 1.0
 	get_tree().quit()
