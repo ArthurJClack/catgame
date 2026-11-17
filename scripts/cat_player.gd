@@ -126,6 +126,8 @@ var _aim_ok_vel := Vector3.ZERO
 var _aim_ok_point := Vector3.ZERO
 var _aim_ok_kind := ""
 var leap_lock := false        # aimed leap in flight: no air steering, it's already on target
+var stick_armed := false      # paw pounce in flight: stick the landing (no slide, no steps)
+var land_stick := 0.0         # planted after a stuck landing
 var pounce_air := false       # launched as a pounce/leap: pin on landing
 var clambering := false
 var clamber_phase := 0        # 0 grab, 1 hang, 2 pull
@@ -652,7 +654,7 @@ func _physics_process(dt: float) -> void:
 		_event("hop")
 	elif jump_pressed and not grounded:
 		_try_wall_kick(wish_dir)
-	if not charging:
+	if not charging and not combat.aiming():
 		_aim_root.visible = false
 
 	hv = Vector3(velocity.x, 0, velocity.z)
@@ -756,6 +758,12 @@ func _physics_process(dt: float) -> void:
 			wall_sliding = false
 	velocity.x = hv.x
 	velocity.z = hv.z
+	if land_stick > 0.0:
+		# stuck the pounce landing: all four paws planted where it came down
+		land_stick -= dt
+		if grounded:
+			velocity.x = 0.0
+			velocity.z = 0.0
 	prev_vy = velocity.y
 	if grounded and wish_len > 0.3 and hv.length() > TROT_SPEED + 0.3:
 		if sprint:
@@ -1693,6 +1701,11 @@ func _on_land() -> void:
 	var impact := -prev_vy
 	land_dip_v -= clampf(impact * 0.12, 0.0, 0.9)
 	paws.land(impact)
+	if stick_armed and pounce_air:
+		land_stick = 0.3
+		velocity.x = 0.0
+		velocity.z = 0.0
+	stick_armed = false
 	if pounce_air:
 		pounce_air = false
 		rig.pin = 1.0
@@ -1744,6 +1757,8 @@ func _prey_name(n: Object) -> String:
 func _catch(n: Object) -> void:
 	if n.has_method("pin_hit"):
 		n.call("pin_hit", self)   # too big to carry (arena rats): the pounce lands as a heavy hit
+		if n is Node3D:
+			combat._slam_fx(n)
 		return
 	if carried:
 		_drop_carried()
@@ -1965,6 +1980,7 @@ func _paw_target(reach: float, cone: float) -> Dictionary:
 	return best
 
 var _swat_rake := false
+var _swat_pt := Vector3.ZERO      # world point the paw strikes (for the slash fx)
 
 ## paw 0 = left, 1 = right, -1 = random (auto swat). rake = one of a held paw's repeated rakes
 func _do_swat(paw := -1, rake := false) -> void:
@@ -1990,6 +2006,7 @@ func _do_swat(paw := -1, rake := false) -> void:
 	if rig.has_method("swat"):
 		var sh := global_transform * Vector3((-0.04 if paw == 0 else 0.04), 0.17, -0.13)
 		rig.swat(paw, sh + (wt - sh).limit_length(0.24))
+	_swat_pt = wt
 	if clawing and paw == paws.claw_i:
 		_claw_release()
 	_swat_hit_t = 0.12   # paw lands at the end of the strike, not on the click
@@ -2011,7 +2028,9 @@ func _swat_impact() -> void:
 		if r.collider is RigidBody3D and not hits.has(r.collider):
 			hits.append(r.collider)
 	# prey gets knocked silly (a stunned mouse is an easy pounce)
-	if is_instance_valid(_swat_prey) and _swat_prey.global_position.distance_to(_eye_pos()) < SWAT_RANGE + 0.15:
+	var prey_hit := is_instance_valid(_swat_prey) and _swat_prey.global_position.distance_to(_eye_pos()) < SWAT_RANGE + 0.15
+	_slash_fx(dir, sweep, _swat_prey if prey_hit else null, hits)
+	if prey_hit:
 		if _swat_rake and _swat_prey.has_method("take_hit"):
 			_swat_prey.call("take_hit", CatCombat.RAKE_DMG, global_position, false, CatCombat.RAKE_POISE)
 		elif _swat_prey.has_method("stun"):
@@ -2035,6 +2054,30 @@ func _swat_impact() -> void:
 		rb.sleeping = false
 		rb.apply_impulse(j, off)
 	_event("swat!")
+
+
+## claw streak along the swipe + sparks / scratch lines where it connects (slash_fx.gd)
+func _slash_fx(dir: Vector3, sweep: Vector3, prey: Node3D, hits: Array[RigidBody3D]) -> void:
+	var c := _swat_pt
+	var eye := _eye_pos()
+	if prey != null:
+		var q := prey.global_position + Vector3.UP * 0.06 * float(prey.get("s") if "s" in prey else 0.5)
+		c = q + (eye - q).normalized() * 0.04
+	var a := c - sweep * 0.11 + Vector3.UP * 0.05
+	var b := c + sweep * 0.09 - Vector3.UP * 0.035
+	SlashFx.streak(self, a, b, -dir * 0.03 + Vector3.UP * 0.01, Color(1.0, 0.82, 0.78) if prey != null else Color(1.0, 0.95, 0.85))
+	var n := (eye - c).normalized()
+	if prey != null:
+		var flesh := prey.is_in_group("enemy")
+		SlashFx.sparks(self, c, n + sweep * 0.6, flesh, 12 if flesh else 6)
+		if flesh:
+			SlashFx.wound(prey, c, n, sweep)
+	elif not hits.is_empty():
+		SlashFx.sparks(self, c, n + sweep * 0.6, false, 6)
+	else:
+		var hit := _ray(eye, eye + (c - eye).normalized() * 0.5)
+		if not hit.is_empty():
+			SlashFx.sparks(self, hit.position, hit.normal, false, 5)
 
 
 func _claw_start(paw := -1) -> void:

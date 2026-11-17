@@ -22,7 +22,9 @@ open the folder in godot 4.3+ and hit play (f5).
   - tap: swat with that paw, auto aims at the loose thing nearest the crosshair, real impulse (light stuff flies, barrels barely rock)
   - hold: that paw keeps raking whatever's in front (a rake every 0.24 s, half a swat's damage + poise, 3 stamina each). nothing to rake = claws out instead: hook a loose object and drag it around by looking, let go to fling. on a surface the claws dig in and drag marks
   - hold both: the cat rears up on its hind legs, comes down with both fore paws on the target (heavy hit) and holds it pinned while both are held, claws squeezing every 0.4 s. a cat needs a free fore paw to walk, so while both hold it can't move, hop or dodge. let go of either to be free again. holding drains stamina, rats wriggle out after 1.6 s (the brute sooner), small prey pinned like this is caught. everything is x2 from behind
-  - tests: `godot --headless --path . res://arena.tscn -- --combattest`, `--combatshow` renders the clip
+  - hold both, then let go of both: **pounce**. no target in paw reach when it comes down from rearing = it drops into the pounce crouch and winds up (0.7 s to full power) while you aim; the arc + ring show where it lands. let go of both (within 0.12 s of each other) = launch: a free ballistic projectile along your look line (+20 deg), no air steering. soft lock: prey / rats near where the arc lands, the tab lock-on target and ledges the arc would smack just under the top bend the launch so it comes down exactly there (ring turns red on prey, yellow on a ledge). it sticks the landing (no slide, no steps) and the forepaws pin what's under them (rats: heavy hit). let go of just one = cancel
+  - slash fx (`slash_fx.gd`): three claw streaks along every swat / rake, sparks where it connects (red bits + scratch lines that stay on a rat for a second), a double streak when both paws come down
+  - tests: `godot --headless --path . res://arena.tscn -- --combattest`, `--combatshow` / `--pounceshow` render the clips
 
 ## parkour (the easy way)
 - hold q (or mouse3), look where you want to be, let go: the cat crouches, wiggles and leaps

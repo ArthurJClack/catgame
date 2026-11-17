@@ -55,6 +55,10 @@ func _reset_cat(pos: Vector3) -> void:
 	p.dash.cancel()
 	p.dash.recover = 0.0
 	p.leap_lock = false
+	if "stick_armed" in p:
+		p.pounce_air = false
+		p.stick_armed = false
+		p.combat.cancel()
 	p.global_position = pos
 	p.velocity = Vector3.ZERO
 	p._phys_prev = pos

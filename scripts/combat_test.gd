@@ -1,7 +1,8 @@
 class_name CombatTest
 extends ArenaTest
 ## paw combat checks (cat_combat.gd). `res://arena.tscn -- --combattest` (headless) prints each
-## rule and COMBATTEST PASS/FAIL, `-- --combatshow` plays the moves for a video (--write-movie).
+## rule and COMBATTEST PASS/FAIL, `-- --combatshow` plays the moves for a video (--write-movie),
+## `-- --pounceshow` the two paw pounce (free arc, soft lock onto a rat / a ledge, stuck landings).
 
 
 func _ready() -> void:
@@ -9,6 +10,8 @@ func _ready() -> void:
 	bot = p.bot
 	if "--combattest" in OS.get_cmdline_user_args():
 		_ctest.call_deferred()
+	elif "--pounceshow" in OS.get_cmdline_user_args():
+		_pshow.call_deferred()
 	else:
 		_cshow.call_deferred()
 
@@ -16,6 +19,20 @@ func _ready() -> void:
 func _paws(l: bool, r: bool) -> void:
 	bot.paw_l = l
 	bot.paw_r = r
+
+
+## waits for the cat to leave the floor and come back down, returns where it touched down
+func _land_spot() -> Vector3:
+	var t := 0.0
+	var left := false
+	while t < 3.0:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		if not p.is_on_floor():
+			left = true
+		elif left:
+			return p.global_position
+	return p.global_position
 
 
 func _still_rat(yaw: float, size := 1.0) -> SoulsRat:
@@ -132,6 +149,8 @@ func _ctest() -> void:
 			held_for += dt
 		elif held_for > 0.0:
 			break
+	_paws(true, false)               # let go of one (no pounce)
+	await _secs(0.2)
 	print("F brute held %.2f s then wriggled free (break_t %.2f), cat still gripping %s" % [held_for, r.break_t, str(c.gripping())])
 	ok = ok and absf(held_for - r.break_t) < 0.05 and r.held_by == null
 	_paws(false, false)
@@ -141,27 +160,119 @@ func _ctest() -> void:
 	_reset_cat(Vector3(0, 0.02, 0.42))
 	r = _still_rat(0.0)              # back to the cat
 	_face(r.global_position)
-	await _ticks(3)
+	await _secs(0.15)
+	r.hp = 99.0
+	r.max_hp = 99.0
 	_paws(true, true)
-	await _secs(0.3)
+	await _secs(0.27)
 	var back := r.max_hp - r.hp
+	_paws(true, false)               # let go of one: no pounce onto it
+	await _secs(0.2)
 	_paws(false, false)
 	await _ticks(2)
 	print("G grab from behind: slam %.1f dmg" % back)
 	ok = ok and is_equal_approx(back, 3.0)
 	# H: holding runs the bar down, then the grip slips
 	await _clear_rats()
-	_reset_cat(Vector3(0, 0.02, 0.5))
-	_face(Vector3(0, 0.02, -1))
+	_reset_cat(Vector3(0, 0.02, 0.4))
+	r = _still_rat(PI)
+	r.hp = 99.0
+	r.max_hp = 99.0
+	r.break_t = 99.0
+	_face(r.global_position)
+	await _ticks(3)
 	p.stamina.value = 20.0
 	_paws(true, true)
 	t = 0.0
 	while t < 4.0 and (c.gripping() or t < 0.1):
 		await get_tree().physics_frame
 		t += get_physics_process_delta_time()
-	print("H 20 stamina, gripping air: slips after %.2f s, gripping %s" % [t, str(c.gripping())])
-	ok = ok and not c.gripping() and t < 2.5
+		r.break_t = 99.0
+	print("H 20 stamina, holding a rat: slips after %.2f s, gripping %s" % [t, str(c.gripping())])
+	ok = ok and not c.gripping() and t < 2.8
 	_paws(false, false)
+	await _ticks(2)
+	# I: nothing in reach: rear, drop into the pounce crouch, release both = free projectile pounce
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 2.0))
+	_face(Vector3(0, 0.02, -1.0))
+	bot.pitch = -0.15
+	await _ticks(3)
+	_paws(true, true)
+	await _secs(0.9)
+	var aimed := c.aiming()
+	var pred: Vector3 = c.pounce.point
+	var pkind: String = c.pounce.kind
+	var n0 := c.pounces
+	_paws(false, false)
+	if OS.has_environment("ARENA_DBG"):
+		for k in 6:
+			await get_tree().physics_frame
+			print("  I fly: pos %s v %s floor %s lock %s" % [p.global_position, p.velocity, p.is_on_floor(), p.leap_lock])
+	var land := await _land_spot()
+	await _secs(0.4)
+	var drift := Vector2(p.global_position.x - land.x, p.global_position.z - land.z).length()
+	var miss := Vector2(land.x - pred.x, land.z - pred.z).length()
+	print("I free pounce: aiming %s, launched %d, %s arc predicted %.2f m out, landed %.2f m out, miss %.3f m, drift after landing %.3f m" % [str(aimed), c.pounces - n0, pkind, 2.0 - pred.z, 2.0 - land.z, miss, drift])
+	ok = ok and aimed and c.pounces - n0 == 1 and pkind == "free" and miss < 0.04 and drift < 0.01 and 2.0 - land.z > 1.0
+	# J: soft lock: rat a bit off the aim line, the pounce bends onto it and pins it
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 1.8))
+	r = _still_rat(PI)
+	r.hp = 99.0
+	r.max_hp = 99.0
+	_face(Vector3(0.35, 0.02, 0.0))   # aiming ~0.35 m to the side of it
+	bot.pitch = -0.1
+	await _ticks(3)
+	_paws(true, true)
+	await _secs(0.9)
+	pkind = c.pounce.kind
+	pred = c.pounce.point
+	_paws(false, false)
+	land = await _land_spot()
+	await _secs(0.3)
+	var dmg := r.max_hp - r.hp
+	var want := r.global_position.distance_to(Vector3(land.x, r.global_position.y, land.z))
+	print("J soft lock on a rat: kind %s, landed %.2f m from it (aim point %.3f m off), pin damage %.1f, drift %.3f m" % [pkind, want, Vector2(land.x - pred.x, land.z - pred.z).length(), dmg, Vector2(p.global_position.x - land.x, p.global_position.z - land.z).length()])
+	ok = ok and pkind == "prey" and dmg >= 2.5 and Vector2(land.x - pred.x, land.z - pred.z).length() < 0.06
+	# K: ledge: the arc would smack the side of a block, it lands on top instead
+	await _clear_rats()
+	var box := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(1.0, 0.45, 0.6)
+	cs.shape = bs
+	box.add_child(cs)
+	arena.add_child(box)
+	box.global_position = Vector3(0, 0.225, -0.2)
+	_reset_cat(Vector3(0, 0.02, 1.6))
+	_face(Vector3(0, 0.1, 0.1))
+	bot.pitch = -0.1
+	await _ticks(3)
+	_paws(true, true)
+	await _secs(0.9)
+	pkind = c.pounce.kind
+	pred = c.pounce.point
+	_paws(false, false)
+	land = await _land_spot()
+	await _secs(0.3)
+	print("K ledge: kind %s, top at %.2f m, landed y %.2f, miss %.3f m" % [pkind, pred.y, land.y, Vector2(land.x - pred.x, land.z - pred.z).length()])
+	ok = ok and pkind == "ledge" and land.y > 0.4
+	box.queue_free()
+	await _ticks(2)
+	# L: let go of just one = cancel, no pounce
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	_face(Vector3(0, 0.02, -1.0))
+	await _ticks(3)
+	n0 = c.pounces
+	_paws(true, true)
+	await _secs(0.6)
+	_paws(true, false)
+	await _secs(0.3)
+	_paws(false, false)
+	await _secs(0.2)
+	print("L let go of one while aiming: pounces %d, aiming %s, cat y %.2f" % [c.pounces - n0, str(c.aiming()), p.global_position.y])
+	ok = ok and c.pounces == n0 and not c.aiming() and p.global_position.y < 0.05
 	print("COMBATTEST ", "PASS" if ok else "FAIL")
 	get_tree().quit()
 
@@ -268,4 +379,101 @@ func _cshow() -> void:
 	await _secs(1.8)
 	_paws(false, false)
 	await _secs(0.6)
+	get_tree().quit()
+
+
+func _block(pos: Vector3, size: Vector3) -> StaticBody3D:
+	var box := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size
+	cs.shape = bs
+	box.add_child(cs)
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.42, 0.3, 0.22)
+	mi.material_override = mat
+	box.add_child(mi)
+	arena.add_child(box)
+	box.global_position = pos
+	return box
+
+
+## hold both, aim for `wind` s, let go of both, follow the flight with the side camera
+func _pounce(wind: float, cam_side := true) -> void:
+	_paws(true, true)
+	await _secs(wind)
+	_paws(false, false)
+	var t := 0.0
+	while t < 1.3:
+		await get_tree().physics_frame
+		var dt := get_physics_process_delta_time()
+		t += dt
+		if cam_side:
+			var mid := p.global_position + Vector3.UP * 0.15
+			cam.global_position = cam.global_position.lerp(Vector3(2.3, 0.7, mid.z + 0.4), clampf(dt * 3.0, 0, 1))
+			cam.look_at(mid)
+
+
+func _pshow() -> void:
+	_labels()
+	arena.hud.visible = true
+	cam = Camera3D.new()
+	cam.fov = 50
+	cam.near = 0.02
+	arena.add_child(cam)
+	cam.current = true
+	p.set_third_person(true)
+	p.set_style("block")
+	await _ticks(10)
+	await _clear_rats()
+	# 1: free pounce, no target: the arc goes where you look, sticks the landing
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	_face(Vector3(0, 0.02, -2.0))
+	bot.pitch = 0.0
+	cam.global_position = Vector3(2.3, 0.7, 2.0)
+	cam.look_at(Vector3(0, 0.15, 1.6))
+	_say("hold both", "rears up, then drops into the pounce crouch (the arc shows where it lands)")
+	await _pounce(1.1)
+	_say("let go of both", "free projectile: no steering, sticks the landing dead still")
+	await _secs(0.6)
+	# 2: soft lock: aim off to the side of a rat, it bends onto it
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	var r := _dummy_rat(PI, Vector3(0.0, 0.02, 0.4))
+	_face(Vector3(0.45, 0.02, 0.4))
+	bot.pitch = -0.05
+	cam.global_position = Vector3(2.3, 0.7, 1.8)
+	cam.look_at(Vector3(0, 0.15, 1.3))
+	_say("soft lock", "aimed off to the side: locks onto the rat and pins it")
+	await _pounce(1.0)
+	await _secs(0.5)
+	# 3: ledge: the arc would smack the side of the crate, it lands on top instead
+	await _clear_rats()
+	_dummy = null
+	var box := _block(Vector3(0, 0.25, 0.1), Vector3(1.0, 0.5, 0.7))
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	_face(Vector3(0, 0.1, 0.4))
+	bot.pitch = -0.08
+	cam.global_position = Vector3(2.3, 0.8, 1.8)
+	cam.look_at(Vector3(0, 0.25, 1.2))
+	_say("ledges", "would hit the side of the crate: lands on top instead")
+	await _pounce(1.0)
+	await _secs(0.6)
+	box.queue_free()
+	# 4: first person
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 2.0))
+	r = _dummy_rat(0.0, Vector3(0.15, 0.02, 0.3))
+	_face(Vector3(0.0, 0.02, 0.3))
+	bot.pitch = -0.08
+	p.set_third_person(false)
+	p.cam.current = true
+	_say("first person", "pounce from behind (double damage)")
+	await _secs(0.3)
+	await _pounce(0.9, false)
+	await _secs(0.8)
 	get_tree().quit()
