@@ -134,7 +134,7 @@ func _build_hud() -> void:
 	hud = CanvasLayer.new()
 	add_child(hud)
 	hud_label = Label.new()
-	hud_label.position = Vector2(18, 14)
+	hud_label.position = Vector2(18, 58)   # under the health + stamina bars (souls_hud.gd)
 	hud_label.add_theme_font_size_override("font_size", 18)
 	hud_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	hud_label.add_theme_constant_override("outline_size", 6)
@@ -158,7 +158,7 @@ func _build_hud() -> void:
 	help_label.add_theme_font_size_override("font_size", 15)
 	help_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	help_label.add_theme_constant_override("outline_size", 5)
-	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop / wall kick x2 · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb · hold f at a wall = scratch\nstalk (c) up to prey, hold space + release = pounce to catch \nmouse1 swat (auto swats things under the crosshair) · hold mouse2 = claws: hook stuff / grab prey · e drop\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · f6 forest · f7 stealth · h hide help · esc free mouse"
+	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop / wall kick x2 · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb · hold f at a wall = scratch\nstalk (c) up to prey, hold space + release = pounce to catch \nmouse1 swat (auto swats things under the crosshair) · hold mouse2 = claws: hook stuff / grab prey · e drop\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · f6 forest · f7 stealth · f10 rat pit · h hide help · esc free mouse"
 	if OS.has_feature("web"):
 		help_label.text = "click the game to grab the mouse (in a browser use c to crouch, ctrl+w closes the tab!)\n" + help_label.text.replace("ctrl/c", "c")
 		help_label.offset_top = -152
@@ -191,6 +191,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			go_scene("res://stealth.tscn")
 		elif k == KEY_F8:
 			go_scene("res://trail.tscn")
+		elif k == KEY_F10:
+			go_scene("res://arena.tscn")
 
 
 ## level hop. keeps the chosen cat style across scenes via Engine meta "cat_style"
