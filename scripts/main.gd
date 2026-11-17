@@ -15,6 +15,11 @@ var preview_mode := false
 
 
 func _ready() -> void:
+	if Net.server:
+		# dedicated server (--server): no level, Net swaps in server.tscn next frame
+		set_process(false)
+		set_process_unhandled_input(false)
+		return
 	_setup_env()
 	info = Level.build(self)
 

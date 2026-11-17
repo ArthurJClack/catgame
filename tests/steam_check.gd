@@ -12,6 +12,12 @@ const METHODS := [
 	"requestLobbyList", "activateGameOverlayInviteDialog", "sendMessageToUser", "receiveMessagesOnChannel",
 	"acceptSessionWithUser", "closeSessionWithUser",
 ]
+# dedicated server list (NetServerBrowser): not fatal, it checks each before calling, but the
+# signatures here are what its argument matching has to cope with
+const OPTIONAL := [
+	"requestInternetServerList", "requestLANServerList", "getServerCount", "getServerDetails", "releaseRequest",
+]
+const OPTIONAL_SIGNALS := ["refresh_complete", "server_list_refresh_complete", "server_responded"]
 const SIGNALS := [
 	"lobby_created", "lobby_joined", "lobby_match_list", "lobby_chat_update", "join_requested",
 	"network_messages_session_request", "network_messages_session_failed", "persona_state_change",
@@ -50,7 +56,26 @@ func _initialize() -> void:
 		for a in sigs[n].args:
 			args.append("%s:%s" % [a.name, type_string(a.type)])
 		print("ok  signal %s(%s)" % [n, ", ".join(args)])
+	for n in OPTIONAL:
+		if not by_name.has(n):
+			print("(missing, optional) ", n)
+			continue
+		var args := []
+		for a in by_name[n].args:
+			args.append("%s:%s" % [a.name, type_string(a.type)])
+		print("ok  %s(%s)" % [n, ", ".join(args)])
+	for n in OPTIONAL_SIGNALS:
+		if sigs.has(n):
+			var args := []
+			for a in sigs[n].args:
+				args.append("%s:%s" % [a.name, type_string(a.type)])
+			print("ok  signal %s(%s)" % [n, ", ".join(args)])
+		else:
+			print("(missing, optional) signal ", n)
 	# the transport also has to compile against it
+	if load("res://scripts/net/server_browser.gd") == null:
+		print("FAIL: server_browser.gd doesn't load")
+		bad += 1
 	var t = load("res://scripts/net/steam_transport.gd")
 	if t == null:
 		print("FAIL: steam_transport.gd doesn't load")

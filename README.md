@@ -130,7 +130,7 @@ build the installer too (download it from the run's artifacts) but don't publish
   (ci stamps it, the repo copy stays `0.1.0`)
 - logic test: `godot --headless --path . -s tests/updater_test.gd`
 
-## multiplayer (steam lobbies)
+## multiplayer (steam lobbies + dedicated servers)
 
 press **m** in game. other players show up as full cats, animated by the same procedural rig as yours.
 
@@ -142,6 +142,38 @@ press **m** in game. other players show up as full cats, animated by the same pr
 - needs steam running and logged in on every pc. no steam? lan / direct ip works too:
   host runs `CatGame.exe -- --net-host`, friends run `CatGame.exe -- --net-join <host ip>` (udp 24680,
   `--net-port` to change, `--net-name` to set your tag).
+
+### dedicated servers
+
+a server is a game with no window and no cat that stays up as a meeting place. players find it in the
+**m** menu under **servers** (**steam servers** / **lan servers**, then **join**), or type its address in
+the box (`1.2.3.4` or `1.2.3.4:port`). steam's own server browser (View > Game Servers, filter Spacewar for
+now) lists it too and starts the game with `+connect ip:port`. joining drops you in the server's level;
+you can still wander off, you just only see cats in the same level.
+
+- download **CatGameServer-linux.tar.gz** or **CatGameServer-windows.zip** from a release, edit the top of
+  `run_server.sh` / `run_server.bat` (name, map, ports, max cats, message of the day) and start it. it
+  restarts itself if it dies.
+- or run any build headless: `CatGame.exe --headless -- --server --name "my cats" --map forest`
+- flags (after `--`): `--name`, `--map house|forest|docks|trail|arena`, `--port` (udp, 24680),
+  `--query-port` (steam, 27016), `--max` (16), `--motd`, `--token <gslt>`, `--no-steam`
+- open **udp 24680** (the cats) and **udp 27016** (steam's server list queries) in the firewall / router.
+- the steam server list needs the GodotSteam *Server* extension (ci puts it in the server builds) and, on
+  linux, steam's `steamclient.so` in `~/.steam/sdk64/` (steamcmd `+login anonymous +app_update 1007`, see
+  `run_server.sh`). without either it's a direct-ip server and says so in its log.
+- anonymous logon gets a new server id each start. a game server login token
+  (https://steamcommunity.com/dev/managegameservers, app 480 for now) via `--token` or `CATGAME_GSLT`
+  keeps it.
+
+how it works: the server is the lan host's relay (`NetEnetTransport` with `dedicated` on) without a cat of
+its own. every game still runs its own world and sends its own cat; the server forwards snapshots to everyone
+else, tells new players its name / level / motd (`T_INFO`), and learns names from their hellos for the
+server list. `scripts/net/dedicated_server.gd` (the server), `steam_server.gd` (SteamGameServer listing),
+`server_browser.gd` (the m menu list). no steam auth, no passwords and no anti cheat yet: anyone with the
+address can join. dedicated server exports (`dedicated_server` feature) start straight into `server.tscn`.
+
+checks: `godot --headless --path . --script res://tests/server_test.gd` (server + two clients on localhost:
+roster, info, relay, leaving). `tests/steam_server_check.gd` lists GodotSteam Server's calls in ci.
 
 ### how the cats stay identical
 

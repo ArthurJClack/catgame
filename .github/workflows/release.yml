@@ -42,18 +42,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/godot
-          key: godot-${{ env.GODOT_VERSION }}-win-templates
+          key: godot-${{ env.GODOT_VERSION }}-win-linux-templates
 
-      - name: get godot + windows export templates
+      - name: get godot + windows / linux export templates
         run: |
           mkdir -p ~/godot && cd ~/godot
           base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
           if [ ! -f Godot_v${GODOT_VERSION}-stable_linux.x86_64 ]; then
             curl -sSLo g.zip $base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && unzip -q g.zip && rm g.zip
           fi
-          if [ ! -f templates/windows_release_x86_64.exe ]; then
+          if [ ! -f templates/windows_release_x86_64.exe ] || [ ! -f templates/linux_release.x86_64 ]; then
             curl -sSLo t.tpz $base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
-            unzip -q t.tpz 'templates/windows_*' 'templates/version.txt' && rm t.tpz
+            unzip -q -o t.tpz 'templates/windows_*' 'templates/linux_release.x86_64' 'templates/version.txt' && rm t.tpz
           fi
           dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
           mkdir -p $dest && cp templates/* $dest/
@@ -97,6 +97,54 @@ jobs:
           path: build/win/
           retention-days: 3
 
+      # dedicated servers (scripts/net/dedicated_server.gd). they carry GodotSteam *Server* (steam
+      # server list) instead of the client GodotSteam. if that download fails they still build, as
+      # direct-ip servers, and none of this can break the game release
+      - name: get godotsteam server
+        id: gss
+        continue-on-error: true
+        run: GODOTSTEAM_FLAVOR=server bash tools/fetch_godotsteam.sh
+
+      - name: export dedicated servers
+        continue-on-error: true
+        run: |
+          G=~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64
+          mv addons/godotsteam "$RUNNER_TEMP/godotsteam_client"
+          trap 'mv "$RUNNER_TEMP/godotsteam_client" addons/godotsteam' EXIT   # put it back for the cache
+          ext="$(ls addons/godotsteam_server/*.gdextension 2>/dev/null | head -n1 || true)"
+          if [ -n "$ext" ]; then
+            cat "$ext"
+            echo "res://$ext" > .godot/extension_list.cfg
+            timeout 120 $G --headless --path . --script res://tests/steam_server_check.gd || echo "::warning::steam server api check failed, servers may not show on the steam list"
+          else
+            echo "::warning::no GodotSteam Server, the servers are direct-ip only"
+            : > .godot/extension_list.cfg
+          fi
+          # relay works: server + two clients on localhost
+          timeout 120 $G --headless --path . --script res://tests/server_test.gd
+          mkdir -p build/server-linux build/server-win build/servers
+          timeout 900 $G --headless --path . --export-release "Linux Server" build/server-linux/CatGameServer.x86_64
+          timeout 900 $G --headless --path . --export-release "Windows Server" build/server-win/CatGameServer.exe
+          for d in build/server-linux build/server-win; do
+            echo 480 > $d/steam_appid.txt
+            cp tools/server/* $d/
+          done
+          chmod +x build/server-linux/CatGameServer.x86_64 build/server-linux/*.sh
+          # the exported linux server boots on its own (feature tag dedicated_server -> server.tscn)
+          (timeout 10 build/server-linux/CatGameServer.x86_64 --headless -- --port 24791 || true) | tee server-smoke.log
+          grep -q "up on udp 24791" server-smoke.log
+          ls -la build/server-linux build/server-win
+          (cd build/server-linux && tar czf ../servers/CatGameServer-linux.tar.gz .)
+          (cd build/server-win && zip -qr ../servers/CatGameServer-windows.zip .)
+
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: CatGame-servers
+          path: build/servers/
+          retention-days: 3
+          if-no-files-found: warn
+
   installer:
     needs: export
     runs-on: windows-latest
@@ -110,6 +158,12 @@ jobs:
         with:
           name: CatGame-win
           path: build/win
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: CatGame-servers
+          path: build/servers
 
       - name: build installer
         shell: pwsh
@@ -134,5 +188,8 @@ jobs:
         shell: pwsh
         run: |
           $notes = "Download **CatGame-Setup.exe** and run it (one click, no admin needed). Already installed? The game updates itself on launch.`n`nBuilt from ${{ github.sha }}."
-          gh release create "v$env:VERSION" build\installer\CatGame-Setup.exe build\installer\CatGame-windows.zip `
+          $files = @("build\installer\CatGame-Setup.exe", "build\installer\CatGame-windows.zip")
+          $files += @(Get-ChildItem build\servers -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+          if ($files.Count -gt 2) { $notes += "`n`nDedicated server: **CatGameServer-linux.tar.gz** / **CatGameServer-windows.zip**, see the readme." }
+          gh release create "v$env:VERSION" @files `
             --target "${{ github.sha }}" --title "Cat Game v$env:VERSION" --notes "$notes" --latest

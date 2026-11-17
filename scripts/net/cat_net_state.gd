@@ -18,6 +18,7 @@ const T_HELLO := 1
 const T_SNAP := 2
 const T_BYE := 3
 const T_ROSTER := 9   # lan mode only: the host tells clients who's connected
+const T_INFO := 10    # dedicated server -> client: server name, map, message of the day
 
 const F_FLOOR := 1
 const F_CLAW := 2
