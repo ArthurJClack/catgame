@@ -10,8 +10,7 @@ const ONE_OF := [["serverInitEx", "serverInit"], ["setAdvertiseServerActive", "e
 const OPTIONAL := [
 	"setProduct", "setGameDescription", "setDedicatedServer", "setPasswordProtected", "setMapName",
 	"setGameTags", "setKeyValue", "logOn", "logOff", "getSteamID", "getPublicIP",
-	"createUnauthenticatedUserConnection", "updateUserData", "sendUserDisconnect_DEPRECATED",
-	"sendUserDisconnect", "endAuthSession", "serverShutdown", "shutdown",
+	"setBotPlayerCount", "serverShutdown", "shutdown",
 ]
 const SIGNALS := ["server_connected", "server_connect_failure", "server_disconnected"]
 

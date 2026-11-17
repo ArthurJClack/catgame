@@ -32,7 +32,7 @@ var max_cats := 16
 var token := ""                  # game server login token (steamcommunity.com/dev/managegameservers) keeps the same server id
 var version := "0.1.0"
 var proto := 1
-var _users := {}                 # client id -> steam id of the fake "unauthenticated" user on the server list
+var _users := {}                 # client ids counted on the server list
 
 
 func start() -> bool:
@@ -151,32 +151,22 @@ func set_map(label: String) -> void:
 	_call("setMapName", [label])
 
 
-## the player count on the server list comes from users the server told steam about. we don't do
-## steam auth (players connect over enet), so each one gets an "unauthenticated" placeholder user
-func player_joined(id: int, nm: String) -> void:
-	if not ready_ok or _users.has(id):
-		return
-	var sid = _call("createUnauthenticatedUserConnection", [])
-	if sid == null or int(sid) == 0:
-		return
-	_users[id] = int(sid)
-	player_named(id, nm)
+## the player count on the server list. steam counts users the server authenticated
+## (beginAuthSession), but players connect over enet without a steam ticket, so the count goes out
+## as "bots" instead, which the server list shows the same way (NetServerBrowser adds them up).
+## GodotSteam Server has no createUnauthenticatedUserConnection to fake real users
+func player_joined(id: int, _nm: String) -> void:
+	_users[id] = true
+	_call("setBotPlayerCount", [_users.size()])
 
 
-func player_named(id: int, nm: String) -> void:
-	if _users.has(id):
-		_call("updateUserData", [_users[id], nm, 0])
+func player_named(_id: int, _nm: String) -> void:
+	pass
 
 
 func player_left(id: int) -> void:
-	if not _users.has(id):
-		return
-	var sid: int = _users[id]
 	_users.erase(id)
-	for m in ["sendUserDisconnect_DEPRECATED", "sendUserDisconnect", "endAuthSession"]:
-		if api.has_method(m):
-			_call(m, [sid])
-			break
+	_call("setBotPlayerCount", [_users.size()])
 
 
 func close() -> void:

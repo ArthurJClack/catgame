@@ -17,7 +17,7 @@ const METHODS := [
 const OPTIONAL := [
 	"requestInternetServerList", "requestLANServerList", "getServerCount", "getServerDetails", "releaseRequest",
 ]
-const OPTIONAL_SIGNALS := ["refresh_complete", "server_list_refresh_complete", "server_responded"]
+const OPTIONAL_SIGNALS := ["request_server_list_refresh_complete"]
 const SIGNALS := [
 	"lobby_created", "lobby_joined", "lobby_match_list", "lobby_chat_update", "join_requested",
 	"network_messages_session_request", "network_messages_session_failed", "persona_state_change",

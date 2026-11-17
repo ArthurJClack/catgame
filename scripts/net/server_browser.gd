@@ -17,7 +17,8 @@ var busy := false
 
 func setup(api: Object) -> void:
 	steam = api
-	for s in ["refresh_complete", "server_list_refresh_complete"]:
+	# GodotSteam 4.15: request_server_list_refresh_complete(request_handle, response)
+	for s in ["request_server_list_refresh_complete", "refresh_complete", "server_list_refresh_complete"]:
 		if steam.has_signal(s) and not steam.is_connected(s, _on_done):
 			steam.connect(s, _on_done)
 
@@ -95,7 +96,8 @@ static func parse(d: Dictionary) -> Dictionary:
 	var s := {
 		"name": str(_first(d, ["name", "server_name"], "cat server")),
 		"map": str(_first(d, ["map", "map_name"], "")),
-		"cats": int(_first(d, ["players", "player_count"], 0)),
+		# the server reports its cats as "bots" (see NetSteamServer.player_joined)
+		"cats": int(_first(d, ["players", "player_count"], 0)) + int(_first(d, ["bot_players", "bots"], 0)),
 		"max": int(_first(d, ["max_players", "max_player_count"], 0)),
 		"ping": int(_first(d, ["ping"], 999)),
 		"addr": "", "port": NetEnetTransport.PORT,
