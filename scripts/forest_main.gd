@@ -17,12 +17,29 @@ var t := 0.0
 var cam: Camera3D
 var tour := false
 var leaving := false
+var atmos: Atmos
+var water: Water
+var swarms: Array = []
+var _shift_t := 0.0
+var sound: Soundscape
+var _perf := false
+var _perf_n := 0
+var _perf_sum := 0.0
+var _load_ms := 0
 
 
 func _ready() -> void:
+	var t0 := Time.get_ticks_msec()
+	_perf = "--perf" in OS.get_cmdline_user_args()
 	_setup_env()
 	info = ForestLevel.build(self)
+	_dress()
 	critters = Critter.spawn_all(self)
+	critters.append_array(Fauna.spawn_all(self, atmos))
+	swarms = Swarms.spawn_all(self, atmos)
+	sound = Soundscape.new()
+	sound.atmos = atmos
+	add_child(sound)
 	_spawn_mice()
 	player = CatPlayer.new()
 	player.position = info.spawn
@@ -32,9 +49,10 @@ func _ready() -> void:
 		player.set_style.call_deferred(Engine.get_meta("cat_style"))
 	_build_gate_trigger()
 	_build_hud()
+	_load_ms = Time.get_ticks_msec() - t0
 	var args := OS.get_cmdline_user_args()
 	var si := args.find("--still")
-	if si >= 0 or "--tour" in args:
+	if si >= 0 or "--tour" in args or "--watch" in args:
 		hud.visible = false
 		player.process_mode = Node.PROCESS_MODE_DISABLED
 		cam = Camera3D.new()
@@ -43,7 +61,12 @@ func _ready() -> void:
 		cam.far = 400
 		add_child(cam)
 		cam.current = true
-		if si >= 0:
+		if "--zoo" in args:
+			_zoo()
+		var wi := args.find("--watch")
+		if wi >= 0:
+			_watch_setup(args, wi)
+		elif si >= 0:
 			var v := args[si + 1].split_floats(",")
 			cam.global_position = Vector3(v[0], v[1], v[2])
 			cam.look_at(Vector3(v[3], v[4], v[5]), Vector3.UP)
@@ -63,50 +86,32 @@ func _spawn_mice() -> void:
 
 
 func _setup_env() -> void:
-	var we := WorldEnvironment.new()
-	env = Environment.new()
-	var sky := Sky.new()
-	var psm := ProceduralSkyMaterial.new()
-	psm.sky_top_color = Color(0.32, 0.5, 0.78)
-	psm.sky_horizon_color = Color(0.78, 0.8, 0.72)
-	psm.ground_horizon_color = Color(0.45, 0.55, 0.4)
-	psm.ground_bottom_color = Color(0.2, 0.28, 0.18)
-	sky.sky_material = psm
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.62, 0.72, 0.62)
-	env.ambient_light_energy = 0.38
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_white = 6.0
-	env.ssao_enabled = true
-	env.ssao_radius = 0.6
-	env.ssao_intensity = 1.8
-	env.glow_enabled = true
-	env.glow_intensity = 0.3
-	env.glow_hdr_threshold = 1.2
-	# hazy green depth, the far trees melt into it
-	env.fog_enabled = true
-	env.fog_light_color = Color(0.7, 0.78, 0.75)
-	env.fog_density = 0.0045
-	env.fog_sky_affect = 0.0
-	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.008
-	env.volumetric_fog_albedo = Color(0.95, 0.95, 0.85)
-	env.volumetric_fog_length = 40.0
-	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.1
-	we.environment = env
-	add_child(we)
-	var sun := DirectionalLight3D.new()
-	sun.light_color = Color(1.0, 0.9, 0.72)
-	sun.light_energy = 1.7
-	sun.light_volumetric_fog_energy = 2.0
-	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 45.0
-	sun.shadow_blur = 1.5
-	sun.rotation = Vector3(deg_to_rad(-38), deg_to_rad(-140), 0)
-	add_child(sun)
+	atmos = Atmos.new()
+	add_child(atmos)
+	env = atmos.env
+	var hi := OS.get_cmdline_user_args().find("--hour")
+	if hi >= 0:
+		atmos.hour = float(OS.get_cmdline_user_args()[hi + 1])
+		atmos.apply_time()
+		var ds := OS.get_cmdline_user_args().find("--dayspeed")
+		if ds >= 0:
+			atmos.day_speed = float(OS.get_cmdline_user_args()[ds + 1])
+	else:
+		# a full day takes about half an hour of play
+		atmos.day_speed = 0.012
+
+
+## grass, flowers, reeds, the water surface: everything that dresses the bare level
+func _dress() -> void:
+	var w := ForestLevel.lv.get_node_or_null("Water") as MeshInstance3D
+	if w:
+		water = Water.apply(w)
+	add_child(Foliage.new())
+	# deepen the ground: the bare terrain colours are pale next to real grass
+	var tm := LowPoly.mat(Color(0.66, 0.84, 0.54), 0.95)
+	for c in ForestLevel.lv.get_children():
+		if c is MeshInstance3D and String(c.name).begins_with("Terrain_"):
+			(c as MeshInstance3D).material_override = tm
 
 
 func _build_gate_trigger() -> void:
@@ -155,7 +160,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -112
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the forest: deer + rabbits in the meadow, squirrels up the trees, birds, foxes, frogs by the stream, field mice to hunt\nstalk (c) to sneak up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nt teleport to next landmark · 1-8 swap cat · v camera · h hide help · walk out the gate behind you (or f5) = back to the yard"
+	help_label.text = "the forest: deer + rabbits in the meadow, ducks + fish on the pond, crows, a hawk overhead, hedgehogs, lizards on the rocks, grasshoppers + mice to hunt\nstalk (c) to sneak up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nt teleport to next landmark · n skip time (sunset, night, morning) · m mute · 1-8 swap cat · v camera · h hide help · walk out the gate behind you (or f5) = back to the yard"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -193,12 +198,143 @@ func _unhandled_input(event: InputEvent) -> void:
 			player.last_event_t = 0.0
 		KEY_H:
 			help_label.visible = not help_label.visible
+		KEY_M:
+			sound.set_muted(not sound.muted)
+			player.last_event = "sound off" if sound.muted else "sound on"
+			player.last_event_t = 0.0
+		KEY_N:
+			# skip ahead: afternoon -> sunset -> night -> morning
+			atmos.skip = 3.0
+			player.last_event = "time passes..."
+			player.last_event_t = 0.0
 		KEY_F5, KEY_TAB:
 			_go_home()
 
 
+# ------------------------------------------------------------------ wildlife camera (previews + checks)
+## `-- --watch duck` films the first animal of that kind (`duck:2` = the third). add `--poke 4` to have a
+## stand-in cat walk up to it after 4 s (`--rush` = at a run, `--crouch` = stalking), `--dist 1.5` camera range,
+## `--log` prints every state change, `--hour 21` sets the time of day
+var _watch: Node3D
+var _watch_dist := 1.6
+var _poke_t := -1.0
+var _poke_speed := 1.5
+var _poke_from := Vector3.ZERO
+var _log_states := {}
+
+
+## `-- --zoo --still ...`: one of every new animal lined up (frozen) to check the models
+func _zoo() -> void:
+	var x := -2.0
+	for k in ["duck", "duck", "duckling", "crow", "owl", "hawk", "woodpecker", "hedgehog", "lizard", "dragonfly", "hopper", "bat"]:
+		var c := Fauna.new()
+		c.kind = k
+		var big: bool = k in ["duck", "crow", "owl", "hawk"]
+		c.home = ForestLevel.ground(x, -14.0 if big or k in ["duckling", "woodpecker", "hedgehog"] else -12.6) + Vector3(0, 0.02, 0)
+		if k == "duck":
+			c.set_meta("drake", x > -1.9)
+		add_child(c)
+		c.position = c.home
+		c.rotation.y = -0.7
+		c.visible = true
+		c.set_process(false)
+		x += 0.75 if big else 0.4
+		if k == "hedgehog":
+			x = -1.0
+
+
+func _watch_setup(args: PackedStringArray, wi: int) -> void:
+	var spec := args[wi + 1].split(":")
+	var idx := int(spec[1]) if spec.size() > 1 else 0
+	var found := 0
+	for c in critters:
+		if (c as Critter).kind == spec[0]:
+			if found == idx:
+				_watch = c
+				break
+			found += 1
+	if _watch == null:
+		for sw in swarms:
+			if (sw as Swarms).kind == spec[0]:
+				if found == idx:
+					_watch = sw
+					break
+				found += 1
+	var di := args.find("--dist")
+	if di >= 0:
+		_watch_dist = float(args[di + 1])
+	var pi := args.find("--poke")
+	if pi >= 0:
+		_poke_t = float(args[pi + 1])
+	if "--rush" in args:
+		_poke_speed = 6.0
+	if "--crouch" in args:
+		_poke_speed = 0.6
+		player.crouch_amt = 1.0
+	if _watch is Fauna and (_watch as Fauna).kind == "hawk":
+		(_watch as Fauna).state_t = 3.0
+	# park the stand-in cat far away until it's time
+	player.global_position = Vector3(30, 20, 30)
+	player.visible = true
+
+
+func _watch_pos() -> Vector3:
+	if _watch is Swarms:
+		var sw := _watch as Swarms
+		return sw.center if sw.kind == "fish" else (sw.pos[0] if sw.kind != "ants" else sw.path[sw.path.size() / 3])
+	return _watch.global_position
+
+
+func _watch_cam(dt: float) -> void:
+	if _watch == null:
+		return
+	var p := _watch_pos()
+	var a := 0.6 + t * 0.05
+	var want := p + Vector3(cos(a), 0.45, sin(a)) * _watch_dist
+	want.y = maxf(want.y, ForestLevel.height(want.x, want.z) + 0.12)
+	cam.global_position = want if t < 0.1 else cam.global_position.lerp(want, 1.0 - exp(-3.0 * dt))
+	cam.look_at(p + Vector3(0, 0.05, 0), Vector3.UP)
+	if _poke_t >= 0.0 and t > _poke_t:
+		# the stand-in cat: slides in from 7 m out, straight at the animal, then stops beside it
+		if _poke_from == Vector3.ZERO:
+			_poke_from = p + Vector3(cos(a + 2.2), 0, sin(a + 2.2)) * 7.0
+			player.global_position = _poke_from
+		var cp := player.global_position
+		var to := p - cp
+		to.y = 0
+		var step := to.normalized() * _poke_speed if to.length() > 0.35 else Vector3.ZERO
+		player.velocity = step
+		cp += step * dt
+		cp.y = maxf(ForestLevel.height(cp.x, cp.z), ForestLevel.WATER_Y - 0.1) + 0.02
+		player.global_position = cp
+		player.yaw = atan2(-to.x, -to.z)
+	if "--log" in OS.get_cmdline_user_args():
+		for c in critters:
+			var cr := c as Critter
+			if _log_states.get(cr) != cr.state:
+				_log_states[cr] = cr.state
+				if t > 0.2:
+					print("%.1f %s -> %s" % [t, cr.kind, cr.state])
+
+
 func _process(dt: float) -> void:
 	t += dt
+	if _perf:
+		# `-- --perf`: script cost per frame (process + physics), printed after 6 s
+		_perf_n += 1
+		_perf_sum += Performance.get_monitor(Performance.TIME_PROCESS) + Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * Engine.physics_ticks_per_second / maxf(Engine.get_frames_per_second(), 1.0)
+		if t > 6.0:
+			print("perf: %.3f ms process, %.3f ms per physics tick, load %d ms" % [Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, _load_ms])
+			get_tree().quit()
+	_shift_t -= dt
+	if _shift_t < 0.0:
+		_shift_t = 2.0
+		Fauna.night_shift(critters)
+		if water and atmos:
+			water.set_sky(atmos.sky_mat.get_shader_parameter("horizon"))
+	if _watch != null:
+		_watch_cam(dt)
+		return
 	if tour:
 		_tour_cam()
 		return
@@ -213,13 +349,13 @@ func _process(dt: float) -> void:
 	var best := 6.0
 	for c in critters:
 		var cr := c as Critter
-		if cr.kind == "butterfly":
+		if cr.kind in ["butterfly", "hopper", "bat", "hawk"]:
 			continue
 		var dd := cr.global_position.distance_to(player.global_position)
 		if dd < best:
 			best = dd
 			near = "%s nearby (%s)" % [cr.kind, cr.state]
-	hud_label.text = "%d fps\n%.1f m/s   height %.2f m   kicks %d\n%s" % [Engine.get_frames_per_second(), hs, player.global_position.y - ForestLevel.height(player.global_position.x, player.global_position.z), player.kicks_left, near]
+	hud_label.text = "%d fps   %02d:%02d\n%.1f m/s   height %.2f m   kicks %d\n%s" % [Engine.get_frames_per_second(), int(atmos.hour), int(fmod(atmos.hour, 1.0) * 60.0), hs, player.global_position.y - ForestLevel.height(player.global_position.x, player.global_position.z), player.kicks_left, near]
 	if player.last_event_t < 1.2:
 		event_label.text = player.last_event
 		event_label.modulate.a = 1.0 - player.last_event_t / 1.2

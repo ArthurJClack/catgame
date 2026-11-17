@@ -71,9 +71,22 @@ walk out the gap in the west yard fence (or f6 from the main map). f5 / the gate
   with ledges, ~95 pines/oaks/birches (trunks + limbs climbable, limbs are perches), fallen + hollow logs,
   stumps, a deer stand with a ladder, bushes to hide in
 - `scripts/wildlife.gd` (Critter) deer, rabbits, birds, squirrels, foxes, frogs, butterflies, each with a
-  small state machine that reads the cat's distance / speed / crouch / height. stalk to sneak up, rush to scatter them
-- `scripts/field_mouse.gd` huntable prey (pounce = caught)
-- t teleports between landmarks. `-- --tour` renders the flythrough
+  small state machine that reads the cat's distance / speed / crouch / height. stalk to sneak up, rush to scatter them.
+  panic spreads: one bird going up takes the flock, a bolting rabbit freezes the others (`alarmed()`)
+- `scripts/fauna.gd` (Fauna, extends Critter) a duck pair with ducklings on the pond, dragonflies, hedgehogs that
+  ball up (and roll when nudged), grasshoppers that ping out of the grass ahead of you, a hawk that circles and
+  stoops at rabbits (everything in the open scatters), woodpeckers, crows that keep their distance and mob the cat
+  when it's up a tree or carrying prey, lizards on the rocks, owls and bats for the night
+- `scripts/swarms.gd` fish shoals, bees on the flowers, ant trails, fireflies and moths (one multimesh each)
+- `scripts/field_mouse.gd` huntable prey (pounce = caught). dragonflies, grasshoppers and lizards are huntable too
+- `scripts/atmos.gd` sky + sun + clouds + fog + grading and the time of day (a day is ~30 min, **n** skips ahead:
+  sunset, stars and fireflies, sunrise). `scripts/foliage.gd` grass that sways and bends away from the cat, flowers,
+  reeds, lily pads. `scripts/water.gd` depth tinted water with bank foam and ripples (`Water.splash(pos)`)
+- `scripts/soundscape.gd` all sound is synthesised at load: wind, stream, birdsong, crickets, frogs, owl, and the
+  calls the animals make (`Soundscape.play(name, pos)`). **m** mutes
+- t teleports between landmarks. `-- --tour` renders the flythrough. wildlife camera for checks:
+  `-- --watch duck --poke 4 --log` films an animal while a stand-in cat walks up to it (`--rush`, `--crouch`,
+  `--hour 21`, `--zoo` lines up the models, `--perf` prints script cost per frame)
 
 ## install + auto updates (windows)
 

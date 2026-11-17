@@ -51,6 +51,7 @@ func _ready() -> void:
 	_lod()
 	if kind in PREY:
 		add_to_group("prey")
+	add_to_group("wild")
 	_pick_wander()
 	state_t = rng.randf_range(0.5, 3.0)
 
@@ -271,11 +272,33 @@ func _pick_wander(radius := 6.0) -> void:
 	target = home
 
 
+static var _ogrid := {}
+static var _ogrid_n := -1
+const OCELL := 4.0
+
+
+## obstacles bucketed into 4 m cells (each one listed in every cell it can push from), rebuilt when the level changes
+static func _near_obstacles(p: Vector2) -> Array:
+	if _ogrid_n != ForestLevel.obstacles.size():
+		_ogrid_n = ForestLevel.obstacles.size()
+		_ogrid.clear()
+		for o in ForestLevel.obstacles:
+			var c: Vector2 = o[0]
+			var reach: float = o[1] + 1.3
+			for gx in range(floori((c.x - reach) / OCELL), floori((c.x + reach) / OCELL) + 1):
+				for gz in range(floori((c.y - reach) / OCELL), floori((c.y + reach) / OCELL) + 1):
+					var key := Vector2i(gx, gz)
+					if not _ogrid.has(key):
+						_ogrid[key] = []
+					_ogrid[key].append(o)
+	return _ogrid.get(Vector2i(floori(p.x / OCELL), floori(p.y / OCELL)), [])
+
+
 func _avoid(dir: Vector3) -> Vector3:
 	# steer around trunks / rocks / logs (ground animals)
 	var p := Vector2(position.x, position.z)
 	var push := Vector2.ZERO
-	for o in ForestLevel.obstacles:
+	for o in _near_obstacles(p):
 		var c: Vector2 = o[0]
 		var r: float = o[1] + (0.6 if kind == "deer" else 0.15)
 		var d := p - c
@@ -326,8 +349,86 @@ func _threat() -> Array:
 
 
 func _set_state(s: String, t: float) -> void:
+	var was := state
 	state = s
 	state_t = t
+	# panic spreads: whoever is close sees this one go and reacts too (a flock goes up together,
+	# a bolting rabbit freezes the others). alarmed animals don't pass it on again, so it stays local
+	if not _hushed and s != was and SHOUT.has(s) and is_inside_tree():
+		get_tree().call_group("wild", "alarmed", global_position, kind, self)
+
+
+const SHOUT := {"flee": true, "fly": true, "run_to_tree": true, "takeoff": true}
+var _hushed := false
+
+
+## something nearby just panicked (`by` = its kind, or "hawk" for the real thing overhead)
+func alarmed(from: Vector3, by: String, src: Node) -> void:
+	if src == self or caught or _stun > 0.0:
+		return
+	var off := global_position - from
+	off.y = 0
+	var d := off.length()
+	var hawk := by == "hawk"
+	var away := off / d if d > 0.01 else Vector3.FORWARD
+	_hushed = true
+	match kind:
+		"rabbit":
+			if state in ["idle", "graze", "hop", "freeze"]:
+				if hawk and d < 16.0:
+					# cover is the nearest tree trunk, not just "away"
+					target = _cover(away)
+					_set_state("flee", rng.randf_range(2.0, 3.0))
+				elif d < 3.0 and by == "rabbit":
+					target = position + away.rotated(Vector3.UP, rng.randf_range(-0.6, 0.6)) * 9.0
+					_set_state("flee", rng.randf_range(1.5, 2.5))
+				elif d < 9.0 and state != "freeze":
+					_set_state("freeze", rng.randf_range(0.8, 1.6))
+		"bird":
+			if state in ["idle", "peck", "hop"] and (d < 5.0 or (hawk and d < 18.0)):
+				_fly_to_perch([d, 0.0, false, 0.0, away])
+				# not all at the same instant
+				fly_t = -rng.randf_range(0.0, 0.25)
+		"squirrel":
+			if state in ["idle", "forage", "scamper"] and (d < 6.0 or (hawk and d < 18.0)):
+				_flee_up_tree()
+			elif state == "perched" and hawk:
+				state_t = maxf(state_t, 10.0)
+		"deer":
+			if state in ["idle", "graze", "walk"] and d < 14.0:
+				if by == "deer":
+					target = position + away.rotated(Vector3.UP, rng.randf_range(-0.4, 0.4)) * 14.0
+					_set_state("flee", rng.randf_range(2.5, 3.5))
+				else:
+					_set_state("alert", rng.randf_range(1.5, 3.0))
+		"fox":
+			if hawk and d < 12.0 and state in ["idle", "trot"]:
+				head.rotation.x = -0.6
+				_set_state("idle", 2.5)
+		"frog":
+			if state == "idle" and d < 2.5 and by != "frog":
+				fly_from = position
+				target = position + away * 0.8
+				target.y = maxf(_ground_y(target.x, target.z), ForestLevel.WATER_Y - 0.03)
+				fly_t = 0.0
+				_set_state("leap", 99.0)
+	_hushed = false
+
+
+func _cover(away: Vector3) -> Vector3:
+	var best := position + away * 10.0
+	var bs := 1e9
+	for tr in ForestLevel.trunks:
+		var b: Vector3 = tr[0]
+		var to := Vector3(b.x - position.x, 0, b.z - position.z)
+		var dd := to.length()
+		if dd < 2.0 or dd > 16.0:
+			continue
+		var score := dd - to.normalized().dot(away) * 5.0
+		if score < bs:
+			bs = score
+			best = Vector3(b.x, 0, b.z) + to.normalized() * 0.8
+	return best
 
 
 # ------------------------------------------------------------------ update
@@ -357,9 +458,32 @@ func released() -> void:
 		_flee_up_tree()
 
 
-func _physics_process(dt: float) -> void:
+var _lod_acc := 0.0
+var _lod_skip := 0
+static var _cam_pos := Vector3.ZERO
+static var _cam_frame := -1
+
+## runs once per drawn frame (not per physics tick: nothing here is a physics body), and animals that are
+## far from the camera only think every few frames, with the skipped time added up so they keep real speed
+func _process(dt: float) -> void:
 	if caught:
 		return
+	var fr := Engine.get_process_frames()
+	if _cam_frame != fr:
+		_cam_frame = fr
+		var cam := get_viewport().get_camera_3d()
+		if cam:
+			_cam_pos = cam.global_position
+	_lod_acc += dt
+	_lod_skip -= 1
+	if _lod_skip > 0:
+		return
+	var far := Vector2(position.x - _cam_pos.x, position.z - _cam_pos.z).length()
+	_lod_skip = 1 if far < 22.0 else (3 if far < 40.0 else 6)
+	if kind == "hawk":
+		_lod_skip = 1
+	dt = minf(_lod_acc, 0.1)
+	_lod_acc = 0.0
 	if _stun > 0.0:
 		_stun -= dt
 		return
@@ -843,6 +967,8 @@ func _think_frog(dt: float, th: Array) -> void:
 				l.rotation.x = -1.2 if k < 0.6 else 0.0
 			if k >= 1.0:
 				home = position
+				if position.y < ForestLevel.WATER_Y + 0.02:
+					Water.splash(position, 0.45)
 				_set_state("idle", rng.randf_range(1.0, 3.0))
 
 
