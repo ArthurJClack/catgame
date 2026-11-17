@@ -10,6 +10,7 @@ var _t := 1.0
 var _rng := RandomNumberGenerator.new()
 var _body: Node3D
 var _tail: Node3D
+var _gait: CritterGait
 
 
 func _ready() -> void:
@@ -40,6 +41,18 @@ func _ready() -> void:
 	_tail.position = Vector3(0, 0.012, 0.04)
 	_body.add_child(_tail)
 	LowPoly.part(_tail, LowPoly.box(0.0), Color(0.7, 0.55, 0.5), Vector3(0, 0, 0.035), Vector3(0.004, 0.004, 0.07))
+	# four little legs: mice half bound (hind feet together) at ~8 strides a second
+	var legs: Array[Node3D] = []
+	var lens: Array[float] = []
+	for z in [-0.02, 0.025]:
+		for s in [-1, 1]:
+			var lg := Node3D.new()
+			lg.position = Vector3(s * 0.012, 0.012, z)
+			_body.add_child(lg)
+			LowPoly.part(lg, LowPoly.box(0.0), Color(0.8, 0.62, 0.58), Vector3(0, -0.006, -0.002), Vector3(0.006, 0.012, 0.008 if z > 0 else 0.005))
+			legs.append(lg)
+			lens.append(0.012)
+	_gait = CritterGait.new("field mouse", legs, lens)
 
 
 ## swatted: dazed for a moment (an easy pounce)
@@ -69,6 +82,10 @@ func _physics_process(dt: float) -> void:
 		_stun -= dt
 		return
 	_tail.rotation.y = sin(Time.get_ticks_msec() * 0.01) * 0.4
+	var fwd := -global_transform.basis.z
+	_gait.step(dt, maxf(linear_velocity.dot(fwd), 0.0), "half_bound")
+	_body.position.y = _gait.dy
+	_body.rotation.x = _gait.pitch
 	_t -= dt
 	var flee := Vector3.ZERO
 	var p := get_tree().get_first_node_in_group("player") as CharacterBody3D
