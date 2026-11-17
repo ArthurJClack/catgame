@@ -100,6 +100,14 @@ func _ready() -> void:
 		cat.visible = false
 		_run_dustshow()
 		return
+	if "--dashtest" in args:
+		cat.visible = false
+		_run_dashtest()
+		return
+	if "--dashshow" in args:
+		cat.visible = false
+		_run_dashshow()
+		return
 	if "--dusttest" in args:
 		cat.visible = false
 		_run_dusttest()
@@ -1435,5 +1443,288 @@ func _run_dustshow() -> void:
 			var cy := maxf(50.0, pp.y - 0.05)
 			cam.global_position = Vector3(look.x - 0.25, cy + 0.3, 1.45)
 			cam.look_at(Vector3(look.x, cy + 0.1, 0), Vector3.UP)
+	Engine.time_scale = 1.0
+	get_tree().quit()
+
+
+func _pad(w: float, d: float, y: float, surf: String, visual := false) -> StaticBody3D:
+	var pad := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(w, 1, d)
+	cs.shape = bs
+	pad.add_child(cs)
+	pad.set_meta("surface", surf)
+	main.add_child(pad)
+	pad.global_position = Vector3(0, y - 0.5, 0)
+	if visual:
+		LowPoly.part(pad, LowPoly.box(), Color(0.55, 0.43, 0.3), Vector3.ZERO, Vector3(w, 1, d))
+		for k in int(w):
+			LowPoly.part(pad, LowPoly.box(), Color(0.48, 0.37, 0.25), Vector3(-w * 0.5 + k, 0.501, 0), Vector3(0.06, 0.002, d))
+	return pad
+
+
+func _ticks(n: int) -> void:
+	for i in n:
+		await get_tree().physics_frame
+
+
+## one dodge from standing: returns what it did
+func _dodge(p: CatPlayer, move: Vector2) -> Dictionary:
+	var bot: Dictionary = p.bot
+	var y0 := p.yaw
+	var s0 := p.stamina.value
+	var c0 := p.dash.count
+	var from := p.global_position
+	bot.move = move
+	bot.dash = true
+	await get_tree().physics_frame
+	bot.dash = false
+	var t := 0.0
+	var air := 0.0
+	var ifr := 0.0
+	var pushed_at := -1.0
+	var hmax := 0.0
+	while t < 1.5:
+		await get_tree().physics_frame
+		var dt := get_physics_process_delta_time()
+		t += dt
+		if p.dash.state == CatDash.AIR:
+			air += dt
+			if pushed_at < 0.0:
+				pushed_at = t
+		if p.is_invulnerable():
+			ifr += dt
+		hmax = maxf(hmax, p.global_position.y - from.y)
+		if t > 0.2 and p.dash.state == CatDash.IDLE and p.dash.recover <= 0.0:
+			bot.move = Vector2.ZERO
+			if Vector2(p.velocity.x, p.velocity.z).length() < 0.15:
+				break
+	var d := p.global_position - from
+	return {"kind": p.dash.last_kind if p.dash.count > c0 else "none", "dist": Vector2(d.x, d.z).length(), "air": air, "iframes": ifr,
+		"push_at": pushed_at, "h": hmax, "cost": s0 - p.stamina.value, "turn": rad_to_deg(wrapf(p.yaw - y0, -PI, PI)), "t": t,
+		"fwd": -d.dot(Vector3(sin(y0), 0, cos(y0))), "side": d.dot(Vector3(cos(y0), 0, -sin(y0)))}
+
+
+## dodge + stamina checks: `-- --preview --dashtest`
+func _run_dashtest() -> void:
+	var p: CatPlayer = main.player
+	var bot: Dictionary = p.bot
+	_pad(120, 120, 50.0, "wood")
+	var spot := Vector3(40.0, 50.02, 0.0)
+	var ok := true
+	bot.clear()
+	bot.stamina = true
+	p.yaw = PI / 2
+	p.orb_yaw = PI / 2
+	p.global_position = spot
+	p.velocity = Vector3.ZERO
+	await _ticks(60)
+	print("-- dodges from standing (wood)")
+	for c in [["dart (w)", Vector2(0, 1)], ["side (d)", Vector2(1, 0)], ["side (a)", Vector2(-1, 0)], ["whirl (s)", Vector2(0, -1)], ["backstep", Vector2.ZERO]]:
+		p.stamina.value = CatStamina.MAX
+		p.yaw = PI / 2
+		p.orb_yaw = PI / 2
+		await _ticks(30)
+		var r := await _dodge(p, c[1])
+		print("%-10s -> %-9s dist %.2f m (fwd %+.2f side %+.2f)  air %.2f s  peak %.2f m  iframes %.2f s (push at %.2f s)  cost %.0f  body turned %+.0f deg  done in %.2f s" % [c[0], r.kind, r.dist, r.fwd, r.side, r.air, r.h, r.iframes, r.push_at, r.cost, r.turn, r.t])
+	# out of a gallop the dart carries the run
+	p.global_position = spot + Vector3(-30, 0, 0)
+	p.orb_yaw = -PI / 2
+	p.stamina.value = CatStamina.MAX
+	bot.move = Vector2(0, 1)
+	bot.sprint = true
+	await _ticks(120)
+	var v0 := Vector2(p.velocity.x, p.velocity.z).length()
+	bot.dash = true
+	await get_tree().physics_frame
+	bot.dash = false
+	bot.sprint = false
+	var vmax := 0.0
+	for i in 40:
+		await get_tree().physics_frame
+		vmax = maxf(vmax, Vector2(p.velocity.x, p.velocity.z).length())
+	print("gallop dart: %.1f m/s before, %.1f m/s peak in the dart (%s)" % [v0, vmax, p.dash.last_kind])
+	bot.move = Vector2.ZERO
+	await _ticks(120)
+	# chaining: press again during the recovery -> buffered
+	p.stamina.value = CatStamina.MAX
+	var c0 := p.dash.count
+	bot.move = Vector2(1, 0)
+	bot.dash = true
+	await get_tree().physics_frame
+	bot.dash = false
+	var pressed := false
+	for i in 120:
+		await get_tree().physics_frame
+		if not pressed and p.dash.recover > 0.0:
+			bot.dash = true
+			pressed = true
+		elif pressed:
+			bot.dash = false
+	print("chain: %d dodges from 2 presses (second pressed during recovery)" % (p.dash.count - c0))
+	ok = ok and p.dash.count - c0 == 2
+	bot.move = Vector2.ZERO
+	await _ticks(120)
+	# empty bar: no dodge
+	p.stamina.value = 0.0
+	p.stamina.winded = true
+	c0 = p.dash.count
+	bot.dash = true
+	await _ticks(2)
+	bot.dash = false
+	await _ticks(40)
+	print("empty bar dodge refused: %s" % str(p.dash.count == c0))
+	ok = ok and p.dash.count == c0
+	# regen
+	p.stamina.value = 0.0
+	var t := 0.0
+	while p.stamina.value < CatStamina.MAX and t < 10.0:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+	print("regen 0 -> full standing still: %.1f s" % t)
+	# gallop drain + winded
+	p.global_position = spot + Vector3(-30, 0, 0)
+	p.orb_yaw = -PI / 2
+	await _ticks(10)
+	bot.move = Vector2(0, 1)
+	bot.sprint = true
+	t = 0.0
+	var winded_at := -1.0
+	var vw := 0.0
+	while t < 12.0:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		if winded_at < 0.0 and p.stamina.winded:
+			winded_at = t
+		if OS.has_environment("DASH_DBG") and int(t * 60) % 30 == 0:
+			print("  t %.1f v %.1f st %.0f pos %s floor %s" % [t, Vector2(p.velocity.x, p.velocity.z).length(), p.stamina.value, p.global_position.snapped(Vector3.ONE * 0.1), p.is_on_floor()])
+		if winded_at > 0.0 and t > winded_at + 1.0:
+			vw = Vector2(p.velocity.x, p.velocity.z).length()
+			break
+		if absf(p.global_position.x) > 50.0:
+			p.global_position.x = -signf(p.global_position.x) * 45.0
+			p._phys_prev = p.global_position
+	print("gallop from full: winded after %.1f s, 1 s later running %.1f m/s (trot is %.1f)" % [winded_at, vw, CatPlayer.TROT_SPEED])
+	ok = ok and winded_at > 4.0 and winded_at < 9.0 and vw < CatPlayer.TROT_SPEED + 0.4
+	bot.sprint = false
+	bot.move = Vector2.ZERO
+	await _ticks(60)
+	# hop costs
+	p.stamina.value = CatStamina.MAX
+	await _ticks(10)
+	bot.jump = true
+	await _ticks(3)
+	bot.jump = false
+	var hm := 0.0
+	var y0 := p.global_position.y
+	for i in 100:
+		await get_tree().physics_frame
+		hm = maxf(hm, p.global_position.y - y0)
+	print("hop: cost %.0f, height %.2f m" % [CatStamina.MAX - p.stamina.value - 0.0, hm])
+	p.stamina.value = 0.0
+	p.stamina.winded = true
+	await _ticks(2)
+	bot.jump = true
+	await _ticks(3)
+	bot.jump = false
+	hm = 0.0
+	for i in 100:
+		await get_tree().physics_frame
+		hm = maxf(hm, p.global_position.y - y0)
+	print("hop with an empty bar: height %.2f m" % hm)
+	print("DASHTEST ", "PASS" if ok else "FAIL")
+	get_tree().quit()
+
+
+## dodge showcase for the preview video: side camera on a dirt pad, real speed then slow-mo
+func _run_dashshow() -> void:
+	var p: CatPlayer = main.player
+	var bot: Dictionary = p.bot
+	main.hud.visible = false
+	_pad(120, 12, 50.0, "dirt", true)
+	p.set_third_person(true)
+	cam.current = true
+	cam.fov = 40
+	p.global_position = Vector3(30, 50.02, 0)
+	p.velocity = Vector3.ZERO
+	bot.clear()
+	bot.stamina = true
+	p.yaw = PI / 2
+	p.orb_yaw = PI / 2
+	await _ticks(30)
+	# [title, sub, move, dash?, sprint?, seconds, timescale]
+	var shots := [
+		["dodge (alt / mouse4)", "wasd picks the way. the bar under the screen is stamina", Vector2.ZERO, false, false, 1.0, 1.0],
+		["dart", "all four paws gather, the hind legs fire, flat and low, forepaws land first", Vector2(0, 1), true, false, 1.2, 1.0],
+		["dart, slow-mo", "", Vector2(0, 1), true, false, 2.0, 0.3],
+		["side leap", "the startled sideways spring: body stays square, head on the threat", Vector2(0, 0), false, false, 0.01, 1.0],
+		["side leap", "the startled sideways spring: body stays square, head on the threat", Vector2(1, 0), true, false, 1.2, 1.0],
+		["side leap, slow-mo", "", Vector2(-1, 0), true, false, 2.0, 0.3],
+		["backstep", "no direction held: hops straight back, still facing forward", Vector2.ZERO, true, false, 1.2, 1.0],
+		["whirl", "s / away from the body: pivots round on the forepaws, then darts", Vector2(0, -1), true, false, 1.4, 0.5],
+		["chained", "a press during the landing is buffered, so dodges chain", Vector2(0, 1), true, false, 2.4, 1.0],
+		["gallop until winded", "the gallop drains the bar in ~6 s, then the cat can only trot", Vector2(0, 1), false, true, 8.5, 1.0],
+		["empty bar", "no stamina, no dodge (it flashes red)", Vector2(0, 1), true, false, 1.2, 1.0],
+		["breather", "stops, gets its breath back", Vector2.ZERO, false, false, 3.6, 1.0],
+	]
+	var look := p.global_position
+	for sh in shots:
+		_say(sh[0], sh[1])
+		Engine.time_scale = sh[6]
+		bot.move = sh[2]
+		bot.sprint = sh[4]
+		if sh[0] != "empty bar" and sh[0] != "gallop until winded" and sh[0] != "breather":
+			p.stamina.value = maxf(p.stamina.value, 60.0)
+		if sh[0] in ["chained", "gallop until winded"]:
+			# fresh run down the middle of the pad, heading -x
+			p.global_position = Vector3(40, 50.02, 0)
+			p.velocity = Vector3.ZERO
+			p._phys_prev = p.global_position
+			look = p.global_position
+			p.yaw = PI / 2
+			p.rotation.y = p.yaw
+		if sh[0] in ["whirl", "chained", "gallop until winded", "dart", "dart, slow-mo"]:
+			p.orb_yaw = p.yaw
+		if sh[0] == "empty bar":
+			p.stamina.value = 0.0
+			p.stamina.winded = true
+		var t := 0.0
+		var presses := 0
+		var turned := false
+		while t < sh[5]:
+			var want_press: bool = sh[3] and (presses == 0 or (sh[0] == "chained" and presses < 3 and p.dash.recover > 0.0))
+			bot.dash = want_press and not bot.get("dash", false)
+			if bot.dash:
+				presses += 1
+			await get_tree().physics_frame
+			var dt := get_physics_process_delta_time()
+			t += dt
+			if sh[0] == "whirl" and p.dash.count > 0 and p.dash.state == CatDash.IDLE and not turned and t > 0.3:
+				turned = true
+			if p.dash.state == CatDash.AIR and sh[0] != "chained" and absf(float(sh[2].x)) > 0.5:
+				bot.move = Vector2.ZERO   # let go of a/d once it's off the ground (else a side hop follows)
+			if p.dash.state == CatDash.IDLE and p.dash.recover <= 0.0 and t > 0.25 and not sh[4] and sh[0] != "chained":
+				bot.move = Vector2.ZERO
+			if sh[0] == "chained" and presses >= 3 and p.dash.state == CatDash.IDLE and p.dash.recover <= 0.0:
+				bot.move = Vector2.ZERO
+			var pp := p.global_position
+			if pp.x > 55.0 or pp.x < -55.0:
+				p.global_position.x = 0.0
+				p._phys_prev = p.global_position
+				look.x = 0.0
+				pp = p.global_position
+			look = look.lerp(pp, 1.0 - exp(-12.0 * dt))
+			look.y = pp.y
+			look.z = lerpf(look.z, pp.z, 1.0 - exp(-6.0 * dt))
+			var cy := maxf(50.0, pp.y - 0.05)
+			cam.global_position = Vector3(look.x - 0.35, cy + 0.42, look.z + 1.9)
+			cam.look_at(Vector3(look.x, cy + 0.1, look.z), Vector3.UP)
+		bot.dash = false
+		# turn round at the end of the pad
+		if p.global_position.x > 45.0:
+			p.orb_yaw = -PI / 2
+		elif p.global_position.x < -45.0:
+			p.orb_yaw = PI / 2
 	Engine.time_scale = 1.0
 	get_tree().quit()

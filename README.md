@@ -8,6 +8,8 @@ open the folder in godot 4.3+ and hit play (f5).
 ## controls
 - wasd moves relative to where you look (same as the orbit cam in every view), the cat turns to run that way and its head follows your look. backing up is slow, a/d = short sideways hop, hold shift = canter (6 m/s), double tap shift + hold = full gallop (11 m/s), ctrl/c stalk (crouch)
 - space: hop (1 m), in the air next to a wall: wall kick (2 per jump)
+- alt or mouse4: souls style dodge (`cat_dash.gd`). wasd toward the body = low dart, off to the side = startled side leap, behind = whirl round + dart, nothing held = backstep. committed once pressed, i-frames from the push off (`player.is_invulnerable()`), presses during the landing are buffered so dodges chain
+- stamina bar (bottom centre, fades when full, `cat_stamina.gd`): hops, pounces, leaps, wall kicks, scrambles, swats and dodges cost a chunk, canter / gallop / climbing / claw dragging drain it while you do it. comes back after a ~0.75 s breather (full in ~2 s standing still). run it dry and the cat is winded: trot only until it's back over a third. bots get a bottomless bar unless their bot dict has `stamina: true`. tests: `-- --preview --dashtest` (headless), `--dashshow` renders the clip
 - grip: paws only push so hard. wood/tile is slippy, carpet/rug grippy, grass in between. hard turns or stops at speed make the cat skid, scrabble and tear up grass/dirt/hay
 - hunting: crouch to stalk (hud shows pounce range), pounce onto prey or claw it to catch, it sits in the cat's mouth, e drops it. swats stun prey, and things close to the crosshair get auto swatted
 - default cat is a black cat with yellow eyes, 1-9 swaps coats
