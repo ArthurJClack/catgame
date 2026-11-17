@@ -264,6 +264,7 @@ func _build_lizard() -> void:
 		var l := _pivot(body, Vector3(s * 0.011, 0.01, z))
 		_p(l, LowPoly.box(0.0), col.darkened(0.1), Vector3(s * 0.012, -0.004, 0), Vector3(0.024, 0.005, 0.006))
 		legs.append(l)
+		leg_lens.append(0.024)
 
 
 func _build_owl() -> void:
@@ -303,11 +304,13 @@ func _build_bat() -> void:
 
 
 # ------------------------------------------------------------------ shared moves
+## `rate` in rad/s (hz * TAU). each bird keeps its own phase, the downstroke is the longer half, and
+## feathered / membrane wings pull in on the upstroke (insects don't)
+const FLEX := {"duck": 0.8, "hawk": 0.8, "woodpecker": 0.5, "crow": 0.6, "owl": 0.75, "bat": 0.45}
+
+
 func _flap(rate: float, amp: float, bias := 0.0) -> void:
-	var f := sin(Time.get_ticks_msec() * 0.001 * rate) * amp + bias
-	for i in wings.size():
-		wings[i].rotation.z = f * (1.0 if i % 2 == 0 else -1.0)
-		wings[i].scale.x = 1.0
+	_beat(rate / TAU, amp, bias, FLEX.get(kind, 1.0))
 
 
 ## wings shut: swung down against the body and drawn in (ducks' wings are already modelled folded)
@@ -459,7 +462,7 @@ func _think_duck(dt: float, th: Array) -> void:
 			position += Vector3(-sin(yaw), 0, -cos(yaw)) * speed * dt
 			position.y = ForestLevel.WATER_Y + fly_t * fly_t * 1.6
 			body.rotation.x = -0.3
-			_flap(34.0, 1.1)
+			_flap(40.0, 1.1)   # takeoff beats are quicker
 			cool -= dt
 			if cool < 0.0 and fly_t < 0.6:
 				cool = 0.12
@@ -476,12 +479,12 @@ func _think_duck(dt: float, th: Array) -> void:
 			if to.length() > 0.01:
 				yaw = lerp_angle(yaw, atan2(-to.x, -to.z), 1.0 - exp(-4.0 * dt))
 			body.rotation.x = LowPoly.damp(body.rotation.x, 0.0, 3.0, dt)
-			_flap(26.0, 0.9)
+			_flap(36.0, 0.9)   # mallard cruise ~5.7 Hz
 			if state_t < 0.0 and (edge > 6.0 or state_t < -16.0):
 				_launch(_pond_point(c.global_position if c else Vector3.INF), 6.0, 1.5)
 				_set_state("land", 99.0)
 		"land":
-			if _fly_step(dt, 0.4, 24.0, 0.8):
+			if _fly_step(dt, 0.4, 34.0, 0.8):
 				body.rotation.x = 0.0
 				Water.splash(position, 1.0)
 				_ears(0.6)
@@ -744,7 +747,7 @@ func _think_hawk(dt: float, th: Array) -> void:
 			position += to.limit_length(8.0 * dt)
 			body.rotation.x = LowPoly.damp(body.rotation.x, 0.35, 3.0, dt)
 			yaw += dt * 0.5
-			_flap(9.0, 0.7)
+			_flap(20.0, 0.7)   # buzzard sized hawk ~3.2 Hz
 			for i in wings.size():
 				(parts["tip%d" % (i + 1)] as Node3D).rotation.z = wings[i].rotation.z * 0.8
 			if state_t < 0.0 or position.y > 19.0:
@@ -856,7 +859,7 @@ func _think_woodpecker(dt: float, th: Array) -> void:
 			position = p
 			body.rotation.x = LowPoly.damp(body.rotation.x, 0.0, 8.0, dt)
 			if bounce > 0.0:
-				_flap(60.0, 1.0)
+				_flap(69.0, 1.0)   # great spotted woodpecker ~11 Hz
 			else:
 				_fold(dt, 1.2)
 			if k >= 1.0:
@@ -885,8 +888,8 @@ func _think_crow(dt: float, th: Array) -> void:
 			body.rotation.x = LowPoly.damp(body.rotation.x, 0.0, 6.0, dt)
 			if state == "strut":
 				var rem := _move_toward(target, 0.55, dt, 5.0)
-				# head bobs back and forth with each step, like every corvid
-				head.position.z = -0.12 + sin(phase) * 0.02
+				# head bobs (hold still, thrust) come from the gait solver, like every corvid
+				head.position.z = -0.12
 				if rem < 0.15:
 					state_t = -1.0
 			else:
@@ -922,8 +925,8 @@ func _think_crow(dt: float, th: Array) -> void:
 		"sidle":
 			_fold(dt)
 			_move_toward(target, 1.3 if d < 2.6 else 0.8, dt, 8.0)
-			# a couple of two-footed hops when it wants to go quicker
-			body.position.y = absf(sin(phase * 0.5)) * 0.03 if d < 2.6 else 0.0
+			# above froude ~0.6 (about 1 m/s for a crow) the gait switches from a walk to two-footed hops
+			body.position.y = 0.0
 			if c:
 				var to := c.global_position - global_position
 				head.rotation.y = clampf(wrapf(atan2(-to.x, -to.z) - yaw, -PI, PI), -1.5, 1.5)
@@ -935,7 +938,7 @@ func _think_crow(dt: float, th: Array) -> void:
 				body.position.y = 0.0
 				_set_state("look", rng.randf_range(0.8, 2.0))
 		"fly":
-			if _fly_step(dt, maxf(1.0, fly_from.distance_to(target) * 0.15), 16.0, 0.9):
+			if _fly_step(dt, maxf(1.0, fly_from.distance_to(target) * 0.15), 26.0, 0.9):   # crows ~4 Hz
 				body.rotation.x = 0.0
 				_set_state("perched", rng.randf_range(5.0, 10.0))
 				cool = rng.randf_range(2.0, 6.0)
@@ -971,12 +974,12 @@ func _think_crow(dt: float, th: Array) -> void:
 		"swoop":
 			if c and fly_t < 0.8:
 				target = c.global_position + Vector3(0, 0.55, 0)
-			if _fly_step(dt, -0.3, 14.0, 0.7):
+			if _fly_step(dt, -0.3, 24.0, 0.7):
 				_ears(1.0, "caw", 1.1)
 				_launch(perch, 8.0, 0.8)
 				_set_state("fly", 99.0)
 		"fly_down":
-			if _fly_step(dt, 0.5, 15.0, 0.8):
+			if _fly_step(dt, 0.5, 25.0, 0.8):
 				body.rotation.x = 0.0
 				_set_state("look", rng.randf_range(1.0, 2.0))
 
@@ -1009,6 +1012,7 @@ func _think_lizard(dt: float, th: Array) -> void:
 	var cs: float = th[1]
 	var crouched: bool = th[2]
 	var spook := 1.2 if (crouched and cs < 0.8) else 2.4
+	_gait_on("sprawl")
 	# the tail trails behind in a lazy s
 	for k in 3:
 		(parts["t%d" % k] as Node3D).rotation.y = sin(Time.get_ticks_msec() * 0.004 - k * 0.9) * 0.2 + sin(phase - k * 1.2) * 0.35 * clampf(speed, 0.0, 1.0)
@@ -1035,8 +1039,7 @@ func _think_lizard(dt: float, th: Array) -> void:
 				yaw = lerp_angle(yaw, atan2(-to.x, -to.z), 1.0 - exp(-25.0 * dt))
 				position += to.limit_length(speed * dt)
 				phase += dt * 40.0
-			for i in legs.size():
-				legs[i].rotation.y = sin(phase + (0.0 if i % 3 == 0 else PI)) * 0.6 * clampf(speed, 0.0, 1.0)
+			_gait_on("sprawl")
 			if to.length() < 0.04:
 				_set_state("hide", rng.randf_range(4.0, 7.0))
 		"hide":
@@ -1059,6 +1062,7 @@ func _think_lizard(dt: float, th: Array) -> void:
 				yaw = lerp_angle(yaw, atan2(-to.x, -to.z), 1.0 - exp(-20.0 * dt))
 				position += to.limit_length(speed * dt)
 				phase += dt * 30.0
+			_gait_on("sprawl")
 			if d < spook:
 				var away: Vector3 = th[4]
 				target = home + away * 0.55
@@ -1099,7 +1103,7 @@ func _think_owl(dt: float, th: Array) -> void:
 			open = 1.0
 			head.rotation = Vector3.ZERO
 			# slow deep wingbeats, low between the trunks, a swoop up to the perch at the end
-			if _fly_step(dt, -1.2, 7.0, 0.75):
+			if _fly_step(dt, -1.2, 20.0, 0.75):   # tawny owl ~3.2 Hz, slow deep strokes
 				body.rotation.x = 0.0
 				home = position
 				yaw += PI

@@ -32,6 +32,12 @@ var body: Node3D
 var head: Node3D
 var tail: Node3D
 var legs: Array[Node3D] = []
+var leg_lens: Array[float] = []
+var gait: CritterGait            # footfall solver (critter_gait.gd), for the animals that walk on legs
+var _gait_req := ""              # set by _gait_on() during a think, consumed after it
+var _g_off := [0.0, 0.0, 0.0, 0.0, 0.0]   # body y, body pitch, body yaw, head pitch, head z added last frame
+var _wing_ph := 0.0
+var _dt := 0.0
 var wings: Array[Node3D] = []
 var ears: Array[Node3D] = []
 var solid: AnimatableBody3D
@@ -48,6 +54,9 @@ func _ready() -> void:
 	yaw = rng.randf() * TAU
 	position = home
 	call("_build_" + kind)
+	if legs.size() >= 2 and CritterGait.SPECIES.has(kind):
+		gait = CritterGait.new(kind, legs, leg_lens)
+	_wing_ph = rng.randf()
 	_lod()
 	if kind in PREY:
 		add_to_group("prey")
@@ -74,6 +83,7 @@ func _leg(parent: Node3D, pos: Vector3, len: float, w: float, col: Color, hoof :
 	if hoof.a > 0.0:
 		_p(piv, LowPoly.box(), hoof, Vector3(0, -len + 0.02, 0.005), Vector3(w * 1.05, 0.04, w * 1.2))
 	legs.append(piv)
+	leg_lens.append(len)
 	return piv
 
 
@@ -94,8 +104,13 @@ func _build_rabbit() -> void:
 	_p(tail, LowPoly.sphere(5, 3), Color(0.95, 0.93, 0.9), Vector3.ZERO, Vector3.ONE * 0.06)
 	_leg(body, Vector3(0.06, 0.08, -0.1), 0.08, 0.03, fur)
 	_leg(body, Vector3(-0.06, 0.08, -0.1), 0.08, 0.03, fur)
-	_p(body, LowPoly.box(), fur.darkened(0.1), Vector3(0.07, 0.03, 0.12), Vector3(0.05, 0.05, 0.14))
-	_p(body, LowPoly.box(), fur.darkened(0.1), Vector3(-0.07, 0.03, 0.12), Vector3(0.05, 0.05, 0.14))
+	# hind legs: a big haunch + the long flat foot, swinging from the hip so the half bound can use them
+	for s in [-1, 1]:
+		var hl := _pivot(body, Vector3(s * 0.07, 0.09, 0.1))
+		_p(hl, LowPoly.box(), fur.darkened(0.1), Vector3(0, -0.035, 0.0), Vector3(0.05, 0.07, 0.09))
+		_p(hl, LowPoly.box(), fur.darkened(0.15), Vector3(0, -0.08, 0.0), Vector3(0.035, 0.02, 0.13))
+		legs.append(hl)
+		leg_lens.append(0.09)
 
 
 func _build_bird() -> void:
@@ -489,7 +504,13 @@ func _process(dt: float) -> void:
 		return
 	state_t -= dt
 	var th := _threat()
+	_gait_undo()
+	_dt = dt
 	call("_think_" + kind, dt, th)
+	if gait and _gait_req != "":
+		gait.step(dt, speed, "" if _gait_req == "auto" else _gait_req)
+		_gait_apply()
+	_gait_req = ""
 	rotation = Vector3(0, yaw, 0)
 	if solid:
 		solid.global_transform = Transform3D(Basis(Vector3.UP, yaw), global_position)
@@ -502,13 +523,68 @@ func _snap_ground(dt: float, lift := 0.0) -> void:
 	position.y = LowPoly.damp(position.y, gy + lift, 18.0, dt)
 
 
-func _walk_anim(dt: float, stride: float, amp: float) -> void:
-	phase += speed / stride * dt * TAU
-	for i in legs.size():
-		var off := 0.0 if i % 2 == 0 else PI
-		if i >= 2:
-			off += PI * 0.5
-		legs[i].rotation.x = sin(phase + off) * amp * clampf(speed / 1.0, 0.0, 1.0)
+## legacy name: the legs are now driven by the footfall solver (CritterGait) after the think, from `speed`
+func _walk_anim(_dt: float, _stride: float, _amp: float) -> void:
+	_gait_on()
+
+
+## ask for the legs to be animated this frame. `mode` = a CritterGait pattern ("half_bound", "biped_hop"...),
+## or "auto" to let the animal pick walk / trot / gallop from its speed like the real one would
+func _gait_on(mode := "auto") -> void:
+	if _gait_req == "":
+		_gait_req = mode
+
+
+## the solver's body bob / pitch / head moves are added on top of the pose the think set, so take last
+## frame's back off first (the think code damps those values toward its own targets)
+func _gait_undo() -> void:
+	if body:
+		body.position.y -= _g_off[0]
+		body.rotation.x -= _g_off[1]
+		body.rotation.y -= _g_off[2]
+	if head:
+		head.rotation.x -= _g_off[3]
+		head.position.z -= _g_off[4]
+	_g_off = [0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+func _gait_apply() -> void:
+	_g_off = [gait.dy, gait.pitch, gait.yaw_wave, gait.head_pitch, gait.head_z]
+	if body:
+		body.position.y += _g_off[0]
+		body.rotation.x += _g_off[1]
+		body.rotation.y += _g_off[2]
+	if head:
+		head.rotation.x += _g_off[3]
+		head.position.z += _g_off[4]
+
+
+## one wing beat cycle per call frame, with a per-bird phase (flocks don't flap in sync), the downstroke
+## taking ~58% of the cycle (it's the power stroke), the wing pulled in on the upstroke by `flex`
+## (1 = rigid like an insect, 0.5 = passerine / bat that half folds), and optional flap-bounding:
+## `bound` = Vector2(beats, pause s) of flapping then wings tucked, how finches + woodpeckers fly.
+## returns false while tucked
+func _beat(hz: float, amp: float, bias := 0.0, flex := 1.0, bound := Vector2.ZERO) -> bool:
+	var dt := _dt
+	_wing_ph += dt * hz
+	if bound.x > 0.0:
+		var cyc := bound.x + bound.y * hz        # in beats
+		var c := fposmod(_wing_ph, cyc)
+		if c >= bound.x:
+			for i in wings.size():
+				wings[i].rotation.z = LowPoly.damp(wings[i].rotation.z, 1.3 * (1.0 if i % 2 == 0 else -1.0), 30.0, dt)
+				wings[i].scale.x = LowPoly.damp(wings[i].scale.x, 0.5, 30.0, dt)
+			return false
+	var u := fposmod(_wing_ph, 1.0)
+	var down := 0.58
+	# up at u=0, down through the downstroke, back up through the (quicker) upstroke
+	var y := cos(PI * u / down) if u < down else -cos(PI * (u - down) / (1.0 - down))
+	var f := y * amp + bias
+	var span := 1.0 if u < down else lerpf(1.0, flex, sin(PI * (u - down) / (1.0 - down)))
+	for i in wings.size():
+		wings[i].rotation.z = f * (1.0 if i % 2 == 0 else -1.0)
+		wings[i].scale.x = span
+	return true
 
 
 # ---------------- rabbit
@@ -517,7 +593,6 @@ func _think_rabbit(dt: float, th: Array) -> void:
 	var cs: float = th[1]
 	var crouched: bool = th[2]
 	var notice := 2.2 if (crouched and cs < 1.0) else (7.0 if cs > 2.5 else 4.5)
-	var hop_y := 0.0
 	match state:
 		"idle", "graze":
 			speed = LowPoly.damp(speed, 0.0, 8.0, dt)
@@ -534,8 +609,6 @@ func _think_rabbit(dt: float, th: Array) -> void:
 					_set_state("hop", 4.0)
 		"hop":
 			var rem := _move_toward(target, 1.4, dt)
-			phase += dt * 5.0
-			hop_y = absf(sin(phase * PI)) * 0.08
 			if rem < 0.2 or state_t < 0.0:
 				_set_state("idle", rng.randf_range(0.8, 2.5))
 			if d < notice:
@@ -555,18 +628,25 @@ func _think_rabbit(dt: float, th: Array) -> void:
 				var side := Vector3(-sin(yaw), 0, -cos(yaw)).cross(Vector3.UP) * rng.randf_range(-3.0, 3.0)
 				target += side
 			_move_toward(target, 7.0, dt, 12.0)
-			phase += dt * 9.0
-			hop_y = absf(sin(phase * PI)) * 0.14
 			if state_t < 0.0:
 				home = position
 				_set_state("idle", rng.randf_range(2.0, 4.0))
 	_snap_ground(dt)
-	body.position.y = hop_y
-	body.rotation.x = -hop_y * 2.0
+	# rabbits half bound at every speed: hind feet together, fore feet one after the other
+	body.position.y = 0.0
+	body.rotation.x = 0.0
+	_gait_on("half_bound")
 	for e in ears:
 		e.rotation.x = lerpf(0.5, -0.1, alert) + sin(Time.get_ticks_msec() * 0.003 + e.position.x * 50.0) * 0.05
 	if state == "graze":
 		head.position.y = 0.2 + sin(Time.get_ticks_msec() * 0.02) * 0.004
+
+
+## in flight small birds pull their feet up into the belly feathers
+func _tuck_legs(dt: float) -> void:
+	for l in legs:
+		l.rotation.x = LowPoly.damp(l.rotation.x, -1.2, 14.0, dt)
+		l.scale.y = LowPoly.damp(l.scale.y, 0.5, 14.0, dt)
 
 
 # ---------------- bird
@@ -575,6 +655,8 @@ func _think_bird(dt: float, th: Array) -> void:
 	var cs: float = th[1]
 	var crouched: bool = th[2]
 	var flush := 1.6 if (crouched and cs < 0.8) else (4.5 if cs > 2.0 else 3.0)
+	if state in ["idle", "peck", "hop"]:
+		_gait_on("biped_hop")   # sparrows, finches, robins: both feet together
 	match state:
 		"idle", "peck":
 			for w in wings:
@@ -596,13 +678,11 @@ func _think_bird(dt: float, th: Array) -> void:
 				else:
 					_set_state("idle", rng.randf_range(0.5, 2.0))
 			_snap_ground(dt)
+			speed = LowPoly.damp(speed, 0.0, 10.0, dt)
 		"hop":
 			var rem := _move_toward(target, 0.6, dt, 14.0)
-			phase += dt * 10.0
-			body.position.y = absf(sin(phase * PI)) * 0.025
 			_snap_ground(dt)
 			if rem < 0.1 or state_t < 0.0:
-				body.position.y = 0.0
 				_set_state("idle", rng.randf_range(0.3, 1.5))
 			if d < flush:
 				_fly_to_perch(th)
@@ -615,9 +695,9 @@ func _think_bird(dt: float, th: Array) -> void:
 			if dd.length() > 0.001:
 				yaw = lerp_angle(yaw, atan2(-dd.x, -dd.z), 1.0 - exp(-10.0 * dt))
 			position = p
-			var flap := sin(Time.get_ticks_msec() * 0.06) * 1.1
-			for i in wings.size():
-				wings[i].rotation.z = flap * (1.0 if i == 0 else -1.0)
+			# small passerine: ~14 beats a second in bursts, wings tucked between (flap-bounding)
+			_beat(14.0, 1.1, 0.0, 0.55, Vector2(4.0, 0.12))
+			_tuck_legs(dt)
 			body.rotation.x = -0.2
 			if k >= 1.0:
 				body.rotation.x = 0.0
@@ -640,9 +720,9 @@ func _think_bird(dt: float, th: Array) -> void:
 			fly_t += dt / fly_dur
 			var k := clampf(fly_t, 0.0, 1.0)
 			position = fly_from.lerp(target, k) + Vector3(0, sin(k * PI) * 0.6, 0)
-			var flap := sin(Time.get_ticks_msec() * 0.06) * (1.1 if k < 0.8 else 0.5)
-			for i in wings.size():
-				wings[i].rotation.z = flap * (1.0 if i == 0 else -1.0)
+			# gliding down then braking flaps to land
+			_beat(14.0, 1.1 if k < 0.8 else 0.6, 0.0, 0.55, Vector2(3.0, 0.2) if k < 0.7 else Vector2.ZERO)
+			_tuck_legs(dt)
 			var dd := target - fly_from
 			yaw = lerp_angle(yaw, atan2(-dd.x, -dd.z), 1.0 - exp(-10.0 * dt))
 			if k >= 1.0:
@@ -701,8 +781,6 @@ func _think_squirrel(dt: float, th: Array) -> void:
 			_snap_ground(dt)
 		"scamper":
 			var rem := _move_toward(target, 2.2, dt, 14.0)
-			phase += dt * 14.0
-			body.position.y = absf(sin(phase)) * 0.04
 			_snap_ground(dt)
 			if rem < 0.15 or state_t < 0.0:
 				_set_state("idle", rng.randf_range(0.5, 2.0))
@@ -714,8 +792,6 @@ func _think_squirrel(dt: float, th: Array) -> void:
 			var dir := Vector3(position.x - base.x, 0, position.z - base.z).normalized()
 			var dest := base + dir * (r + 0.05)
 			var rem := _move_toward(dest, 5.0, dt, 16.0)
-			phase += dt * 18.0
-			body.position.y = absf(sin(phase)) * 0.05
 			_snap_ground(dt)
 			if rem < 0.1:
 				fly_t = atan2(dir.z, dir.x)
@@ -732,12 +808,14 @@ func _think_squirrel(dt: float, th: Array) -> void:
 			yaw = atan2(cos(fly_t), sin(fly_t)) * -1.0 + PI * 0.5
 			yaw = atan2(-(base.x - position.x), -(base.z - position.z))
 			body.rotation.x = -PI * 0.5
-			phase += dt * 16.0
-			_walk_anim(dt, 0.1, 0.8)
+			speed = 2.2
+			_gait_on("bound")   # squirrels climb bark in a bound: both hind feet, then both fore
 			if position.y > base.y + top:
 				_set_state("perched", rng.randf_range(8.0, 15.0))
 		"perched":
 			body.rotation.x = LowPoly.damp(body.rotation.x, -PI * 0.5, 6.0, dt)
+			speed = 0.0
+			_gait_on("bound")
 			# chatter: tail flicks + head bobs toward the cat
 			tail.rotation.x = sin(Time.get_ticks_msec() * 0.03) * 0.5
 			head.rotation.y = sin(Time.get_ticks_msec() * 0.005) * 0.4
@@ -751,7 +829,8 @@ func _think_squirrel(dt: float, th: Array) -> void:
 			position.x = base.x + cos(fly_t) * (r + 0.05)
 			position.z = base.z + sin(fly_t) * (r + 0.05)
 			body.rotation.x = PI * 0.5
-			_walk_anim(dt, 0.1, 0.8)
+			speed = 1.6
+			_gait_on("bound")
 			if position.y <= _ground_y(position.x, position.z) + 0.02:
 				body.rotation.x = 0.0
 				home = position
@@ -761,7 +840,8 @@ func _think_squirrel(dt: float, th: Array) -> void:
 				body.rotation.x = -PI * 0.5
 	if state in ["idle", "forage", "scamper", "run_to_tree"]:
 		body.rotation.x = 0.0
-		_walk_anim(dt, 0.12, 0.9)
+		body.position.y = 0.0
+		_gait_on()
 
 
 func _flee_up_tree() -> void:
@@ -817,7 +897,10 @@ func _think_deer(dt: float, th: Array) -> void:
 				_face(c.global_position, dt, 2.0)
 			# tail flag + stamp a foreleg
 			tail.rotation.x = -1.2
-			legs[0].rotation.x = sin(Time.get_ticks_msec() * 0.012) * 0.3 if state_t > 1.0 else 0.0
+			if state_t > 1.0:
+				legs[0].rotation.x = sin(Time.get_ticks_msec() * 0.012) * 0.3
+			else:
+				_gait_on()
 			if d < 4.0 or (cs > 4.0 and d < notice):
 				var away: Vector3 = th[4]
 				target = position + away * 16.0
@@ -828,23 +911,17 @@ func _think_deer(dt: float, th: Array) -> void:
 		"flee":
 			_move_toward(target, 8.5, dt, 3.5)
 			neck.rotation.x = LowPoly.damp(neck.rotation.x, 0.25, 6.0, dt)
-			phase += dt * 4.5
-			# bounding: all four legs fold + body arcs
-			var b := sin(phase * PI)
-			body.position.y = maxf(b, 0.0) * 0.45
-			body.rotation.x = -cos(phase * PI) * 0.15
-			for i in legs.size():
-				legs[i].rotation.x = (0.9 if i < 2 else -0.9) * maxf(b, 0.0)
+			# 8.5 m/s is well past a 60 kg deer's trot-gallop switch (~4 m/s): transverse gallop
+			_gait_on()
 			if state_t < 0.0:
-				body.position.y = 0.0
-				body.rotation.x = 0.0
 				tail.rotation.x = 0.0
 				home = position
 				_set_state("idle", rng.randf_range(3.0, 6.0))
 	_snap_ground(dt)
-	if state != "flee":
-		_walk_anim(dt, 1.3, 0.45)
-		body.position.y = LowPoly.damp(body.position.y, 0.0, 8.0, dt)
+	body.position.y = 0.0
+	body.rotation.x = 0.0
+	if state != "alert":
+		_gait_on()
 	for e in ears:
 		e.rotation.y = lerpf(0.0, -0.4 if e.position.x > 0 else 0.4, alert)
 
@@ -926,7 +1003,7 @@ func _think_fox(dt: float, th: Array) -> void:
 	if state != "watch":
 		body.rotation.x = LowPoly.damp(body.rotation.x, 0.0, 6.0, dt)
 	_snap_ground(dt)
-	_walk_anim(dt, 0.55, 0.6)
+	_gait_on()   # walk when circling, trot about, rotary gallop when it bolts
 	tail.rotation.y = sin(Time.get_ticks_msec() * 0.004) * 0.25
 
 
