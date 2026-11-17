@@ -26,7 +26,7 @@ const SIDE_HOP := 4.0
 const WALL_KICK := 12.0
 const SCRAMBLE := 8.0
 const CLAMBER := 8.0
-const SWAT := 2.0
+const SWAT := 4.0
 const DASH := 22.0
 const BACKSTEP := 15.0
 # costs (per second, while doing it)
@@ -44,22 +44,8 @@ var _drained_now := false
 var spent_total := 0.0       # for tests
 var _flash := 0.0            # red flash when you try something with an empty bar
 
-# hud
-var layer: CanvasLayer
-var _root: Control
-var _back: ColorRect
-var _lag: ColorRect          # the souls "damage trail": a pale bar that catches up to the real one
-var _fill: ColorRect
-var _lag_v := MAX
-var _vis := 0.0
-var show_bar := true
-const BAR_W := 240.0
-const BAR_H := 7.0
-
-
-func _ready() -> void:
-	_build_hud()
-
+# the bar itself is drawn by souls_hud.gd (health + stamina, top left)
+var lag := MAX               # pale "damage trail" that catches up to value
 
 func ratio() -> float:
 	return value / MAX
@@ -117,57 +103,17 @@ func physics_tick(dt: float, still: bool) -> void:
 	if winded and value >= WINDED_UNTIL:
 		winded = false
 	_flash = maxf(_flash - dt * 2.5, 0.0)
-	_update_hud(dt)
+	_update_lag(dt)
 
 
-func _build_hud() -> void:
-	layer = CanvasLayer.new()
-	layer.layer = 3
-	add_child(layer)
-	_root = Control.new()
-	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_root.anchor_left = 0.5
-	_root.anchor_right = 0.5
-	_root.anchor_top = 1.0
-	_root.anchor_bottom = 1.0
-	_root.offset_left = -BAR_W * 0.5
-	_root.offset_right = BAR_W * 0.5
-	_root.offset_top = -46
-	_root.offset_bottom = -46 + BAR_H
-	layer.add_child(_root)
-	_back = _rect(Color(0.05, 0.05, 0.04, 0.6), -2)
-	_lag = _rect(Color(0.95, 0.9, 0.6, 0.85), 0)
-	_fill = _rect(Color(0.36, 0.78, 0.36), 0)
 
-
-func _rect(c: Color, pad: float) -> ColorRect:
-	var r := ColorRect.new()
-	r.mouse_filter = Control.MOUSE_FILTER_IGNORE   # never under the crosshair, but keep it safe
-	r.color = c
-	r.position = Vector2(pad, pad)
-	r.size = Vector2(BAR_W - pad * 2.0, BAR_H - pad * 2.0)
-	_root.add_child(r)
-	return r
-
-
-func _update_hud(dt: float) -> void:
-	if _root == null:
-		return
-	# full and resting: fade out. anything else: show it
-	var want := 1.0 if (value < MAX - 0.01 or _flash > 0.0) else 0.0
-	_vis = move_toward(_vis, want, dt * (6.0 if want > _vis else 1.2))
-	_root.visible = show_bar and _vis > 0.01
-	_root.modulate.a = _vis
-	# the pale trail holds a moment then slides down to the real value
-	if value > _lag_v:
-		_lag_v = value
+## for the hud: holds, then slides down to the real value (souls)
+func _update_lag(dt: float) -> void:
+	if value > lag:
+		lag = value
 	elif _delay < REGEN_DELAY - 0.35:
-		_lag_v = move_toward(_lag_v, value, dt * 80.0)
-	_fill.size.x = BAR_W * value / MAX
-	_lag.size.x = BAR_W * _lag_v / MAX
-	var c := Color(0.36, 0.78, 0.36)
-	if winded:
-		c = Color(0.85, 0.62, 0.2).lerp(Color(0.95, 0.3, 0.2), 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012))
-	c = c.lerp(Color(1, 0.2, 0.15), _flash)
-	_fill.color = c
-	_back.color = Color(0.05, 0.05, 0.04, 0.6).lerp(Color(0.6, 0.08, 0.05, 0.8), _flash)
+		lag = move_toward(lag, value, dt * 80.0)
+
+
+func flash() -> float:
+	return _flash

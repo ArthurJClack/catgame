@@ -133,7 +133,7 @@ func _build_hud() -> void:
 	hud = CanvasLayer.new()
 	add_child(hud)
 	hud_label = Label.new()
-	hud_label.position = Vector2(18, 14)
+	hud_label.position = Vector2(18, 58)   # under the health + stamina bars (souls_hud.gd)
 	_style(hud_label, 18)
 	hud.add_child(hud_label)
 	event_label = Label.new()

@@ -192,6 +192,8 @@ var _tear_last := Vector3.ZERO
 var _tears: Array[Node3D] = []
 var dust: PawDust              # dirt / dust right under a paw, only on hard pushes (paw_dust.gd)
 var stamina: CatStamina        # souls style stamina bar (cat_stamina.gd)
+var health: CatHealth          # hits from enemies (souls_rat.gd), nine lives (cat_health.gd)
+var souls_hud: SoulsHud        # health + stamina bars, top left
 var dash: CatDash              # souls style dodge: dart / side leap / whirl / backstep (cat_dash.gd)
 var prev_dash := false
 
@@ -230,6 +232,12 @@ func _ready() -> void:
 	dash = CatDash.new()
 	dash.player = self
 	add_child(dash)
+	health = CatHealth.new()
+	health.player = self
+	add_child(health)
+	souls_hud = SoulsHud.new()
+	souls_hud.player = self
+	add_child(souls_hud)
 
 	cam_pivot = Node3D.new()
 	cam_pivot.position.y = EYE_STAND
@@ -838,6 +846,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 		_third_person_cam(dt)
 	_hunt_scan()
 	dust.physics_tick(dt)
+	health.physics_tick(dt)
 	stamina.physics_tick(dt, hspd < 0.2 and is_on_floor() and not (climbing or clambering or scratching))
 	_phys_curr = global_position
 	_rig_base = rig.transform
@@ -1559,6 +1568,9 @@ func _prey_name(n: Object) -> String:
 
 ## caught something: it stops struggling and goes in the mouth
 func _catch(n: Object) -> void:
+	if n.has_method("pin_hit"):
+		n.call("pin_hit", self)   # too big to carry (arena rats): the pounce lands as a heavy hit
+		return
 	if carried:
 		_drop_carried()
 	if n.has_method("pinned"):
@@ -1770,8 +1782,8 @@ func _paw_target(reach: float, cone: float) -> Dictionary:
 		if ang > cone:
 			continue
 		var hit := _ray(eye, c)
-		if not hit.is_empty() and (hit.position - eye).length() < dist - 0.06:
-			continue
+		if not hit.is_empty() and hit.collider != n and (hit.position - eye).length() < dist - 0.06:
+			continue   # something in the way (prey with its own collider doesn't block itself)
 		var score := ang + dist * 0.6
 		if score < best_s:
 			best_s = score
