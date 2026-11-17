@@ -181,3 +181,21 @@ steam access is the GodotSteam GDExtension. it isn't committed: ci downloads it 
 from codeberg) before exporting and fails the build if the steam api the game uses is missing
 (`tests/steam_check.gd`). run the script yourself to get steam in the editor. without it the game runs fine,
 the m menu just says steam isn't in this build.
+
+## the living layer (`scripts/cat_soma.gd`)
+everything a real cat does that is not locomotion, layered on the rig (`rig.soma`):
+- breathing follows exertion: ~25 breaths a minute at rest, flanks after ribs, hard and fast after a long
+  sprint (mouth open when really blown, also when the stamina bar runs dry)
+- loose skin: the loin jiggles on landings, the belly pouch swings under the hips
+- whiskers fan forward to hunt / sniff / yawn, pin back at a gallop or in fear, and quiver
+- ears go flat sideways when startled, the tips flop on impacts and shakes, each one scans on its own when sat
+- pupils go from slits to saucers (hunting, pouncing, scared), the eyes move before the head, slow blinks
+- left alone it sniffs, tilts its head, yawns, stretches, shakes itself off, then sits down, grooms and
+  (after a long while) loafs. any input and it is up at once
+- a loud noise close by (`rig.hear(pos, 0.8+)`): flinch, puffed tail, raised back, wide eyes
+- the head locks onto nearby prey and follows it
+- wet paws (forest stream / pond): flicked on every step, then shaken off one by one when it stops
+- the tail lies on the floor instead of going through it
+- `rig.soma.act("yawn")` etc. plays one by hand, `rig.idle_life = false` turns the self started ones off.
+  self started acts go through the rig's life_log, so multiplayer copies do the same thing
+- lab: `godot --path . res://gaitlab.tscn -- --only life,scare,pant,wet,stalk2 --view face`

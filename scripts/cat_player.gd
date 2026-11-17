@@ -860,6 +860,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	# slipping now just shows the claws and the paws stay on the ground.
 	rig.scramble = LowPoly.damp(rig.scramble, 1.0 if scramble_t > 0.0 else (0.6 if wall_sliding else 0.0), 14.0, dt)
 	rig.slip_claws = minf(slip * 1.3, 1.0) if is_on_floor() else 0.0
+	if stamina and stamina.winded:
+		rig.soma.exertion = maxf(rig.soma.exertion, 0.9)   # ran the bar dry: the cat is visibly blown
 	rig.climb = w_climb
 	rig.kick_paw_w = clampf(w_kick * 1.6 - 0.25, 0.0, 1.0)
 	rig.kick_w = w_kick
