@@ -72,6 +72,15 @@ func _initialize() -> void:
 			print("ok  signal %s(%s)" % [n, ", ".join(args)])
 		else:
 			print("(missing, optional) signal ", n)
+	var related := []
+	for g in s.get_signal_list():
+		var n: String = g.name
+		if n.contains("server") or n.contains("refresh") or n.contains("matchmak"):
+			var args := []
+			for x in g.args:
+				args.append("%s:%s" % [x.name, type_string(x.type)])
+			related.append("%s(%s)" % [n, ", ".join(args)])
+	print("server list signals in this build: ", ", ".join(related))
 	# the transport also has to compile against it
 	if load("res://scripts/net/server_browser.gd") == null:
 		print("FAIL: server_browser.gd doesn't load")

@@ -51,6 +51,13 @@ func _initialize() -> void:
 		for a in sigs[n].args:
 			args.append("%s:%s" % [a.name, type_string(a.type)])
 		print("ok  signal %s(%s)" % [n, ", ".join(args)])
+	var related := []
+	for n in by_name:
+		var l := str(n).to_lower()
+		if l.contains("user") or l.contains("player") or l.contains("auth") or l.contains("bot"):
+			related.append(str(n))
+	related.sort()
+	print("user / player calls in this build: ", ", ".join(related))
 	if load("res://scripts/net/steam_server.gd") == null:
 		print("FAIL: steam_server.gd doesn't load")
 		bad += 1
