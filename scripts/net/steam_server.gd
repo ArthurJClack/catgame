@@ -40,6 +40,11 @@ func start() -> bool:
 		why = "GodotSteam Server isn't in this build: running without the steam server list (direct ip still works)"
 		return false
 	api = Engine.get_singleton("SteamServer")
+	if OS.get_name() == "Linux" and _steamclient_path() == "":
+		# steam's server library needs steamclient.so, and GodotSteam Server crashes the whole
+		# process (instead of failing) when serverInitEx runs without it. so look first
+		why = "no steamclient.so in ~/.steam/sdk64 (see run_server.sh to get it): running without the steam server list, direct ip still works"
+		return false
 	OS.set_environment("SteamAppId", str(NetSteamTransport.STEAM_APP_ID))
 	OS.set_environment("SteamGameId", str(NetSteamTransport.STEAM_APP_ID))
 	var init_name := "serverInitEx" if api.has_method("serverInitEx") else "serverInit"
@@ -78,6 +83,15 @@ func start() -> bool:
 		_call("logOnAnonymous", [])
 	status.emit("logging on to steam as a game server...")
 	return true
+
+
+func _steamclient_path() -> String:
+	var exe_dir := OS.get_executable_path().get_base_dir()
+	for p in [OS.get_environment("HOME") + "/.steam/sdk64/steamclient.so", exe_dir + "/steamclient.so",
+			exe_dir + "/linux64/steamclient.so", OS.get_environment("HOME") + "/.steam/steam/linux64/steamclient.so"]:
+		if FileAccess.file_exists(p):
+			return p
+	return ""
 
 
 ## serverInitEx(ip, game_port, query_port, server_mode, version_string) in GodotSteam 4.x. read the
