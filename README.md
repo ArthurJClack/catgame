@@ -66,6 +66,7 @@ open the folder in godot 4.3+ and hit play (f5).
 - `CatRig.use_planting = false` gives the old cheap legs back
 - gait lab: `godot --path . res://gaitlab.tscn -- --only walk,trot,run,turn --view side --slow 0.5 --report out.json`
   drives a cat over a checker floor and prints paw slide, time on ground, stride rate, head steadiness
+- first person paws lab: `godot --path . res://fplab.tscn -- --fptest` (needs a display, e.g. xvfb) checks the fp paws are copies of the rig's real forelegs and stay on screen through walk / trot / gallop / swats / pounce / dodges / wall kick. without `--fptest` it plays the same moves split screen: old viewmodel | new viewmodel + a small third person view of the body
 
 ## views + levels
 
