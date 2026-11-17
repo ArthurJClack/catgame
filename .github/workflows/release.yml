@@ -156,11 +156,9 @@ jobs:
           mkdir -p ~/.steam/sdk64 && cp linux64/steamclient.so ~/.steam/sdk64/
           cd "$GITHUB_WORKSPACE"
           command -v gdb >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb) >/dev/null || true
-          # which init call / ip form survives (GodotSteam Server crashed inside serverInitEx)
-          for v in "serverInitEx|" "serverInitEx|0.0.0.0" "serverInit|" "serverInit|0.0.0.0"; do
-            echo "== init variant $v"
-            (cd build/server-linux && CATGAME_STEAM_TRACE=1 CATGAME_STEAM_INIT="${v%%|*}" CATGAME_STEAM_IP="${v#*|}" timeout 15 ./CatGameServer.x86_64 --headless -- --port 24793 2>&1 | tail -8) || true
-          done
+          # where exactly GodotSteam Server dies in serverInitEx
+          (cd build/server-linux && CATGAME_STEAM_TRACE=1 timeout 60 gdb -q -batch -ex run -ex "info symbol \$pc" -ex "x/8i \$pc-16" -ex "info registers rip rax rdi rsi rdx" -ex "bt 8" -ex "info sharedlibrary" --args ./CatGameServer.x86_64 --headless -- --port 24793 2>&1 | grep -v "New Thread\|exited\]\|already registered\|class_db" | tail -60) || true
+          nm -D --defined-only build/server-linux/libgodotsteam_server*.so | head -5 || true
           (cd build/server-linux && CATGAME_STEAM_TRACE=1 timeout 90 gdb -q -batch -ex run -ex bt --args ./CatGameServer.x86_64 --headless -- --name "catgame ci $GITHUB_RUN_ID" --port 24792 --query-port 27016 > ../../steam-live.log 2>&1) &
           sleep 30
           ip=$(curl -s https://api.ipify.org)
