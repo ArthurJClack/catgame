@@ -3,9 +3,10 @@ extends Node3D
 ## rats (souls_rat.gd) that can only bite what's in front of them. circle them, bait the bite,
 ## dodge through it (alt / mouse4) and swat them from behind. health + stamina top left,
 ## nine lives under them. clearing a wave patches you back up.
-##   r restart the pit · h hide help · 1-8 swap cat · v camera · f5 / tab back to the house
+##   r restart the pit · h hide help · 1-8 swap cat · v camera · f5 back to the house · tab lock on
 ## preview: `-- --arenatest` (headless rules check), `-- --arenashow` (bot fight for the video),
 ## `-- --combattest` / `-- --combatshow` (paw combat: swats, rakes, two paw grip; combat_test.gd)
+## `-- --locktest` / `-- --lockshow` (tab lock on: pick, strafe, dodges, flick switch; lock_test.gd)
 
 const R := 6.0                # pit radius
 const WAVES := [
@@ -37,8 +38,8 @@ var spawn := Vector3(0, 0.02, 4.4)
 func _ready() -> void:
 	process_priority = 10
 	var args := OS.get_cmdline_user_args()
-	test_mode = "--arenatest" in args or "--combattest" in args
-	show_mode = "--arenashow" in args or "--combatshow" in args
+	test_mode = "--arenatest" in args or "--combattest" in args or "--locktest" in args
+	show_mode = "--arenashow" in args or "--combatshow" in args or "--lockshow" in args
 	_setup_env()
 	_build_pit()
 	player = CatPlayer.new()
@@ -53,6 +54,8 @@ func _ready() -> void:
 		help_label.visible = false
 		player.bot = {"move": Vector2.ZERO, "stamina": true}
 		var t: ArenaTest = CombatTest.new() if ("--combattest" in args or "--combatshow" in args) else ArenaTest.new()
+		if "--locktest" in args or "--lockshow" in args:
+			t = LockTest.new()
 		t.arena = self
 		add_child(t)
 		return
@@ -184,7 +187,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			restart()
 		KEY_H:
 			help_label.visible = not help_label.visible
-		KEY_F5, KEY_TAB:
+		KEY_F5:
 			Engine.set_meta("cat_style", player.style)
 			get_tree().change_scene_to_file.call_deferred("res://main.tscn")
 
@@ -379,7 +382,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the rat pit: rats can only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nalt / mouse4 dodge (i-frames) · mouse1 / mouse2 left / right paw (hold = rake) · both = rear up + pin it (can't walk while holding) · hold space + release / q leap = pounce (heavy hit) · watch your stamina\nr restart · 1-8 swap cat · v camera · h hide help · f5 back to the house"
+	help_label.text = "the rat pit: rats can only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nalt / mouse4 dodge (i-frames) · mouse1 / mouse2 left / right paw (hold = rake) · both = rear up + pin it (can't walk while holding) · hold space + release / q leap = pounce (heavy hit) · watch your stamina\ntab lock on (wasd circles, flick mouse = switch rat, dodges go relative to it) · r restart · 1-8 swap cat · v camera · h hide help · f5 back to the house"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)

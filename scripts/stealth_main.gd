@@ -1,7 +1,7 @@
 extends Node3D
 ## psx night level: "pier 9 pump house". builds env, level, player cat, hud and the psx post filter.
 ##   keys: 1-7 teleport to test spots, r respawn, f1 psx filter on/off, f2 pixel size,
-##         f3 vertex wobble strength, tab back to the living room
+##         f3 vertex wobble strength, f5 back to the living room
 ## run with `-- --still x,y,z,tx,ty,tz` to render a single still (used for previews)
 
 var player: CatPlayer
@@ -187,7 +187,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_apply_look()
 		KEY_H:
 			help_label.visible = not help_label.visible
-		KEY_TAB:
+		KEY_F5:
 			get_tree().change_scene_to_file("res://main.tscn")
 
 

@@ -3,7 +3,7 @@ extends Node3D
 ## and branches, and at a run bounds over logs and rocks, onto stone steps and slabs, and across the creek
 ## by itself (see run_assist.gd).
 ##   r restart at the trailhead · t jump to the next section · b auto bound on/off · 1-8 swap cat
-##   v camera · h hide help · f5 / tab back to the house
+##   v camera · h hide help · f5 back to the house · tab lock on
 ## preview: `-- --still x,y,z,tx,ty,tz`, `-- --run` (a bot runs the loop with a camera director, for
 ## the preview video), `-- --runtest` (bot lap, prints every bound and how far it got)
 
@@ -191,7 +191,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			player._event("auto bound " + ("on" if player.auto_bound else "off"))
 		KEY_H:
 			help_label.visible = not help_label.visible
-		KEY_F5, KEY_TAB:
+		KEY_F5:
 			_go_home()
 
 

@@ -83,8 +83,20 @@ func try_start(wish: Vector3, grounded: bool) -> bool:
 		return false
 	var p = player
 	var back: bool = wish.length() < 0.1
+	# locked on (cat_lock_on.gd): the dodge reads wasd relative to the target and the cat keeps
+	# its face on it the whole way. s = backstep away from it, a/d = side leap round it
+	var locked: bool = p.lock != null and p.lock.active()
 	var k := Kind.BACK
-	if not back:
+	if locked and not back:
+		var tf := Vector3(-sin(p.lock.yaw_to()), 0, -cos(p.lock.yaw_to()))
+		var la := tf.signed_angle_to(wish, Vector3.UP)
+		if absf(la) < 0.8:
+			k = Kind.DART
+		elif absf(la) < 2.3:
+			k = Kind.SIDE
+		else:
+			k = Kind.BACK
+	elif not back:
 		var fwd := Vector3(-sin(p.yaw), 0, -cos(p.yaw))
 		var a := fwd.signed_angle_to(wish, Vector3.UP)
 		if absf(a) < 1.0:
@@ -107,6 +119,8 @@ func try_start(wish: Vector3, grounded: bool) -> bool:
 	else:
 		dir = wish.normalized()
 	target_yaw = atan2(-dir.x, -dir.z) if k in [Kind.DART, Kind.WHIRL] else p.yaw
+	if locked:
+		target_yaw = p.lock.yaw_to()
 	# planting all four: the camera sinks a touch with the body
 	p.land_dip_v -= 0.35
 	return true
@@ -139,7 +153,7 @@ func wind_step(dt: float) -> void:
 
 func _push() -> void:
 	var p = player
-	p.yaw = target_yaw if kind in [Kind.DART, Kind.WHIRL] else p.yaw
+	p.yaw = target_yaw if (kind in [Kind.DART, Kind.WHIRL] or (p.lock != null and p.lock.active())) else p.yaw
 	p.rotation.y = p.yaw
 	var hv := Vector3(p.velocity.x, 0, p.velocity.z)
 	var v := Vector3.ZERO
