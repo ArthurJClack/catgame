@@ -188,9 +188,9 @@ var prev_drop := false
 const GRIP := {"wood": 16.0, "tile": 14.0, "carpet": 30.0, "rug": 30.0, "grass": 24.0, "dirt": 19.0, "hay": 20.0, "default": 18.0}
 var surface := "default"
 var slip := 0.0
-var _fx_t := 0.0
 var _tear_last := Vector3.ZERO
 var _tears: Array[Node3D] = []
+var dust: PawDust              # dirt / dust right under a paw, only on hard pushes (paw_dust.gd)
 
 var _aim_root: Node3D
 var _aim_ring: MeshInstance3D
@@ -218,6 +218,9 @@ func _ready() -> void:
 	rig.style = style
 	add_child(rig)
 	_apply_rig_view()
+	dust = PawDust.new()
+	dust.player = self
+	add_child(dust)
 
 	cam_pivot = Node3D.new()
 	cam_pivot.position.y = EYE_STAND
@@ -776,6 +779,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	elif third_person:
 		_third_person_cam(dt)
 	_hunt_scan()
+	dust.physics_tick(dt)
 	_phys_curr = global_position
 	_rig_base = rig.transform
 	_interp_ok = true
@@ -1572,8 +1576,7 @@ func _update_surface() -> void:
 	surface = sf
 
 
-func _slip_fx(dt: float, hv: Vector3) -> void:
-	_fx_t -= dt
+func _slip_fx(_dt: float, hv: Vector3) -> void:
 	var soft := surface in ["grass", "dirt", "hay"]
 	var feet := global_position + Vector3.UP * 0.01
 	if soft and feet.distance_to(_tear_last) > 0.09:
@@ -1592,34 +1595,7 @@ func _slip_fx(dt: float, hv: Vector3) -> void:
 		while _tears.size() > 220:
 			var old: Node3D = _tears.pop_front()
 			old.queue_free()
-	if _fx_t > 0.0:
-		return
-	_fx_t = 0.06
-	var p := CPUParticles3D.new()
-	p.one_shot = true
-	p.amount = 6 if soft else 2
-	p.lifetime = 0.7
-	p.explosiveness = 0.9
-	p.direction = (-hv.normalized() + Vector3.UP * 1.2).normalized() if hv.length() > 0.1 else Vector3.UP
-	p.spread = 35
-	p.initial_velocity_min = 0.6 + slip
-	p.initial_velocity_max = 1.4 + slip * 1.5
-	p.gravity = Vector3(0, -9.8, 0)
-	p.scale_amount_min = 0.006
-	p.scale_amount_max = 0.014
-	var pm := BoxMesh.new()
-	pm.size = Vector3.ONE
-	var col := Color(0.35, 0.55, 0.22)
-	match surface:
-		"dirt": col = Color(0.45, 0.35, 0.22)
-		"hay": col = Color(0.85, 0.74, 0.42)
-		"wood", "tile", "default": col = Color(0.8, 0.75, 0.7)   # just a little dust off the floor
-	pm.material = LowPoly.mat(col, 1.0)
-	p.mesh = pm
-	get_tree().current_scene.add_child(p)
-	p.global_position = feet
-	p.emitting = true
-	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+	# the dust itself comes from the paws that are digging in (paw_dust.gd)
 
 
 # ------------------------------------------------------------------ camera

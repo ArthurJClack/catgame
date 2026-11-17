@@ -96,6 +96,14 @@ func _ready() -> void:
 		cat.visible = false
 		_run_hoptest()
 		return
+	if "--dustshow" in args:
+		cat.visible = false
+		_run_dustshow()
+		return
+	if "--dusttest" in args:
+		cat.visible = false
+		_run_dusttest()
+		return
 	if "--camtest" in args:
 		cat.visible = false
 		_run_camtest()
@@ -1283,4 +1291,149 @@ func _run_pawtest() -> void:
 			hb = maxf(hb, maxf(p.rig.fp_foot[0].y, p.rig.fp_foot[1].y))
 	bot.move = Vector2.ZERO
 	print("pawtest baseline trot front paw height %.3f m" % hb)
+	get_tree().quit()
+
+
+## paw dust: counts puffs per move. steady running should throw none, hard pushes should
+func _run_dusttest() -> void:
+	var p: CatPlayer = main.player
+	var bot: Dictionary = p.bot
+	p.dust.log_puffs = OS.has_environment("DUST_LOG")
+	var cases := [
+		["stand still", {"move": Vector2.ZERO}, 72],
+		["trot start", {"move": Vector2(0, 1)}, 72],
+		["steady trot", {"move": Vector2(0, 1)}, 288],
+		["trot stop", {"move": Vector2.ZERO}, 100],
+		["sprint start", {"move": Vector2(0, 1), "sprint": true}, 144],
+		["steady sprint", {"move": Vector2(0, 1), "sprint": true}, 144],
+		["hard stop", {"move": Vector2.ZERO}, 144],
+		["hop", {"move": Vector2.ZERO, "jump": true}, 4],
+		["hop air+land", {"move": Vector2.ZERO}, 200],
+		["side hop", {"move": Vector2(1, 0)}, 10],
+		["side hop land", {"move": Vector2.ZERO}, 120],
+	]
+	# a big flat test pad up in the sky so nothing gets in the way
+	var pad := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(120, 1, 120)
+	cs.shape = bs
+	pad.add_child(cs)
+	main.add_child(pad)
+	pad.global_position = Vector3(0, 49.5, 0)
+	for sf in ["dirt", "wood"]:
+		pad.set_meta("surface", sf)
+		var spot := Vector3(40.0, 50.02, 0.0)
+		p.global_position = spot
+		p.velocity = Vector3.ZERO
+		bot.clear()
+		bot.yaw = PI / 2
+		p.orb_yaw = PI / 2
+		for i in 60:
+			await get_tree().physics_frame
+		print("-- surface ", p.surface)
+		for c in cases:
+			for k in c[1]:
+				bot[k] = c[1][k]
+			if not c[1].has("sprint"):
+				bot.sprint = false
+			if not c[1].has("jump"):
+				bot.jump = false
+			var n0: int = p.dust.puffs
+			var k0: Dictionary = p.dust.last_kinds.duplicate()
+			for i in c[2]:
+				await get_tree().physics_frame
+			var kinds := {}
+			for k in p.dust.last_kinds:
+				var d: int = p.dust.last_kinds[k] - int(k0.get(k, 0))
+				if d > 0:
+					kinds[k] = d
+			print("%-14s puffs %2d %s  speed %.1f x %.1f" % [c[0], p.dust.puffs - n0, str(kinds), Vector2(p.velocity.x, p.velocity.z).length(), p.global_position.x])
+		# sharp cut at a sprint
+		bot.move = Vector2(0, 1)
+		bot.sprint = true
+		p.global_position = spot
+		for i in 220:
+			await get_tree().physics_frame
+		var n1: int = p.dust.puffs
+		bot.yaw = -PI / 2
+		p.orb_yaw = -PI / 2
+		for i in 72:
+			await get_tree().physics_frame
+			if OS.has_environment("DUST_LOG") and i % 8 == 0:
+				print("   v ", p.velocity.snapped(Vector3.ONE * 0.1), " slip %.2f" % p.slip, " modes ", p.rig.gait.mode)
+		print("%-14s puffs %2d" % ["sprint u-turn", p.dust.puffs - n1])
+		bot.move = Vector2.ZERO
+		bot.sprint = false
+		for i in 144:
+			await get_tree().physics_frame
+		# drop from 1.2 m
+		p.global_position = spot + Vector3(0, 1.2, 0)
+		p.velocity = Vector3.ZERO
+		var n2: int = p.dust.puffs
+		for i in 200:
+			await get_tree().physics_frame
+		print("%-14s puffs %2d %s" % ["drop 1.2m", p.dust.puffs - n2, str(p.dust.last_kinds)])
+	get_tree().quit()
+
+
+## paw dust showcase: side tracking camera on a dirt pad, slowed down so each puff reads
+func _run_dustshow() -> void:
+	var p: CatPlayer = main.player
+	var bot: Dictionary = p.bot
+	main.hud.visible = false
+	var pad := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(120, 1, 12)
+	cs.shape = bs
+	pad.add_child(cs)
+	pad.set_meta("surface", "dirt")
+	main.add_child(pad)
+	pad.global_position = Vector3(0, 49.5, 0)
+	LowPoly.part(pad, LowPoly.box(), Color(0.55, 0.43, 0.3), Vector3.ZERO, Vector3(120, 1, 12))
+	for k in 120:
+		# a stripe every metre so you can see the speed
+		LowPoly.part(pad, LowPoly.box(), Color(0.48, 0.37, 0.25), Vector3(-60 + k, 0.501, 0), Vector3(0.08, 0.002, 12))
+	p.set_third_person(true)
+	cam.current = true
+	cam.fov = 38
+	p.global_position = Vector3(40, 50.02, 0)
+	p.velocity = Vector3.ZERO
+	bot.clear()
+	bot.yaw = PI / 2
+	p.orb_yaw = PI / 2
+	Engine.time_scale = 0.4
+	var shots := [
+		["steady trot", "no dust: the paws aren't pushing any harder than it takes to keep going", {"move": Vector2(0, 1)}, 2.6, false],
+		["hard stop", "each paw that digs in throws a puff from right where it stands", {"move": Vector2.ZERO}, 1.4, false],
+		["sprint start", "the push off kicks dirt back off each paw", {"move": Vector2(0, 1), "sprint": true}, 1.6, false],
+		["steady gallop", "constant speed: nothing", {"move": Vector2(0, 1), "sprint": true}, 1.2, false],
+		["skid to a stop", "", {"move": Vector2.ZERO}, 1.6, false],
+		["hop + landing", "hind paws push off, then a splash under each paw as it lands", {"move": Vector2.ZERO, "jump": true}, 0.05, false],
+		["hop + landing", "hind paws push off, then a splash under each paw as it lands", {"move": Vector2.ZERO}, 1.6, false],
+		["drop from 1.2 m", "", {"move": Vector2.ZERO}, 1.8, true],
+	]
+	var look := p.global_position
+	for sh in shots:
+		_say(sh[0], sh[1])
+		bot.sprint = false
+		bot.jump = false
+		for k in sh[2]:
+			bot[k] = sh[2][k]
+		if sh[4]:
+			p.global_position += Vector3(0, 1.2, 0)
+			p.velocity = Vector3.ZERO
+		var t := 0.0
+		while t < sh[3]:
+			await get_tree().physics_frame
+			var dt := get_physics_process_delta_time()
+			t += dt
+			var pp := p.global_position
+			look = look.lerp(pp, 1.0 - exp(-30.0 * dt))
+			look.y = pp.y
+			var cy := maxf(50.0, pp.y - 0.05)
+			cam.global_position = Vector3(look.x - 0.25, cy + 0.3, 1.45)
+			cam.look_at(Vector3(look.x, cy + 0.1, 0), Vector3.UP)
+	Engine.time_scale = 1.0
 	get_tree().quit()
