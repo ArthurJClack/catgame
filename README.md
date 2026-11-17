@@ -18,8 +18,11 @@ open the folder in godot 4.3+ and hit play (f5).
 - push into a wall while falling: claws out, slow wall slide
 - hold space while running into a wall in the air: scramble up it
 - hold c + hold space, release: charged pounce (0.6 to 1.8 m)
-- mouse1: swat with a random paw, auto aims at the loose thing nearest the crosshair, real impulse (light stuff flies, barrels barely rock)
-- hold mouse2: claws out. hook a loose object and drag it around by looking, let go to fling. on a surface the claws dig in and drag marks
+- paw combat (`cat_combat.gd`): mouse1 = left paw, mouse2 = right paw
+  - tap: swat with that paw, auto aims at the loose thing nearest the crosshair, real impulse (light stuff flies, barrels barely rock)
+  - hold: that paw keeps raking whatever's in front (a rake every 0.24 s, half a swat's damage + poise, 3 stamina each). nothing to rake = claws out instead: hook a loose object and drag it around by looking, let go to fling. on a surface the claws dig in and drag marks
+  - hold both: the cat rears up on its hind legs, comes down with both fore paws on the target (heavy hit) and holds it pinned while both are held, claws squeezing every 0.4 s. a cat needs a free fore paw to walk, so while both hold it can't move, hop or dodge. let go of either to be free again. holding drains stamina, rats wriggle out after 1.6 s (the brute sooner), small prey pinned like this is caught. everything is x2 from behind
+  - tests: `godot --headless --path . res://arena.tscn -- --combattest`, `--combatshow` renders the clip
 
 ## parkour (the easy way)
 - hold q (or mouse3), look where you want to be, let go: the cat crouches, wiggles and leaps

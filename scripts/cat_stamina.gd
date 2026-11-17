@@ -27,6 +27,8 @@ const WALL_KICK := 12.0
 const SCRAMBLE := 8.0
 const CLAMBER := 8.0
 const SWAT := 4.0
+const RAKE := 3.0            # each rake of a held paw
+const GRIP := 10.0           # rear up + two paw grab
 const DASH := 22.0
 const BACKSTEP := 15.0
 # costs (per second, while doing it)
@@ -34,6 +36,7 @@ const GALLOP := 16.0
 const CANTER := 4.0
 const CLIMB := 6.0
 const CLAW_DRAG := 4.0
+const GRIP_HOLD := 9.0       # holding something down with both paws
 
 var player: Node3D
 var value := MAX
