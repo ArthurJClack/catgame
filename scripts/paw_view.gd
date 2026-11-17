@@ -1,8 +1,10 @@
 class_name PawView
 extends Node3D
-## first person front legs, parented to the camera. procedural ik like the
-## full rig, but with targets placed so the paws actually show up on screen
-## (fps games cheat the same way with hands).
+## first person front legs. when `rig` is set these are copies of the full body cat's own
+## forelegs (same meshes, same pose every frame: gait, swats, pounces, dodges, wall kicks,
+## climbing...), lifted from where they really are (below and behind the eye, out of view)
+## into view by one fixed shift. so what you see in first person is exactly what the body does.
+## without a rig it falls back to its own procedural ik (the old viewmodel).
 
 var fur := Color(0.86, 0.52, 0.24)
 var pad := Color(0.93, 0.55, 0.6)
@@ -50,10 +52,41 @@ const LA := 0.125
 const LB := 0.12
 
 var _legs := []
+
+## the full body cat whose forelegs you see (CatRig). null = old standalone viewmodel
+var rig: Node3D
+var mirror := true
+## how the rig's real forelegs are moved into view. a cat's eyes sit ahead of and above its
+## shoulders, so its own forelegs are mostly below / behind what it can see. one rigid
+## transform fixes that without touching the animation: the legs are taken relative to the
+## shoulders' rest spot (in the yaw-only eye frame, so camera dips and crouches still show),
+## tipped forward by view_tilt, hung at view_origin, and scaled toward the eye by view_scale
+## (scaling toward the eye doesn't change the picture, it only pulls them closer so they
+## poke into walls less). every angle, timing and contact of the rig is kept
+var view_tilt := 1.25
+var view_origin := Vector3(0.0, -0.17, -0.05)
+var view_scale := 0.6
+## extra sideways gap per leg (each leg is moved as a whole, so it keeps its own exact pose).
+## cats put their forepaws nearly on one line, which from the eye stacks both up on the crosshair
+var view_spread := 0.03
+## a raised paw is seen from behind rather than from above (see _leg_xform)
+var raise_tilt := 0.35
+var raise_push := Vector3(0.0, 0.0, -0.08)
+var _raise := [0.0, 0.0]
+var eye_height := 0.25      # player eye above the rig root at rest
+## the body can face away from the camera (head turns first, s runs toward you): the legs
+## follow the body's heading only this far (rad) so they stay on screen
+var yaw_limit := 0.4
+var _rest := Vector3.ZERO   # rest shoulder midpoint, eye frame
+var _mir: Array = []        # [src, dup] pairs, every node under the copied leg parts
+var _mir_rig: Node3D = null
+var mirror_xform := Transform3D.IDENTITY  # rig local -> this node's local, last frame (tests)
 var _targets := [Vector3(-0.055, -0.22, -0.15), Vector3(0.055, -0.22, -0.15)]
 
 
 func _ready() -> void:
+	# run after the rig has animated this frame (both live under the player)
+	process_priority = 10
 	var S := LowPoly.sphere(8, 6)
 	var S_lo := LowPoly.sphere(6, 4)
 	for i in 2:
@@ -135,6 +168,93 @@ func land(impact: float) -> void:
 	_land = clampf(impact * 0.012, 0.0, 0.06)
 
 
+func _mirror_on() -> bool:
+	if not mirror or rig == null or not is_instance_valid(rig) or not rig.get("_built"):
+		return false
+	if _mir_rig != rig:
+		_build_mirror()
+	return true
+
+
+func _build_mirror() -> void:
+	for pr in _mir:
+		if pr[1].get_parent() == self:
+			pr[1].queue_free()
+	_mir.clear()
+	_mir_rig = rig
+	var st: Dictionary = rig.get("S_")
+	_rest = Vector3(0.0, float(rig.get("BODY_H")) - 0.018 - eye_height, -0.125 * float(st.get("len", 1.0)))
+	var legs: Array = rig.get("legs")
+	for i in 2:
+		var leg: Dictionary = legs[i]
+		for key in ["upper", "lower", "pastern", "wrist", "joint", "paw"]:
+			if not leg.has(key):
+				continue
+			var src: Node3D = leg[key]
+			var dup: Node3D = src.duplicate()
+			dup.set_meta("leg", i)
+			add_child(dup)
+			_pair(src, dup)
+	for c in find_children("*", "GeometryInstance3D", true, false):
+		(c as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for leg in _legs:
+		for key in ["upper", "lower", "joint", "paw"]:
+			(leg[key] as Node3D).visible = false
+
+
+func _pair(src: Node, dup: Node) -> void:
+	if src is Node3D:
+		_mir.append([src, dup])
+	for k in mini(src.get_child_count(), dup.get_child_count()):
+		_pair(src.get_child(k), dup.get_child(k))
+
+
+## rig local space -> the eye frame, body yaw clamped (the shared part of both legs' transforms)
+func _body_xform() -> Transform3D:
+	var anchor := get_parent() as Node3D
+	var local := anchor.global_transform.affine_inverse() * rig.global_transform
+	# yaw of the body (player), not the rig root: the rig tips onto walls when climbing
+	var body := rig.get_parent() as Node3D
+	var bz := anchor.global_transform.basis.inverse() * body.global_transform.basis.z
+	if Vector2(bz.x, bz.z).length() > 0.3:
+		var rel := atan2(bz.x, bz.z)
+		var excess := rel - clampf(rel, -yaw_limit, yaw_limit)
+		local = Transform3D(Basis(Vector3.UP, -excess), Vector3.ZERO) * local
+	return Transform3D(Basis.IDENTITY, -_rest) * local
+
+
+## one leg's view transform. a paw on the ground is seen from high up (view_tilt), a paw
+## raised up off the ground (swat, reaching up a wall, rearing) gets seen from behind instead
+## (raise_tilt), otherwise the tip would swing a raised paw straight into your face.
+## the whole leg moves as one piece, so its pose is still exactly the rig's
+func _leg_xform(body: Transform3D, i: int, raise: float) -> Transform3D:
+	var tilt := lerpf(view_tilt, raise_tilt, raise)
+	var org := view_origin + raise_push * raise
+	org.x += view_spread * (-1.0 if i == 0 else 1.0)
+	var v := Transform3D(Basis(Vector3.RIGHT, tilt).scaled(Vector3.ONE * view_scale), org * view_scale)
+	return v * body
+
+
+func _mirror_step() -> void:
+	var body := _body_xform()
+	var legs: Array = rig.get("legs")
+	var xf: Array[Transform3D] = []
+	for i in 2:
+		var paw: Node3D = legs[i].paw
+		var h := paw.position.y - 0.012
+		_raise[i] = smoothstep(0.03, 0.15, h)
+		xf.append(_leg_xform(body, i, _raise[i]))
+	mirror_xform = xf[1]
+	for pr in _mir:
+		var src: Node3D = pr[0]
+		var dup: Node3D = pr[1]
+		dup.visible = src.visible
+		if dup.get_parent() == self:
+			dup.transform = xf[int(dup.get_meta("leg"))] * src.transform
+		else:
+			dup.transform = src.transform
+
+
 func _process(dt: float) -> void:
 	_t += dt
 	if _swat_t >= 0.0:
@@ -154,6 +274,13 @@ func _process(dt: float) -> void:
 		_pin_t += dt
 		if _pin_t > 0.9:
 			_pin_t = -1.0
+	if _mirror_on():
+		var sway_m := Vector3(clampf(-look_vel.x * 0.0025, -0.015, 0.015), clampf(look_vel.y * 0.002, -0.01, 0.01), 0)
+		_sway = LowPoly.damp3(_sway, sway_m, 10.0, dt)
+		position = _sway
+		rotation.z = _sway.x * 1.0
+		_mirror_step()
+		return
 
 	# sway: paws lag behind mouse movement a touch
 	var sway_t := Vector3(clampf(-look_vel.x * 0.0025, -0.015, 0.015), clampf(look_vel.y * 0.002, -0.01, 0.01), 0)

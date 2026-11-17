@@ -279,6 +279,7 @@ func _ready() -> void:
 	paws.pattern = rig.pattern
 	paws.socks = rig.socks
 	paws.sock_col = rig.belly
+	paws.rig = rig
 	# the paws hang off a yaw-only anchor at the eye, not the camera: look up and they
 	# drop out of view like real paws would, look down and you see more of them
 	paw_anchor = Node3D.new()
@@ -868,6 +869,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	# slipping now just shows the claws and the paws stay on the ground.
 	rig.scramble = LowPoly.damp(rig.scramble, 1.0 if scramble_t > 0.0 else (0.6 if wall_sliding else 0.0), 14.0, dt)
 	rig.slip_claws = minf(slip * 1.3, 1.0) if is_on_floor() else 0.0
+	if stamina and stamina.winded:
+		rig.soma.exertion = maxf(rig.soma.exertion, 0.9)   # ran the bar dry: the cat is visibly blown
 	rig.climb = w_climb
 	rig.kick_paw_w = clampf(w_kick * 1.6 - 0.25, 0.0, 1.0)
 	rig.kick_w = w_kick
@@ -1034,6 +1037,7 @@ func set_style(st: String) -> void:
 	paws.socks = rig.socks
 	paws.sock_col = rig.belly
 	paws.visible = op.visible
+	paws.rig = rig
 	op.get_parent().add_child(paws)
 	op.queue_free()
 	_event("cat: " + CatRig.STYLES[st].label)
