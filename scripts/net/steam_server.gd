@@ -49,6 +49,8 @@ func start() -> bool:
 	OS.set_environment("SteamAppId", str(NetSteamTransport.STEAM_APP_ID))
 	OS.set_environment("SteamGameId", str(NetSteamTransport.STEAM_APP_ID))
 	var init_name := "serverInitEx" if api.has_method("serverInitEx") else "serverInit"
+	if OS.get_environment("CATGAME_STEAM_INIT") != "":
+		init_name = OS.get_environment("CATGAME_STEAM_INIT")
 	var r = _call(init_name, _init_args(init_name))
 	var ok := false
 	if r is Dictionary:
@@ -110,7 +112,7 @@ func _init_args(method: String) -> Array:
 			elif n.contains("port"):
 				out.append(game_port)
 			elif n.contains("ip"):
-				out.append("0.0.0.0" if is_str else 0)
+				out.append(OS.get_environment("CATGAME_STEAM_IP") if is_str else 0)
 			elif n.contains("mode"):
 				out.append(SERVER_MODE_LISTED)
 			elif n.contains("version"):
