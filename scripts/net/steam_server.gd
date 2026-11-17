@@ -32,6 +32,7 @@ var max_cats := 16
 var token := ""                  # game server login token (steamcommunity.com/dev/managegameservers) keeps the same server id
 var version := "0.1.0"
 var proto := 1
+var _trace := OS.get_environment("CATGAME_STEAM_TRACE") != ""   # print every steam call (stderr)
 var _users := {}                 # client ids counted on the server list
 
 
@@ -201,7 +202,12 @@ func close() -> void:
 func _call(method: String, args: Array):
 	if api == null or not api.has_method(method):
 		return null
-	return api.callv(method, args)
+	if _trace:
+		printerr("steam server: %s%s" % [method, str(args)])
+	var r = api.callv(method, args)
+	if _trace:
+		printerr("  -> ", r)
+	return r
 
 
 func _hook(sig: String, fn: Callable) -> void:

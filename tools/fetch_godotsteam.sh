@@ -85,7 +85,9 @@ for r in rel:
     for a in r.get("assets", []):
         n = a["name"].lower()
         if n.endswith(".zip") and ("gdextension" in n or "gde" in n) and (("server" in n) == server) and "example" not in n:
-            m = re.search(r"plugin-(\d+)\.(\d+)", n)
+            # "plugin-4.4" or "plugin-44": built for that godot (godot-cpp), even when the
+            # .gdextension's compatibility_minimum says older is fine. those crash on 4.3
+            m = re.search(r"plugin-(\d)\.?(\d+)", n)
             if m and (int(m.group(1)), int(m.group(2))) > want:
                 continue   # built for a newer godot, says so in the name
             print(a["browser_download_url"], "#", r["tag_name"], a["name"], file=sys.stdout)
