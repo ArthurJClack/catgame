@@ -168,74 +168,104 @@ func _ctest() -> void:
 
 # ---------------------------------------------------------------- show reel
 
+var _dummy: SoulsRat = null
+var _dummy_yaw := 0.0
+var _dummy_pos := Vector3.ZERO
+
+
+func _physics_process(_dt: float) -> void:
+	# show reel: the rat is a training dummy, it never attacks (still flinches + struggles)
+	if is_instance_valid(_dummy) and _dummy.held_by == null and _dummy.state in [SoulsRat.IDLE, SoulsRat.CHASE, SoulsRat.WINDUP, SoulsRat.LUNGE]:
+		_dummy.state = SoulsRat.RECOVER
+		_dummy.st_t = -50.0
+		_dummy.yaw = _dummy_yaw
+		_dummy.hp = 50.0
+	if is_instance_valid(_dummy) and _dummy.held_by == null:
+		# stays on its mark (swats would knock it out of shot)
+		_dummy.global_position = _dummy.global_position.lerp(_dummy_pos, 0.2)
+		_dummy.velocity = Vector3.ZERO
+
+
+func _dummy_rat(yaw: float, pos: Vector3) -> SoulsRat:
+	var r: SoulsRat = arena.spawn_rat(pos, 1.0)
+	r.yaw = yaw
+	r.rotation.y = yaw
+	r.hp = 50.0
+	r.max_hp = 50.0
+	r.state = SoulsRat.RECOVER
+	r.st_t = -50.0
+	_dummy = r
+	_dummy_yaw = yaw
+	_dummy_pos = pos
+	return r
+
+
+func _tap(l: bool, r: bool, gap := 0.55) -> void:
+	_paws(l, r)
+	await _ticks(6)
+	_paws(false, false)
+	await _secs(gap)
+
+
 func _cshow() -> void:
 	_labels()
-	await _ticks(20)
+	arena.hud.visible = true
 	cam = Camera3D.new()
-	cam.fov = 62
+	cam.fov = 46
+	cam.near = 0.02
 	arena.add_child(cam)
-	await _clear_rats()
-	_reset_cat(Vector3(0, 0.02, 0.5))
-	var r := _still_rat(PI)
-	_face(r.global_position)
-	r.hp = 50.0
-	r.max_hp = 50.0
-	var side := Vector3(0.75, 0.32, 0.55)
-	cam.global_position = side
-	cam.look_at(Vector3(0, 0.12, 0.25))
 	cam.current = true
-	_say("left click", "left paw swat")
-	await _secs(0.6)
-	for k in 2:
-		_paws(true, false)
-		await _ticks(4)
-		_paws(false, false)
-		await _secs(0.55)
-	_say("right click", "right paw swat")
-	for k in 2:
-		_paws(false, true)
-		await _ticks(4)
-		_paws(false, false)
-		await _secs(0.55)
-	_say("hold", "raking with one paw")
-	_paws(true, false)
-	await _secs(1.4)
-	_paws(false, false)
-	await _secs(0.4)
-	_paws(false, true)
-	await _secs(1.4)
-	_paws(false, false)
-	await _secs(0.6)
-	r.hp = 50.0
-	_say("hold both", "rear up on the hind legs, then pin it with both paws")
-	_paws(true, true)
-	bot.move = Vector2(0, 1)
-	await _secs(1.5)
-	_say("both paws busy", "can't walk until one lets go")
-	await _secs(0.9)
-	_say("let go of one", "walk again")
-	_paws(true, false)
-	await _secs(0.25)
-	_paws(false, false)
-	await _secs(0.8)
-	bot.move = Vector2.ZERO
-	# first person view of the grip
+	p.set_third_person(true)
+	p.set_style("block")
+	await _ticks(10)
 	await _clear_rats()
 	_reset_cat(Vector3(0, 0.02, 0.5))
-	r = _still_rat(0.0)
-	r.hp = 50.0
-	r.max_hp = 50.0
+	var r := _dummy_rat(PI, Vector3(0, 0.02, 0))
 	_face(r.global_position)
-	bot.pitch = -0.55
-	p.cam.current = true
-	_say("first person", "grab from behind = double damage")
-	await _secs(0.8)
+	# side on, a little in front of the cat
+	cam.global_position = Vector3(1.05, 0.38, 0.12)
+	cam.look_at(Vector3(0, 0.13, 0.3))
+	_say("left click", "left paw swat")
+	await _secs(0.5)
+	await _tap(true, false)
+	await _tap(true, false)
+	_say("right click", "right paw swat")
+	await _tap(false, true)
+	await _tap(false, true)
+	_say("hold one", "that paw keeps raking")
 	_paws(true, false)
-	await _ticks(4)
+	await _secs(1.3)
+	_paws(false, false)
+	await _secs(0.5)
+	_say("hold both  (half speed)", "rear up on the hind legs, then pin it with both paws")
+	Engine.time_scale = 0.5
+	_paws(true, true)
+	await _secs(0.9)
+	Engine.time_scale = 1.0
+	_say("both paws holding", "holding w: can't walk without a free paw")
+	bot.move = Vector2(0, 1)
+	await _secs(0.9)
+	_say("let go of one", "free to walk again")
+	_paws(true, false)
+	await _secs(0.7)
+	_paws(false, false)
+	bot.move = Vector2.ZERO
+	await _secs(0.3)
+	# first person: grab one from behind
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 0.48))
+	r = _dummy_rat(0.0, Vector3(0, 0.02, 0))
+	_face(r.global_position)
+	p.set_third_person(false)
+	p.cam.current = true
+	_say("first person", "rake, then grab it from behind (double damage)")
+	await _secs(0.5)
+	_paws(false, true)
+	await _secs(0.9)
+	_paws(false, false)
+	await _secs(0.3)
+	_paws(true, true)
+	await _secs(1.8)
 	_paws(false, false)
 	await _secs(0.6)
-	_paws(true, true)
-	await _secs(1.6)
-	_paws(false, false)
-	await _secs(0.8)
 	get_tree().quit()
