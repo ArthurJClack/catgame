@@ -1663,7 +1663,7 @@ func _run_dashshow() -> void:
 		["side leap, slow-mo", "", Vector2(-1, 0), true, false, 2.0, 0.3],
 		["backstep", "no direction held: hops straight back, still facing forward", Vector2.ZERO, true, false, 1.2, 1.0],
 		["whirl", "s / away from the body: pivots round on the forepaws, then darts", Vector2(0, -1), true, false, 1.4, 0.5],
-		["chained", "a press during the landing is buffered: dodge, dodge, dodge", Vector2(0, 1), true, false, 2.4, 1.0],
+		["chained", "a press during the landing is buffered, so dodges chain", Vector2(0, 1), true, false, 2.4, 1.0],
 		["gallop until winded", "the gallop drains the bar in ~6 s, then the cat can only trot", Vector2(0, 1), false, true, 8.5, 1.0],
 		["empty bar", "no stamina, no dodge (it flashes red)", Vector2(0, 1), true, false, 1.2, 1.0],
 		["breather", "stops, gets its breath back", Vector2.ZERO, false, false, 3.6, 1.0],
@@ -1676,8 +1676,19 @@ func _run_dashshow() -> void:
 		bot.sprint = sh[4]
 		if sh[0] != "empty bar" and sh[0] != "gallop until winded" and sh[0] != "breather":
 			p.stamina.value = maxf(p.stamina.value, 60.0)
-		if sh[0] == "whirl":
+		if sh[0] in ["chained", "gallop until winded"]:
+			# fresh run down the middle of the pad, heading -x
+			p.global_position = Vector3(40, 50.02, 0)
+			p.velocity = Vector3.ZERO
+			p._phys_prev = p.global_position
+			look = p.global_position
+			p.yaw = PI / 2
+			p.rotation.y = p.yaw
+		if sh[0] in ["whirl", "chained", "gallop until winded", "dart", "dart, slow-mo"]:
 			p.orb_yaw = p.yaw
+		if sh[0] == "empty bar":
+			p.stamina.value = 0.0
+			p.stamina.winded = true
 		var t := 0.0
 		var presses := 0
 		var turned := false
@@ -1691,6 +1702,8 @@ func _run_dashshow() -> void:
 			t += dt
 			if sh[0] == "whirl" and p.dash.count > 0 and p.dash.state == CatDash.IDLE and not turned and t > 0.3:
 				turned = true
+			if p.dash.state == CatDash.AIR and sh[0] != "chained" and absf(float(sh[2].x)) > 0.5:
+				bot.move = Vector2.ZERO   # let go of a/d once it's off the ground (else a side hop follows)
 			if p.dash.state == CatDash.IDLE and p.dash.recover <= 0.0 and t > 0.25 and not sh[4] and sh[0] != "chained":
 				bot.move = Vector2.ZERO
 			if sh[0] == "chained" and presses >= 3 and p.dash.state == CatDash.IDLE and p.dash.recover <= 0.0:
