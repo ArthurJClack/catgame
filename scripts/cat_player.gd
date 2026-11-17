@@ -67,6 +67,7 @@ const BACKUP_SPEED := 0.8     # backing up is slow and careful
 var _hop_cool := 0.0
 var _prev_side := 0.0
 var _hopped_now := false
+var auto_bound := true        # glide up small steps + bound over/onto stuff at a run (run_assist.gd)
 
 ## when set, input is read from here instead of the keyboard (used by the preview bot)
 var bot := {}
@@ -633,6 +634,14 @@ func _physics_process(dt: float) -> void:
 		else:
 			scramble_t = 0.0
 
+	# rough ground at a run: bound over / onto logs, rocks, ledges and ditches (run_assist.gd)
+	if grounded and auto_bound and ground_time > 0.05 and wish_len > 0.3 and not (want_crouch or charging or clawing):
+		if RunAssist.bound(self, hv, dt, G, RADIUS):
+			grounded = false
+			jumped_this_air = true
+			hv = Vector3(velocity.x, 0, velocity.z)   # a standing hop sets its own pace
+			_event("bound %s" % RunAssist.last_bound.kind)
+
 	# gravity
 	if grounded:
 		# landing out of a wall slide used to leave this stuck on, so the paws stayed in the scramble pose
@@ -649,6 +658,8 @@ func _physics_process(dt: float) -> void:
 	velocity.z = hv.z
 	prev_vy = velocity.y
 
+	if grounded and auto_bound:
+		RunAssist.step_up(self, hv, dt)   # roots, branches, stone lips: glide up, paws step
 	move_and_slide()
 	_track_walls()
 	_push_props()
@@ -1552,7 +1563,9 @@ func _update_surface() -> void:
 	var sf := "default"
 	if c is Node:
 		var nd := c as Node
-		if nd.has_meta("surface"):
+		if nd.has_meta("surface_at"):
+			sf = (nd.get_meta("surface_at") as Callable).call(hit.position)
+		elif nd.has_meta("surface"):
 			sf = nd.get_meta("surface")
 		elif nd.is_in_group("climbable") or nd.is_in_group("scratchable"):
 			sf = "carpet"

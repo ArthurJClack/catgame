@@ -189,6 +189,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			go_scene("res://forest.tscn")
 		elif k == KEY_F7:
 			go_scene("res://stealth.tscn")
+		elif k == KEY_F8:
+			go_scene("res://trail.tscn")
 
 
 ## level hop. keeps the chosen cat style across scenes via Engine meta "cat_style"
