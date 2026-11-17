@@ -133,7 +133,7 @@ jobs:
           # the exported linux server boots on its own (feature tag dedicated_server -> server.tscn).
           # under gdb so a crash prints a backtrace
           ls -la build/server-linux
-          timeout 40 gdb -q -batch -ex run -ex bt --args build/server-linux/CatGameServer.x86_64 --headless -- --port 24791 --quit-after 5 > server-smoke.log 2>&1 || true
+          timeout 40 gdb -q -batch -ex run -ex bt --args build/server-linux/CatGameServer.x86_64 --headless --quit-after 600 -- --port 24791 > server-smoke.log 2>&1 || true
           cat server-smoke.log
           grep -q "up on udp 24791" server-smoke.log
           ls -la build/server-linux build/server-win
