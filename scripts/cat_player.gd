@@ -191,6 +191,9 @@ var slip := 0.0
 var _tear_last := Vector3.ZERO
 var _tears: Array[Node3D] = []
 var dust: PawDust              # dirt / dust right under a paw, only on hard pushes (paw_dust.gd)
+var stamina: CatStamina        # souls style stamina bar (cat_stamina.gd)
+var dash: CatDash              # souls style dodge: dart / side leap / whirl / backstep (cat_dash.gd)
+var prev_dash := false
 
 var _aim_root: Node3D
 var _aim_ring: MeshInstance3D
@@ -221,6 +224,12 @@ func _ready() -> void:
 	dust = PawDust.new()
 	dust.player = self
 	add_child(dust)
+	stamina = CatStamina.new()
+	stamina.player = self
+	add_child(stamina)
+	dash = CatDash.new()
+	dash.player = self
+	add_child(dash)
 
 	cam_pivot = Node3D.new()
 	cam_pivot.position.y = EYE_STAND
@@ -325,6 +334,7 @@ func _read_input() -> Dictionary:
 		"scratch": Input.is_physical_key_pressed(KEY_F),
 		"toggle_view": Input.is_physical_key_pressed(KEY_V),
 		"drop": Input.is_physical_key_pressed(KEY_E),
+		"dash": Input.is_physical_key_pressed(KEY_ALT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_XBUTTON1),
 	}
 
 
@@ -367,7 +377,7 @@ func _physics_process(dt: float) -> void:
 		# body only comes round once the look goes past what a neck can do
 		if view_mode == 2:
 			pitch = lerpf(pitch, orb_pitch * 0.5, clampf(dt * 6.0, 0, 1))
-		var busy := climbing or clambering or scratching or mantling
+		var busy := climbing or clambering or scratching or mantling or dash.busy()
 		var face_look: bool = charging or clawing or inp.get("swat", false) or inp.get("scratch", false) or inp.get("aim", false)
 		if mv.length() > 0.05 and not busy:
 			var wd := Basis(Vector3.UP, orb_yaw) * Vector3(mv.x, 0, -mv.y)
@@ -383,6 +393,17 @@ func _physics_process(dt: float) -> void:
 				yaw += clampf(ld - signf(ld) * 1.1, -6.0 * dt, 6.0 * dt)
 	rotation.y = yaw
 	last_event_t += dt
+	# stamina / dodge bookkeeping. bots run with a bottomless bar unless they ask for the real one
+	stamina.infinite = not bot.is_empty() and not bot.get("stamina", false)
+	dash.tick(dt)
+	var dash_in: bool = inp.get("dash", false)
+	if dash_in and not prev_dash:
+		dash.press()
+	prev_dash = dash_in
+	var raw_mv: Vector2 = inp.get("move", Vector2.ZERO)
+	var dash_wish := Vector3.ZERO
+	if raw_mv.length() > 0.3:
+		dash_wish = Basis(Vector3.UP, orb_yaw) * Vector3(raw_mv.x, 0, -raw_mv.y)
 	climb_cool = maxf(climb_cool - dt, 0.0)
 	paws.look_vel = paws.look_vel.lerp(Vector2(wrapf(yaw - prev_yaw, -PI, PI), pitch - prev_pitch) / dt, clampf(dt * 20.0, 0, 1))
 
@@ -390,6 +411,10 @@ func _physics_process(dt: float) -> void:
 	var canter: bool = inp.get("canter", false)
 	# running only happens straight ahead
 	if mv.y < 0.5 or absf(mv.x) > 0.3:
+		sprint = false
+		canter = false
+	# winded (ran the bar dry): trot only until it's back up
+	if not stamina.can_run():
 		sprint = false
 		canter = false
 	var want_crouch: bool = inp.get("crouch", false)
@@ -400,7 +425,7 @@ func _physics_process(dt: float) -> void:
 	var jump_released := (not jump_held) and prev_jump
 	prev_jump = jump_held
 	var swat_held: bool = inp.get("swat", false)
-	if swat_held and not prev_swat:
+	if swat_held and not prev_swat and stamina.spend(CatStamina.SWAT):
 		_do_swat()
 	prev_swat = swat_held
 	if _swat_hit_t >= 0.0:
@@ -448,7 +473,7 @@ func _physics_process(dt: float) -> void:
 	if is_on_floor() and not (mantling or clambering or climbing or scratching or charging):
 		if want_crouch_peek(inp):
 			ground_mv.x = mv.x * 0.45
-		elif side != 0.0 and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12):
+		elif side != 0.0 and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12) and not dash.busy() and dash.buffer <= 0.0 and stamina.spend(CatStamina.SIDE_HOP):
 			_side_hop(side, fwd, right)
 	_prev_side = side
 	if is_on_floor():
@@ -460,6 +485,10 @@ func _physics_process(dt: float) -> void:
 	var wish_len := minf(wish.length(), 1.0)
 	var wish_dir := wish.normalized() if wish.length() > 0.01 else Vector3.ZERO
 
+	if mantling or clambering or climbing or scratching:
+		dash.cancel()
+	if climbing and wish_dir.length() > 0.0:
+		stamina.drain(CatStamina.CLIMB, dt)
 	if mantling:
 		_mantle_step(dt)
 		_post(dt, inp)
@@ -492,6 +521,26 @@ func _physics_process(dt: float) -> void:
 	else:
 		air_time += dt
 		ground_time = 0.0
+
+	# ---------------- dodge (souls style, cat_dash.gd) ----------------
+	if dash.buffer > 0.0 and charging and grounded:
+		charging = false     # a dodge cancels a wind up
+		charge = 0.0
+		_aim_root.visible = false
+	if dash.winding() or dash.try_start(dash_wish, grounded):
+		dash.wind_step(dt)
+		if dash.winding():
+			velocity.y = minf(velocity.y, 0.0)
+		move_and_slide()
+		_track_walls()
+		_post(dt, inp)
+		return
+	if dash.recover > 0.0:
+		# landing out of a dodge: the legs are busy soaking it up
+		jump_pressed = false
+		jump_held = false
+		aim_in = false
+		wish_len *= 0.3
 
 	# scratch: stand up against whatever is in front of you
 	if scratch_in and grounded and not charging and Vector2(velocity.x, velocity.z).length() < 1.5:
@@ -538,6 +587,8 @@ func _physics_process(dt: float) -> void:
 				_leap()
 			elif charge_src == "crouch":
 				# pounce! cats crouch low then launch way higher than a casual hop
+				if not stamina.spend(CatStamina.POUNCE + CatStamina.POUNCE_CHARGE * charge):
+					charge = minf(charge, 0.25)   # spent: a feeble little pounce
 				var hgt := lerpf(POUNCE_MIN, POUNCE_MAX, charge)
 				velocity.y = sqrt(2.0 * G * hgt)
 				velocity += fwd * lerpf(1.0, 3.2, charge)
@@ -548,7 +599,9 @@ func _physics_process(dt: float) -> void:
 			grounded = false
 			charge = 0.0
 	elif jump_buffer > 0.0 and can_ground_jump:
-		velocity.y = sqrt(2.0 * G * HOP_HEIGHT)
+		# a cat always gets off the ground, but spent it's a lower hop
+		var hh := HOP_HEIGHT if stamina.spend(CatStamina.HOP) else HOP_HEIGHT * 0.55
+		velocity.y = sqrt(2.0 * G * hh)
 		jumped_this_air = true
 		jump_buffer = 0.0
 		grounded = false
@@ -627,7 +680,7 @@ func _physics_process(dt: float) -> void:
 	# ---------------- wall scramble ----------------
 	scramble_t = maxf(scramble_t - dt, 0.0)
 	if not grounded and wall_time < 0.05 and jump_held and scramble_avail and velocity.y > -1.5:
-		if wish_dir.dot(-wall_normal) > 0.6 and not _is_climbable(wall_collider):
+		if wish_dir.dot(-wall_normal) > 0.6 and not _is_climbable(wall_collider) and stamina.spend(CatStamina.SCRAMBLE):
 			scramble_avail = false
 			scramble_t = 0.32
 			_event("scramble")
@@ -660,6 +713,11 @@ func _physics_process(dt: float) -> void:
 	velocity.x = hv.x
 	velocity.z = hv.z
 	prev_vy = velocity.y
+	if grounded and wish_len > 0.3 and hv.length() > TROT_SPEED + 0.3:
+		if sprint:
+			stamina.drain(CatStamina.GALLOP, dt)
+		elif canter:
+			stamina.drain(CatStamina.CANTER, dt)
 
 	if grounded and auto_bound:
 		RunAssist.step_up(self, hv, dt)   # roots, branches, stone lips: glide up, paws step
@@ -741,7 +799,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 
 	rig.drive_velocity = velocity
 	rig.on_floor = is_on_floor() or mantling or clambering or climbing or scratching
-	rig.crouch = crouch_amt * (1.0 - charge)
+	rig.crouch = maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85)
 	rig.charge = charge
 	rig.look_pitch = pitch * 0.6 * (1.0 - w_face)
 	# the head turns a little toward where you're looking
@@ -780,6 +838,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 		_third_person_cam(dt)
 	_hunt_scan()
 	dust.physics_tick(dt)
+	stamina.physics_tick(dt, hspd < 0.2 and is_on_floor() and not (climbing or clambering or scratching))
 	_phys_curr = global_position
 	_rig_base = rig.transform
 	_interp_ok = true
@@ -864,6 +923,11 @@ func _side_hop(side: float, fwd: Vector3, right: Vector3) -> void:
 	_hopped_now = true
 	ground_time = 0.0
 	_event("side hop " + ("right" if side > 0.0 else "left"))
+
+
+## inside a dodge's i-frame window (cat_dash.gd). anything that hurts the cat should check this
+func is_invulnerable() -> bool:
+	return dash.iframes > 0.0
 
 
 ## eye for paw reach / aiming: the cat's head, even when the camera is behind it
@@ -964,6 +1028,8 @@ func _try_wall_kick(wish_dir: Vector3) -> void:
 		return
 	var n := _find_wall()
 	if n == Vector3.ZERO:
+		return
+	if not stamina.spend(CatStamina.WALL_KICK):
 		return
 	var same_wall := last_kick_normal != Vector3.ZERO and n.dot(last_kick_normal) > 0.9
 	var hv := Vector3(velocity.x, 0, velocity.z)
@@ -1075,6 +1141,7 @@ func _start_clamber(edge: Vector3, n: Vector3, onto: Vector3) -> void:
 	velocity = Vector3.ZERO
 	pounce_air = false
 	leap_lock = false
+	stamina.spend(CatStamina.CLAMBER)
 	_event("grab (%.2fm)" % (edge.y - global_position.y))
 
 
@@ -1430,6 +1497,7 @@ func _leap() -> void:
 		aim_point = _aim_ok_point
 		aim_kind = _aim_ok_kind
 	_aim_ok_age = 99.0
+	stamina.spend(CatStamina.LEAP)
 	velocity = aim_vel
 	leap_lock = true
 	pounce_air = true
@@ -1438,6 +1506,7 @@ func _leap() -> void:
 
 
 func _on_land() -> void:
+	dash.on_land()
 	var impact := -prev_vy
 	land_dip_v -= clampf(impact * 0.12, 0.0, 0.9)
 	paws.land(impact)
@@ -1829,6 +1898,7 @@ func _claw_step(dt: float) -> void:
 	var eye := _eye_pos()
 	var dir := _look_dir()
 	if is_instance_valid(claw_rb):
+		stamina.drain(CatStamina.CLAW_DRAG, dt)
 		# hooked body: spring-damper pulls the hook point toward where you look,
 		# limited to what one forepaw can pull. heavy things drag, light things lift
 		var g := claw_rb.to_global(claw_local)
