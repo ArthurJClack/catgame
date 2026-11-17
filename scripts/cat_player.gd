@@ -277,6 +277,7 @@ func _ready() -> void:
 	paws.pattern = rig.pattern
 	paws.socks = rig.socks
 	paws.sock_col = rig.belly
+	paws.rig = rig
 	# the paws hang off a yaw-only anchor at the eye, not the camera: look up and they
 	# drop out of view like real paws would, look down and you see more of them
 	paw_anchor = Node3D.new()
@@ -1026,6 +1027,7 @@ func set_style(st: String) -> void:
 	paws.socks = rig.socks
 	paws.sock_col = rig.belly
 	paws.visible = op.visible
+	paws.rig = rig
 	op.get_parent().add_child(paws)
 	op.queue_free()
 	_event("cat: " + CatRig.STYLES[st].label)
