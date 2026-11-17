@@ -36,6 +36,12 @@ var max_stance := 0.26
 var max_stance_gallop := 0.34
 var use_rays := true
 var exclude: Array[RID] = []
+## multiplayer copy: never decide to lift a paw itself, only lift the ones queue_lift() hands it
+## (the owner's lifts, replayed), so every step, settle step and turn-in-place step is taken by
+## the same paw at the same moment on every screen. landing and the rest run as normal
+var remote := false
+var _queued: Array = []   # [[paw, dur, lift, age], ...]
+var owner_modes := -1     # copy: the owner's paw modes right now, 2 bits per paw (-1 = unknown)
 
 var offs: Array[float] = [0.25, 0.75, 0.0, 0.5]
 var pos: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO] # world
@@ -165,7 +171,12 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 		var q := fposmod(phase - offs[i], 1.0)
 		# ---- free <-> planted
 		if want_free[i]:
-			if mode[i] != FREE:
+			if mode[i] != FREE and remote and owner_modes >= 0:
+				# copy: the hind paws let go of the ground when the owner's did (unless the leg
+				# would tear off first)
+				if ((owner_modes >> (i * 2)) & 3) == FREE or stretch[i] > 0.998:
+					mode[i] = FREE
+			elif mode[i] != FREE:
 				if _hold[i] > 0.0 and stretch[i] < 0.985:
 					_hold[i] -= dt  # hind paws stay on the ground while the legs push off
 				else:
@@ -213,9 +224,18 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 						worst = i
 				else:
 					_idle_t[i] = 0.0
+			if remote:
+				lift = false
+				worst = -1
+				for qi in _queued.size():
+					if int(_queued[qi][0]) == i:
+						var qd: Array = _queued.pop_at(qi)
+						_begin_swing(i, qd[1], qd[2], home_w, xf, true)
+						n_swing += 1
+						break
 			if lift:
 				var d := clampf((1.0 - duty) / maxf(freq, 0.01), 0.085, 0.36)
-				_begin_swing(i, d, lift_h * (1.0 if i < 2 else 0.85), home_w, xf)
+				_begin_swing(i, d, lift_h * (1.0 if i < 2 else 0.85), home_w, xf, true)
 				n_swing += 1
 		if mode[i] == SWING:
 			sw_t[i] += dt / _dur[i]
@@ -254,7 +274,11 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 		load[i] = move_toward(load[i], 1.0 if mode[i] == PLANTED else 0.0, dt * 14.0)
 
 	# settling / turn in place steps
-	if worst >= 0 and _since_land > 0.12:
+	# a replayed lift that never found its paw on the ground (it was still landing) expires
+	for q in _queued:
+		q[3] += dt
+	_queued = _queued.filter(func(q): return q[3] < 0.25)
+	if worst >= 0 and _since_land > 0.12 and not remote:
 		var diag := 3 - worst
 		var others := 0
 		for i in 4:
@@ -265,11 +289,18 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 			var d := clampf(0.13 + worst_err * 0.5, 0.13, 0.24)
 			if worst_err > 0.2:
 				d = 0.1
-			_begin_swing(worst, d, clampf(0.012 + worst_err * 0.2, 0.014, 0.04), xf * (homes[worst] as Vector3), xf)
+			_begin_swing(worst, d, clampf(0.012 + worst_err * 0.2, 0.014, 0.04), xf * (homes[worst] as Vector3), xf, true)
 			_idle_t[worst] = 0.0
 
 
-func _begin_swing(i: int, dur: float, lift: float, home_w: Vector3, xf: Transform3D) -> void:
+## a lift the owner made (multiplayer copy only)
+func queue_lift(i: int, dur: float, lift: float) -> void:
+	_queued.append([clampi(i, 0, 3), dur, lift, 0.0])
+
+
+func _begin_swing(i: int, dur: float, lift: float, home_w: Vector3, xf: Transform3D, decided := false) -> void:
+	if decided and rig and rig.get("net_record"):
+		rig.call("_log", ["L", i, dur, lift])   # a step this cat chose to take: copies replay it
 	mode[i] = SWING
 	sw_t[i] = 0.0
 	_dur[i] = dur

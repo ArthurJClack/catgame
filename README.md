@@ -97,3 +97,52 @@ build the installer too (download it from the run's artifacts) but don't publish
 - updater: `scripts/updater.gd` (autoload `Updater`), version lives in `application/config/version`
   (ci stamps it, the repo copy stays `0.1.0`)
 - logic test: `godot --headless --path . -s tests/updater_test.gd`
+
+## multiplayer (steam lobbies)
+
+press **m** in game. other players show up as full cats, animated by the same procedural rig as yours.
+
+- **host (friends)** makes a friends-only lobby, **host (public)** one anyone can find. **invite friends**
+  opens the steam overlay invite list (shift+tab works too). friends accept the invite in steam and land
+  in your lobby. **refresh** lists public / friends' lobbies, **join** hops in. **go to them** takes you to
+  the level a friend is in (house / forest / docks): you only see cats in the same level as you.
+- name tags float over everyone's cat. "x joined" / "x left" shows in the middle of the screen.
+- needs steam running and logged in on every pc. no steam? lan / direct ip works too:
+  host runs `CatGame.exe -- --net-host`, friends run `CatGame.exe -- --net-join <host ip>` (udp 24680,
+  `--net-port` to change, `--net-name` to set your tag).
+
+### how the cats stay identical
+
+nobody streams bones. `CatRig` animates itself from a few inputs (position, velocity, floor contact and the
+pose dials: crouch, charge, climb, clamber, scratch, sit, loaf, groom, stretch, claws, look, ...), so each game
+sends those ~30 times a second (`scripts/net/cat_net_state.gd`, ~6 kB/s per player) and every other game
+feeds them into its own copy of your rig (`scripts/net/remote_cat.gd`), played back ~0.1 s in the past so
+it's smooth through lag. on top of that it sends:
+
+- the rig's own clocks (breathing / wiggle / tail lash time and the gait phase), so the same paw lifts on
+  the same beat
+- everything the rig does at random, as events: glances, blinks, ear flicks, tail twitches, plus swats
+  and sounds it heard (`CatRig.life_log`). the remote copy has `remote_life` on and never rolls its own dice
+- what's in its mouth (a brainless copy of the same critter)
+
+the levels, props, prey and npc cats are still each player's own (not synced yet), and cats don't collide
+with each other.
+
+check it: `godot --path . -- --preview --parkour --nettest [--split]` runs the parkour bot, echoes your cat
+back through a fake 60 ms / jittery / 2% loss network and prints how far every part of the copy is from the
+real cat at the same moment (`--split` renders them side by side). knobs: `--net-hz --net-lag --net-jitter --net-loss`.
+
+### steam app id
+
+it runs on valve's public test app **480 ("Spacewar")** for now: free, works for testing with friends, but
+steam shows the game as "Spacewar" and everyone shares it (lobbies are tagged `catgame`, so you only see
+ours). for a real release you need a steamworks partner account + the **$100 app fee** per game
+(https://partner.steamgames.com), then put your app id in `NetSteamTransport.STEAM_APP_ID` and drop the
+`steam_appid.txt` line from the release workflow (steam supplies it when launched from steam).
+
+### godotsteam
+
+steam access is the GodotSteam GDExtension. it isn't committed: ci downloads it (`tools/fetch_godotsteam.sh`,
+from codeberg) before exporting and fails the build if the steam api the game uses is missing
+(`tests/steam_check.gd`). run the script yourself to get steam in the editor. without it the game runs fine,
+the m menu just says steam isn't in this build.

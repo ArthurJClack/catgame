@@ -168,6 +168,46 @@ var _load_s := [0.6, 0.6, 0.6, 0.6]
 var _lean := 0.0
 var _hear_age := 9.0
 
+# ---- multiplayer (see scripts/net/). everything random the rig does by itself (glances, ear
+# flicks, blinks, tail twitches) and everything it is told once (swats, sounds) is written to
+# life_log while net_record is on, so other players' copies of this cat can replay it exactly.
+# a copy with remote_life on never rolls its own dice: it only does what the log says
+var net_record := false
+var remote_life := false
+var life_log: Array = []
+var net_phase := -1.0   # remote copy: the owner's gait phase for this frame (-1 = run free)
+var net_paws := PackedVector3Array()   # remote copy: where the owner's paws are (world)
+var net_pmode := -1                    # remote copy: owner's gait modes, 2 bits per paw
+var _net_paws_init := false
+var _net_apply := false
+
+
+func _log(ev: Array) -> void:
+	if net_record and life_log.size() < 64:
+		life_log.append(ev)
+
+
+## replay one entry of another player's life_log on this (remote) copy
+func apply_life(ev: Array) -> void:
+	_net_apply = true
+	match str(ev[0]):
+		"g":
+			_glance_on = bool(ev[1])
+			_glance_to = Vector2(ev[2], ev[3])
+		"e":
+			_ear_flick[clampi(int(ev[1]), 0, 1)] = 1.0
+		"b":
+			_blink_t = -0.0001
+		"t":
+			_twitch(float(ev[1]))
+		"s":
+			swat(int(ev[1]), ev[2])
+		"h":
+			hear(ev[1], float(ev[2]))
+		"L":
+			gait.queue_lift(int(ev[1]), float(ev[2]), float(ev[3]))
+	_net_apply = false
+
 # ---------------- model style ----------------
 ## every style is a different take on the blocky low poly cat: its own
 ## proportions, cross sections and low poly fur trick. the animation rig is shared.
@@ -626,6 +666,9 @@ func _process(dt: float) -> void:
 func swat(side: int, target: Vector3) -> void:
 	if climb > 0.5 or clamber > 0.5:
 		return
+	if remote_life and not _net_apply:
+		return
+	_log(["s", side, target])
 	_swat_i = clampi(side, 0, 1)
 	_swat_target = target
 	_swat_t = 0.0
@@ -817,7 +860,31 @@ func animate(dt: float) -> void:
 	var all_free := (not on_floor) or climb > 0.02 or clamber > 0.02 or not use_planting
 	var want_free := [all_free, all_free, all_free, all_free]
 	var gxf := Transform3D(gb, gx.origin)
+	if net_phase >= 0.0:
+		# remote copy: start this frame's step from where the owner's gait clock was, so the
+		# same paw lifts on the same beat (update() and the climb line below add this frame's bit)
+		var gv := drive_velocity * nc
+		var gh := gv - gb.y * gv.dot(gb.y)
+		var inc := gh.length() * dt / maxf(gait.stride, 0.05)
+		if climb > 0.0:
+			inc += climb * (1.5 + 1.4 * speed_s) * move_amt * dt
+		gait.phase = fposmod(net_phase - inc, 1.0)
+		net_phase = -1.0
+	gait.remote = remote_life
+	gait.owner_modes = net_pmode if remote_life else -1
 	gait.update(dt, gxf, drive_velocity * nc, _yaw_rate, homes, want_free, lift_amt, on_floor)
+	if net_pmode >= 0 and net_paws.size() == 4:
+		# remote copy: a paw both copies have on the ground goes where the owner's is. it lands
+		# right on the owner's print, and one that's off (joined mid stride) creeps over unseen
+		for i in 4:
+			var om := (net_pmode >> (i * 2)) & 3
+			if om == CatGait.PLANTED and gait.mode[i] == CatGait.PLANTED:
+				if gait.touched[i] or not _net_paws_init:
+					gait.pos[i] = net_paws[i]
+				else:
+					gait.pos[i] = gait.pos[i].move_toward(net_paws[i], 0.06 * dt)
+		_net_paws_init = true
+		net_pmode = -1
 	if climb > 0.0:
 		gait.phase = fposmod(gait.phase + climb * (1.5 + 1.4 * speed_s) * move_amt * dt, 1.0)
 	phase = gait.phase
@@ -953,7 +1020,7 @@ func animate(dt: float) -> void:
 	var rinv := gxf.affine_inverse()
 	# life: glances at nothing in particular, and toward sounds
 	_glance_t -= dt
-	if _glance_t < 0.0:
+	if _glance_t < 0.0 and not remote_life:
 		_glance_on = not _glance_on
 		if _glance_on:
 			_glance_to = Vector2(randf_range(0.25, 0.75) * (1.0 if randf() < 0.5 else -1.0), randf_range(-0.1, 0.18))
@@ -961,6 +1028,7 @@ func animate(dt: float) -> void:
 		else:
 			_glance_to = Vector2.ZERO
 			_glance_t = randf_range(2.5, 7.0)
+		_log(["g", _glance_on, _glance_to.x, _glance_to.y])
 	_hear_t = maxf(_hear_t - dt, 0.0)
 	_hear_age += dt
 	var hw := _hear_w * smoothstep(0.0, 0.35, _hear_t)
@@ -1011,9 +1079,11 @@ func animate(dt: float) -> void:
 	head_bob = clampf(head_y - _head_slow, -0.02, 0.02) * hold
 	# ears: forward + up when hunting, flattened back at speed or hanging on, follow the gaze
 	_ear_t -= dt
-	if _ear_t < 0.0:
+	if _ear_t < 0.0 and not remote_life:
 		_ear_t = randf_range(2.0, 6.0)
-		_ear_flick[randi() % 2] = 1.0
+		var fi := randi() % 2
+		_ear_flick[fi] = 1.0
+		_log(["e", fi])
 	var ear_fwd := maxf(crouch, charge) * 0.35 + scratch * 0.1 + hw * 0.2
 	var ear_back := wg * 0.55 + clamber * 0.45 + climb * 0.25 + g_lick * 0.3
 	for i in ears.size():
@@ -1036,8 +1106,10 @@ func animate(dt: float) -> void:
 	var eye_y := 1.0 - loaf * 0.6 - groom * 0.45
 	if _blink_t < 0.0:
 		eye_y = 0.1
+		if _blink_t > -dt - 1e-4:
+			_log(["b"])
 		if _blink_t < -0.11:
-			_blink_t = randf_range(1.5, 5.0)
+			_blink_t = 1e9 if remote_life else randf_range(1.5, 5.0)
 	for e in eyes:
 		e.scale.y = LowPoly.damp(e.scale.y, eye_y, 40.0, dt)
 
@@ -1323,6 +1395,14 @@ func _predict_landing(from: Vector3) -> void:
 ## righting reflex: start a fall rolled over by this many turns (0.5 = on its back) and the
 ## cat twists itself upright on the way down, front half first. happens by itself when the
 ## cat comes off a climb backwards
+func _twitch(imp: float) -> void:
+	if _tyv.size() < TAIL_N:
+		return
+	for j in range(TAIL_N - 3, TAIL_N):
+		_tyv[j] += imp * (j - TAIL_N + 4) / 3.0
+		_tpv[j] += absf(imp) * 0.4
+
+
 func tumble(turns := 0.5) -> void:
 	_tum_c = turns * TAU
 	_tum_p = turns * TAU
@@ -1332,8 +1412,11 @@ func tumble(turns := 0.5) -> void:
 ## furthest), and from about 0.55 loudness the head follows. anything can call this, or reach
 ## every cat with get_tree().call_group("cat_ears", "hear", pos, loudness)
 func hear(pos: Vector3, loud := 1.0) -> void:
+	if remote_life and not _net_apply:
+		return   # a remote copy only hears what its owner heard
 	if loud < _hear_w * smoothstep(0.0, 0.35, _hear_t):
 		return
+	_log(["h", pos, loud])
 	_hear_pos = pos
 	_hear_w = clampf(loud, 0.0, 1.0)
 	_hear_t = 1.1 + _hear_w * 0.8
@@ -1348,7 +1431,7 @@ func eye_world() -> Vector3:
 ## prey rustling about nearby is heard without anyone calling hear() (ears only, never the head)
 func _listen(dt: float) -> void:
 	_listen_t -= dt
-	if _listen_t > 0.0 or not auto_listen or not is_inside_tree():
+	if _listen_t > 0.0 or not auto_listen or remote_life or not is_inside_tree():
 		return
 	_listen_t = 0.3
 	var seen := {}
@@ -1591,12 +1674,11 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	f_yaw += _bal_s * (clampf(-_cx * 22.0, -0.4, 0.4) + 0.22 * sin(_t * 5.3) * sin(_t * 1.7))
 	f_yaw = clampf(f_yaw, -1.2, 1.2)
 	_twitch_t -= dt * (1.0 + maxf(crouch, charge) * 3.0)
-	if _twitch_t < 0.0:
+	if _twitch_t < 0.0 and not remote_life:
 		_twitch_t = randf_range(1.2, 4.0)
 		var imp := randf_range(-7.0, 7.0)
-		for j in range(TAIL_N - 3, TAIL_N):
-			_tyv[j] += imp * (j - TAIL_N + 4) / 3.0
-			_tpv[j] += absf(imp) * 0.4
+		_twitch(imp)
+		_log(["t", imp])
 	var sub := 2
 	var h := dt / sub
 	for _s in sub:

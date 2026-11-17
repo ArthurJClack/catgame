@@ -1,6 +1,6 @@
 ; One-click installer for Cat Game (Inno Setup 6).
 ; Built by .github/workflows/release.yml:  iscc /DAppVersion=0.1.42 installer\catgame.iss
-; Expects the exported game at build\win\CatGame.exe (relative to the repo root).
+; Expects the exported game in build\win\ (CatGame.exe + steam dlls, relative to the repo root).
 ;
 ; - installs per user into %LOCALAPPDATA%\Programs\CatGame, so no admin / UAC prompt
 ; - start menu + desktop shortcut, launches the game when done
@@ -37,7 +37,8 @@ CloseApplications=force
 RestartApplications=no
 
 [Files]
-Source: "..\build\win\CatGame.exe"; DestDir: "{app}"; Flags: ignoreversion
+; the exe plus GodotSteam's dlls (multiplayer) and steam_appid.txt
+Source: "..\build\win\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{autoprograms}\Cat Game"; Filename: "{app}\CatGame.exe"
