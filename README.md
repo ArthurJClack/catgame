@@ -7,6 +7,8 @@ open the folder in godot 4.3+ and hit play (f5).
 
 ## controls
 - wasd moves relative to where you look (same as the orbit cam in every view), the cat turns to run that way and its head follows your look. backing up is slow, a/d = short sideways hop, hold shift = canter (6 m/s), double tap shift + hold = full gallop (11 m/s), ctrl/c stalk (crouch)
+- momentum: the cat has weight. speed builds (trot ~0.4 s, full gallop ~2.5 s) and bleeds off when you let go (gallop rolls ~1.5-2 s), asking to go the other way at speed plants the paws and skids, and the faster it runs the wider it turns. hold x (or tap caps lock) = walk (~1 m/s)
+- controller (`cat_pad.gd`, any pad godot maps, xbox names): left stick tilt = speed (nudge creep, half walk, full trot), right stick look, L3 run (click again = gallop), A jump, B dodge, X scratch, Y view, LT/RT left/right paw (both = rear up + hold), LB aim leap, RB crouch (RB+A pounce), R3 lock on, d-pad down drop, d-pad up walk toggle. radial deadzones with rescale, hysteresis on the triggers
 - space: hop (1 m), in the air next to a wall: wall kick (2 per jump)
 - alt or mouse4: souls style dodge (`cat_dash.gd`). wasd toward the body = low dart, off to the side = startled side leap, behind = whirl round + dart, nothing held = backstep. committed once pressed, i-frames from the push off (`player.is_invulnerable()`), presses during the landing are buffered so dodges chain
 - stamina bar (bottom centre, fades when full, `cat_stamina.gd`): hops, pounces, leaps, wall kicks, scrambles, swats and dodges cost a chunk, canter / gallop / climbing / claw dragging drain it while you do it. comes back after a ~0.75 s breather (full in ~2 s standing still). run it dry and the cat is winded: trot only until it's back over a third. bots get a bottomless bar unless their bot dict has `stamina: true`. tests: `-- --preview --dashtest` (headless), `--dashshow` renders the clip
@@ -50,7 +52,8 @@ open the folder in godot 4.3+ and hit play (f5).
   spring chain tail, stretch/groom/loaf/scratch/hang/climb/pin poses (5 model styles, one rig)
 - `scripts/toy_mouse.gd` prey toy
 - `scripts/paw_view.gd` first person front legs
-- `scripts/cat_player.gd` movement controller
+- `scripts/cat_player.gd` movement controller (`-- --preview --movetest` checks momentum + the pad, `--movecurve` dumps a speed csv)
+- `scripts/cat_pad.gd` gamepad reader (deadzones, button map, `CatPad.sim` fake pad for tests)
 - `scripts/level.gd` living room gym + gait reference studio
 - `scripts/npc_cat.gd` wandering cats
 - `scripts/preview.gd` scripted showcase (run with `godot -- --preview`, add `--showcase` for

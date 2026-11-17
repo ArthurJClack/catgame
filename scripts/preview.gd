@@ -124,6 +124,14 @@ func _ready() -> void:
 		cat.visible = false
 		_run_swattest()
 		return
+	if "--movecurve" in args:
+		cat.visible = false
+		_run_movecurve()
+		return
+	if "--movetest" in args:
+		cat.visible = false
+		_run_movetest()
+		return
 	if "--variants" in args:
 		cat.visible = false
 		_run_variants()
@@ -1848,4 +1856,201 @@ func _run_kickshow(test: bool) -> void:
 		report[sh[0]] = {"deepest_mm": snappedf(deep * 1000.0, 0.1), "spine_deg": snappedf(upright, 1.0), "events": events, "end_x": snappedf(p.global_position.x, 0.01)}
 		print("KICK ", sh[0], " ", JSON.stringify(report[sh[0]]))
 	Engine.time_scale = 1.0
+	get_tree().quit()
+
+
+# speed over time for a fixed script (trot, gallop, let go, walk), one csv line per tick. for the momentum chart
+func _run_movecurve() -> void:
+	var p: CatPlayer = main.player
+	var bot: Dictionary = p.bot
+	_pad(300, 300, 50.0, "wood")
+	p.global_position = Vector3(-120.0, 50.02, 0.0)
+	p.velocity = Vector3.ZERO
+	bot.clear()
+	bot.yaw = -PI / 2
+	bot.move = Vector2.ZERO
+	await _ticks(20)
+	var seq := [[{"move": Vector2(0, 1)}, 1.5], [{"move": Vector2(0, 1), "sprint": true}, 3.0], [{"move": Vector2(0, 1)}, 1.5], [{"move": Vector2.ZERO}, 1.5], [{"move": Vector2(0, 0.45)}, 1.5], [{"move": Vector2.ZERO}, 1.0]]
+	var t := 0.0
+	for st in seq:
+		for k in ["move", "sprint"]:
+			bot.erase(k)
+		for k in st[0]:
+			bot[k] = st[0][k]
+		for i in int(st[1] * 144):
+			await get_tree().physics_frame
+			t += 1.0 / 144.0
+			if i % 4 == 0:
+				print("CURVE %.3f,%.3f" % [t, Vector2(p.velocity.x, p.velocity.z).length()])
+	get_tree().quit()
+
+
+# momentum + gamepad: speed builds and bleeds with weight, analog tilt picks walk/trot, deadzones.
+# headless: godot --headless --path . -- --preview --movetest  (prints MOVETEST PASS)
+func _run_movetest() -> void:
+	var p: CatPlayer = main.player
+	var bot: Dictionary = p.bot
+	_pad(200, 200, 50.0, "wood")
+	var spot := Vector3(-60.0, 50.02, 0.0)
+	var ok := true
+	var hs := func() -> float: return Vector2(p.velocity.x, p.velocity.z).length()
+	var reset := func() -> void:
+		bot.clear()
+		bot.move = Vector2.ZERO
+		bot.yaw = -PI / 2     # run along +x
+		p.global_position = spot
+		p.velocity = Vector3.ZERO
+	# 1. ramp up: time to reach 90% of each gait from a stand
+	for c in [["walk (half tilt)", {"move": Vector2(0, CatPlayer.WALK_TILT)}, CatPlayer.speed_for_tilt(CatPlayer.WALK_TILT)],
+			["trot", {"move": Vector2(0, 1)}, CatPlayer.TROT_SPEED],
+			["canter", {"move": Vector2(0, 1), "canter": true}, CatPlayer.CANTER_SPEED],
+			["gallop", {"move": Vector2(0, 1), "sprint": true}, CatPlayer.SPRINT_SPEED]]:
+		reset.call()
+		await _ticks(20)
+		for k in c[1]:
+			bot[k] = c[1][k]
+		var t90 := -1.0
+		var top := 0.0
+		for i in 720:
+			await get_tree().physics_frame
+			var v: float = hs.call()
+			top = maxf(top, v)
+			if t90 < 0.0 and v >= c[2] * 0.9:
+				t90 = (i + 1) / 144.0
+		print("%-17s target %.2f m/s  reached 90%% in %.2f s  top %.2f" % [c[0], c[2], t90, top])
+		ok = ok and t90 > 0.0 and absf(top - c[2]) < 0.25
+		if c[0] == "trot":
+			ok = ok and t90 > 0.2 and t90 < 0.8
+		if c[0] == "gallop":
+			ok = ok and t90 > 1.2 and t90 < 4.0
+		# 2. let go: coast to a stop
+		bot.move = Vector2.ZERO
+		bot.erase("canter")
+		bot.erase("sprint")
+		var x0 := p.global_position
+		var ts := -1.0
+		for i in 720:
+			await get_tree().physics_frame
+			if hs.call() < 0.05:
+				ts = (i + 1) / 144.0
+				break
+		var dist := Vector2(p.global_position.x - x0.x, p.global_position.z - x0.z).length()
+		print("%-17s let go: stops in %.2f s over %.2f m" % ["", ts, dist])
+		ok = ok and ts > 0.1
+		if c[0] == "gallop":
+			ok = ok and ts > 0.8 and ts < 2.5 and dist > 3.0
+	# 3. analog curve: tilt -> speed
+	var line := "tilt -> speed:"
+	for m in [0.1, 0.25, 0.45, 0.6, 0.75, 1.0]:
+		reset.call()
+		await _ticks(10)
+		bot.move = Vector2(0, m)
+		await _ticks(200)
+		line += "  %.2f=%.2f" % [m, hs.call()]
+	print(line)
+	ok = ok and CatPlayer.speed_for_tilt(CatPlayer.WALK_TILT) < 1.05 and CatPlayer.speed_for_tilt(1.0) == CatPlayer.TROT_SPEED
+	# 4. release the gallop button but keep running: settles to a trot within ~1.3 s
+	reset.call()
+	bot.move = Vector2(0, 1)
+	bot.sprint = true
+	await _ticks(500)
+	bot.sprint = false
+	var tdown := -1.0
+	for i in 400:
+		await get_tree().physics_frame
+		if hs.call() < CatPlayer.TROT_SPEED + 0.3:
+			tdown = (i + 1) / 144.0
+			break
+	print("gallop -> trot (let go of run): %.2f s" % tdown)
+	ok = ok and tdown > 0.3 and tdown < 1.6
+	# 5. orbit controls: reverse the stick at a gallop = brake (skid) then come round, wide arcs when turning
+	reset.call()
+	bot.erase("yaw")
+	p.yaw = -PI / 2
+	p.orb_yaw = -PI / 2
+	bot.move = Vector2(0, 1)
+	bot.sprint = true
+	await _ticks(500)
+	var y0 := p.yaw
+	var d0 := Vector2(p.velocity.x, p.velocity.z).normalized()
+	bot.move = Vector2(0, -1)    # stick straight back (camera stays)
+	bot.sprint = false
+	var t_slow := -1.0
+	var maxslip := 0.0
+	for i in 400:
+		await get_tree().physics_frame
+		maxslip = maxf(maxslip, p.slip)
+		if t_slow < 0.0 and Vector2(p.velocity.x, p.velocity.z).dot(d0) < 0.5:
+			t_slow = (i + 1) / 144.0
+	print("gallop, stick reversed: forward run killed after %.2f s, now %.2f m/s, max slip %.2f, body turned %.0f deg" % [t_slow, hs.call(), maxslip, rad_to_deg(absf(wrapf(p.yaw - y0, -PI, PI)))])
+	ok = ok and t_slow > 0.3 and t_slow < 2.0
+	reset.call()
+	bot.erase("yaw")
+	p.yaw = -PI / 2
+	p.orb_yaw = -PI / 2
+	bot.move = Vector2(0, 1)
+	bot.sprint = true
+	await _ticks(500)
+	bot.move = Vector2(1, 0)     # hard right at a gallop
+	var tq := -1.0
+	var y1 := p.yaw
+	for i in 300:
+		await get_tree().physics_frame
+		if tq < 0.0 and absf(wrapf(p.yaw - y1, -PI, PI)) > PI / 2 - 0.1:
+			tq = (i + 1) / 144.0
+	print("gallop, hard right: body turned 90 deg in %.2f s (standing: %.2f s)" % [tq, (PI / 2) / CatPlayer.TURN_RATE_SLOW])
+	ok = ok and tq > 0.3
+	# 6. gamepad maths
+	var z := CatPad.shape(Vector2(0.1, 0.05), CatPad.MOVE_DEADZONE)
+	var e := CatPad.shape(Vector2(0.0, 0.2), CatPad.MOVE_DEADZONE)
+	var f := CatPad.shape(Vector2(0.0, 0.97), CatPad.MOVE_DEADZONE)
+	print("pad deadzone: rest %s  just past %.3f  full %.2f" % [z, e.length(), f.length()])
+	ok = ok and z == Vector2.ZERO and e.length() < 0.06 and is_equal_approx(f.length(), 1.0)
+	var mg := CatPad.merge({"move": Vector2(0, 1), "canter": true, "sprint": false, "jump": false}, {"move": Vector2(0.1, 0), "canter": false, "sprint": false, "jump": true})
+	ok = ok and mg.move == Vector2(0, 1) and mg.canter and mg.jump
+	# 7. a (virtual) pad driving the real input path: half tilt walks, full tilt trots, L3 runs, right stick turns the camera
+	CatPad.sim = {"axes": {}, "buttons": {}}
+	if CatPad.connected():
+		reset.call()
+		bot.clear()          # empty bot = real input
+		p.orb_yaw = -PI / 2
+		p.yaw = -PI / 2
+		var axis := func(a: JoyAxis, v: float) -> void:
+			CatPad.sim.axes[a] = v
+		var button := func(b: JoyButton, down: bool) -> void:
+			CatPad.sim.buttons[b] = down
+		axis.call(JOY_AXIS_LEFT_Y, -0.55)    # a bit over half forward
+		await _ticks(300)
+		var v_half: float = hs.call()
+		axis.call(JOY_AXIS_LEFT_Y, -1.0)
+		await _ticks(300)
+		var v_full: float = hs.call()
+		button.call(JOY_BUTTON_LEFT_STICK, true)
+		await _ticks(2)
+		button.call(JOY_BUTTON_LEFT_STICK, false)
+		await _ticks(300)
+		var v_run: float = hs.call()
+		button.call(JOY_BUTTON_LEFT_STICK, true)
+		await _ticks(2)
+		button.call(JOY_BUTTON_LEFT_STICK, false)
+		await _ticks(500)
+		var v_gal: float = hs.call()
+		axis.call(JOY_AXIS_LEFT_Y, 0.0)
+		await _ticks(500)
+		var oy := p.orb_yaw
+		axis.call(JOY_AXIS_RIGHT_X, 1.0)
+		for i in 30:
+			await get_tree().process_frame
+		axis.call(JOY_AXIS_RIGHT_X, 0.0)
+		var turned := wrapf(p.orb_yaw - oy, -PI, PI)
+		axis.call(JOY_AXIS_TRIGGER_LEFT, 1.0)
+		await _ticks(2)
+		var lt: bool = p._read_input().paw_l
+		axis.call(JOY_AXIS_TRIGGER_LEFT, 0.0)
+		print("pad: tilt 0.55 -> %.2f m/s, full -> %.2f, L3 -> %.2f, L3 again -> %.2f, right stick 30 frames -> %.2f rad, LT paw_l %s" % [v_half, v_full, v_run, v_gal, turned, lt])
+		ok = ok and v_half > 0.6 and v_half < 1.6 and absf(v_full - CatPlayer.TROT_SPEED) < 0.2 and absf(v_run - CatPlayer.CANTER_SPEED) < 0.3 and v_gal > 10.0 and turned < -0.05 and lt
+		CatPad.sim = {}
+	else:
+		print("pad: couldn't fake a pad here, skipped")
+	print("MOVETEST %s" % ("PASS" if ok else "FAIL"))
 	get_tree().quit()
