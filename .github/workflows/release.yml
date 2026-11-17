@@ -156,13 +156,18 @@ jobs:
           mkdir -p ~/.steam/sdk64 && cp linux64/steamclient.so ~/.steam/sdk64/
           cd "$GITHUB_WORKSPACE"
           command -v gdb >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb) >/dev/null || true
-          # GodotSteam Server's serverInitEx source, to see why it crashes (codeberg is ci-only reachable)
-          git clone -q --depth 1 --branch v4.3-gde https://codeberg.org/godotsteam/godotsteam-server.git /tmp/gss || git clone -q --depth 1 https://codeberg.org/godotsteam/godotsteam-server.git /tmp/gss || true
-          f=$(grep -rl "SteamServer::serverInitEx" /tmp/gss | head -1)
-          echo "== $f"
-          awk '/SteamServer::SteamServer\(/{p=1} p{print; if(/^}/){p=0}}' "$f" | head -60
-          awk '/SteamServer::serverInit(Ex)?\(/{p=1} p{print; if(/^}/){p=0}}' "$f" | head -90
-          awk '/::getIPFromString\(/{p=1} p{print; if(/^}/){p=0}}' "$f" | head -30
+          # which GodotSteam Server build survives serverInit (v4.3/v4.4 parse the ip with a steam
+          # networking call that crashes before init). each one in the editor binary, debug libs
+          G=~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64
+          mv addons/godotsteam "$RUNNER_TEMP/gs_client2"
+          for v in v4.0-gde v4.0.1-gde v4.3-gde; do
+            echo "== GodotSteam Server $v"
+            rm -rf addons/godotsteam_server
+            GODOTSTEAM_FLAVOR=server GODOTSTEAM_URL="https://codeberg.org/godotsteam/godotsteam-server/releases/download/$v/godotsteam-server-gdextension-plugin.zip" bash tools/fetch_godotsteam.sh > /dev/null 2>&1 || { echo "fetch failed"; continue; }
+            echo "res://$(ls addons/godotsteam_server/*.gdextension)" > .godot/extension_list.cfg
+            CATGAME_STEAM_TRACE=1 timeout 40 $G --headless --path . --script res://tests/steam_server_init.gd 2>&1 | grep -v "already registered\|class_db" | tail -12 || true
+          done
+          mv "$RUNNER_TEMP/gs_client2" addons/godotsteam
           (cd build/server-linux && CATGAME_STEAM_TRACE=1 timeout 90 gdb -q -batch -ex run -ex bt --args ./CatGameServer.x86_64 --headless -- --name "catgame ci $GITHUB_RUN_ID" --port 24792 --query-port 27016 > ../../steam-live.log 2>&1) &
           sleep 30
           ip=$(curl -s https://api.ipify.org)
