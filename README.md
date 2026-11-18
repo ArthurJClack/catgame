@@ -77,7 +77,12 @@ open the folder in godot 4.3+ and hit play (f5).
 ## views + levels
 
 - v cycles first person, third person and orbit cam. in orbit, the mouse orbits the cat, the scroll wheel zooms, wasd is camera relative and the cat turns to face where it goes. the camera never clips through walls.
-- the gap in the west yard fence (and f6) goes to the forest level. f7 goes to the stealth level, f8 the running trail.
+- the farm is the **hub world** (`scripts/hub.gd`): walk out a gate to travel, every level has a way back that drops you at the gate you left by.
+  - west fence gate -> the forest · east fence steel gate + lamp lit lane -> pier 9 (night docks) · north timber arch -> the running trail · cellar hatch against the barn -> the rat pit
+  - fingerpost on the patio points at all four. in multiplayer the signs show "2 cats there" and you get a flash when a friend walks off somewhere ("mo went to the forest"); each player travels on their own, lobby "go to them" still works
+  - ways back: forest gate behind the spawn, a lit cat hole in the dock warehouse west wall, a farm gate just off the trail start line, a lit tunnel in the pit wall behind you. f5 still works everywhere
+  - f6 / f7 / f8 / f10 stay as debug shortcuts. add a destination: an entry in `Hub.DESTS` (+ `FENCE_GATES` for a fence gate or your own builder), a spawn in `Hub.spawns()`, and `Hub.exit(...)` in the level
+  - tests: `xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/hub_test.gd` (every gate there and back). `tests/hub_show.gd` renders the tour clip, `tests/hub_map.gd` the labelled map
 
 ## forest (res://forest.tscn)
 walk out the gap in the west yard fence (or f6 from the main map). f5 / the gate behind you goes back.

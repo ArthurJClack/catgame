@@ -310,6 +310,7 @@ static func build(root: Node3D) -> Dictionary:
 	return {
 		"spawn": Vector3(-1.0, 0.02, 1.2),
 		"forest_gate": Vector3(-15.2, 0.02, 12.25),
+		"hub_spawns": Hub.spawns(),
 		"studio_x": 40.0,
 	}
 

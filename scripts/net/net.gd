@@ -409,7 +409,14 @@ func _on_packet(from: int, data: PackedByteArray) -> void:
 			if nm != "" and not transport is NetSteamTransport:
 				p.name = nm     # steam names come from steam, never from the packet
 			p.style = b.get_utf8_string()
+			var was := p.scene
 			p.scene = b.get_utf8_string()
+			# hub travel: say when a friend walks off to another level (or comes to ours)
+			if not first and was != "" and was != p.scene:
+				if p.scene == _scene_path():
+					_flash("%s came over to %s" % [p.name, scene_label(p.scene)])
+				else:
+					_flash("%s went to %s" % [p.name, scene_label(p.scene)])
 			if proto != PROTO:
 				_flash("%s has a different game version" % p.name)
 			if first:
@@ -511,7 +518,7 @@ func go_to(id: int) -> void:
 
 static func scene_label(path: String) -> String:
 	match path:
-		"res://main.tscn": return "the house"
+		"res://main.tscn": return "the farm"
 		"res://forest.tscn": return "the forest"
 		"res://stealth.tscn": return "the docks"
 		"res://trail.tscn": return "the trail"

@@ -59,6 +59,8 @@ func _ready() -> void:
 		t.arena = self
 		add_child(t)
 		return
+	# way back up to the farm: a low tunnel in the wall behind the spawn (hub.gd)
+	Hub.exit(self, Vector3(0, 0, R - 0.02), Vector3(0, 0, -1), "pit", Vector2(0.7, 0.6), "farm")
 	if not OS.has_feature("web"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_start_wave(0)
@@ -188,8 +190,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_H:
 			help_label.visible = not help_label.visible
 		KEY_F5:
-			Engine.set_meta("cat_style", player.style)
-			get_tree().change_scene_to_file.call_deferred("res://main.tscn")
+			Hub.go_home(self, "pit")
 
 
 # ---------------------------------------------------------------- the pit

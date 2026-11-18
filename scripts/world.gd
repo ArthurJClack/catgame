@@ -32,6 +32,7 @@ static func build(lv: Node3D) -> void:
 	_roofs(lv)
 	_yard(lv)
 	_barn(lv, Vector3(12.0, 0, 22.0))
+	Hub.build_farm(lv)
 
 
 static func B(lv: Node3D, c: Vector3, s: Vector3, col: Color, collide := true) -> Node3D:
@@ -289,8 +290,10 @@ static func _yard(lv: Node3D) -> void:
 			var pm := (pa + pb) * 0.5
 			var pl := pa.distance_to(pb)
 			var horiz := absf(dir.x) > 0.5
-			if not horiz and pa.x < 0.0 and absf(pm.y - 12.25) < 0.5:
-				_forest_gate(lv, Vector3(pm.x, 0, pm.y), pl)
+			# hub gates to the other levels (hub.gd): forest west, pier 9 east, trail north
+			var gate := Hub.gate_on_fence(horiz, pm, pl)
+			if gate != "":
+				Hub.fence_gate(lv, gate, Vector3(pm.x, 0, pm.y), pl)
 				continue
 			var sz := Vector3(pl, 1.25, 0.05) if horiz else Vector3(0.05, 1.25, pl)
 			var panel := Level.box(lv, Vector3(pm.x, 0.625, pm.y), sz, C_FENCE, true, 0.0, false)
@@ -345,38 +348,6 @@ static func _yard(lv: Node3D) -> void:
 	var tm := ToyMouse.new()
 	tm.position = Vector3(3.0, 0.02, 10.5)
 	lv.add_child(tm)
-
-
-## open gate in the west fence: walk through it to go to the forest level
-static func _forest_gate(lv: Node3D, c: Vector3, width: float) -> void:
-	for sz in [-1.0, 1.0]:
-		B(lv, c + Vector3(0, 0.75, sz * width * 0.5), Vector3(0.12, 1.5, 0.12), C_FENCE.darkened(0.2))
-	B(lv, c + Vector3(0, 1.55, 0), Vector3(0.12, 0.1, width + 0.12), C_FENCE.darkened(0.2))
-	# the gate leaf swung open outward
-	Level.rbox(lv, c + Vector3(-0.55, 0.6, -width * 0.5 + 0.1), Vector3(1.1, 1.1, 0.04), Vector3(0, 0.35, 0), C_FENCE)
-	# path out into the trees
-	for k in 6:
-		B(lv, c + Vector3(-0.6 - k * 0.7, -0.005, sin(k * 1.3) * 0.2), Vector3(0.45, 0.02, 0.4), Color(0.6, 0.58, 0.54), false)
-	var sign := Label3D.new()
-	sign.text = "forest ->"
-	sign.font_size = 48
-	sign.pixel_size = 0.004
-	sign.position = c + Vector3(0.1, 1.75, 0)
-	sign.rotation.y = PI / 2
-	lv.add_child(sign)
-	var area := Area3D.new()
-	var cs := CollisionShape3D.new()
-	var bs := BoxShape3D.new()
-	bs.size = Vector3(0.6, 1.2, width)
-	cs.shape = bs
-	area.add_child(cs)
-	area.position = c + Vector3(-0.6, 0.6, 0)
-	lv.add_child(area)
-	area.body_entered.connect(func(b: Node3D) -> void:
-		if b is CatPlayer and (b as CatPlayer).bot.is_empty():
-			var m := lv.get_tree().current_scene
-			if m.has_method("go_scene"):
-				m.call("go_scene", "res://forest.tscn"))
 
 
 static func _tree(lv: Node3D, base: Vector3, h: float, seed: int) -> void:

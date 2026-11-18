@@ -116,6 +116,8 @@ func _dress() -> void:
 
 func _build_gate_trigger() -> void:
 	var a := Area3D.new()
+	a.add_to_group("hub_trigger")
+	a.set_meta("hub_to", "res://main.tscn")
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	bs.size = Vector3(2.4, 3.0, 1.0)
@@ -132,10 +134,7 @@ func _go_home() -> void:
 	if leaving:
 		return
 	leaving = true
-	Engine.set_meta("cat_spawn", "forest_gate")
-	if player and player.get("style") != null:
-		Engine.set_meta("cat_style", player.style)
-	get_tree().change_scene_to_file.call_deferred("res://main.tscn")
+	Hub.go_home(self, "forest")
 
 
 func _build_hud() -> void:

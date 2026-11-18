@@ -33,6 +33,9 @@ func _ready() -> void:
 	player.position = info.spawn
 	player.yaw = info.spawn_yaw
 	add_child(player)
+	Hub.arrive(player)
+	# cat sized hole in the west wall bricks, next to the spawn: back to the farm (hub.gd)
+	Hub.exit(self, Vector3(-StealthLevel.HALL_X + 0.02, 0.0, 4.4), Vector3(1, 0, 0), "docks", Vector2(0.42, 0.3), "farm")
 	_build_hud()
 	var args := OS.get_cmdline_user_args()
 	var si := args.find("--still")
@@ -188,7 +191,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_H:
 			help_label.visible = not help_label.visible
 		KEY_F5:
-			get_tree().change_scene_to_file("res://main.tscn")
+			Hub.go_home(self, "docks")
 
 
 func _teleport(p: Vector3, yaw: float) -> void:
