@@ -2042,7 +2042,7 @@ func _run_movetest() -> void:
 		for i in 30:
 			await get_tree().process_frame
 		axis.call(JOY_AXIS_RIGHT_X, 0.0)
-		var turned := wrapf(p.orb_yaw - oy, -PI, PI)
+		var turned := p.orb_yaw - oy    # no wrap: on a slow renderer 30 frames can spin past a full turn
 		axis.call(JOY_AXIS_TRIGGER_LEFT, 1.0)
 		await _ticks(2)
 		var lt: bool = p._read_input().paw_l
