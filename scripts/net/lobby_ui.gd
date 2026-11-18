@@ -1,6 +1,7 @@
 extends CanvasLayer
 ## M: the multiplayer menu. host a lobby (friends only or public), invite friends through the
 ## steam overlay, browse lobbies, see who's here and which level they're in, leave.
+## servers: dedicated servers off steam's server list (NetServerBrowser), lan servers, or join by ip.
 
 var panel: PanelContainer
 var box: VBoxContainer
@@ -10,6 +11,9 @@ var member_list: VBoxContainer
 var actions: HBoxContainer
 var hint: Label
 var _lobbies: Array = []
+var _servers: Array = []
+var _addr_text := ""
+var server_list: VBoxContainer
 var _mouse_before := Input.MOUSE_MODE_VISIBLE
 
 
@@ -51,6 +55,8 @@ func _ready() -> void:
 	box.add_child(member_list)
 	lobby_list = VBoxContainer.new()
 	box.add_child(lobby_list)
+	server_list = VBoxContainer.new()
+	box.add_child(server_list)
 	hint = Label.new()
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.custom_minimum_size.x = 520
@@ -62,6 +68,8 @@ func _ready() -> void:
 	Net.changed.connect(_rebuild)
 	if Net.steam:
 		Net.steam.lobbies_listed.connect(func(l): _lobbies = l; _rebuild())
+	if Net.browser:
+		Net.browser.servers_listed.connect(func(l): _servers = l; _rebuild())
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -79,8 +87,10 @@ func toggle() -> void:
 	if visible:
 		_mouse_before = Input.mouse_mode
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-		if Net.steam and Net.steam.ready_ok and not Net.steam.in_lobby():
+		if Net.steam and Net.steam.ready_ok and not Net.steam.in_lobby() and not Net.on_server():
 			Net.steam.refresh()
+			if Net.browser and Net.browser.available():
+				Net.browser.refresh()
 		_rebuild()
 	elif not OS.has_feature("web"):
 		Input.mouse_mode = _mouse_before if _mouse_before != Input.MOUSE_MODE_VISIBLE else Input.MOUSE_MODE_CAPTURED
@@ -117,20 +127,31 @@ func _rebuild() -> void:
 	_clear(actions)
 	_clear(member_list)
 	_clear(lobby_list)
+	_clear(server_list)
 	var st: NetSteamTransport = Net.steam
 	var tr = Net.transport
-	if st and st.ready_ok:
+	if Net.on_server():
+		_btn(actions, "leave server", Net.leave_server)
+	elif st and st.ready_ok:
 		if st.in_lobby():
 			_btn(actions, "invite friends", st.invite_friends)
 			_btn(actions, "leave", st.leave_lobby)
 		else:
 			_btn(actions, "host (friends)", func(): st.host(false))
 			_btn(actions, "host (public)", func(): st.host(true))
-			_btn(actions, "refresh", st.refresh)
+			_btn(actions, "refresh", func():
+				st.refresh()
+				if Net.browser and Net.browser.available():
+					Net.browser.refresh())
 	# who's here
 	if tr and (not (tr is NetSteamTransport) or st.in_lobby()):
 		var hdr := Label.new()
-		hdr.text = st.lobby_name() if tr is NetSteamTransport else "%s (%s)" % ["playing together", tr.kind()]
+		if tr is NetSteamTransport:
+			hdr.text = st.lobby_name()
+		elif Net.on_server():
+			hdr.text = str(Net.server_info.get("name", "connecting to %s..." % Net.server_addr))
+		else:
+			hdr.text = "playing together (%s)" % tr.kind()
 		hdr.add_theme_font_size_override("font_size", 18)
 		member_list.add_child(hdr)
 		_row(member_list, "you (%s)" % Net.my_name)
@@ -157,9 +178,48 @@ func _rebuild() -> void:
 			var r := _row(lobby_list, "%s  (%d/%d)" % [nm, l.cats, l.max])
 			var lid: int = l.id
 			_btn(r, "join", func(): st.join_lobby(lid))
-	elif tr == null:
+	if not Net.on_server() and not (st and st.in_lobby()) and not (tr is NetEnetTransport):
+		_server_section()
+	if tr == null and not Net.on_server():
 		var l := Label.new()
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		l.custom_minimum_size.x = 520
-		l.text = "no steam: you can still play over lan / direct ip.\nhost: start the game with  -- --net-host\nfriend: start with  -- --net-join <host's ip>   (udp port 24680)"
+		l.text = "no steam: you can still play over lan / direct ip (join a server by ip below).\nhost: start the game with  -- --net-host\nfriend: start with  -- --net-join <host's ip>   (udp port 24680)"
 		member_list.add_child(l)
+
+
+func _server_section() -> void:
+	var hdr := Label.new()
+	hdr.text = "servers"
+	hdr.add_theme_font_size_override("font_size", 18)
+	server_list.add_child(hdr)
+	var br: NetServerBrowser = Net.browser
+	if br and br.available():
+		var bar := HBoxContainer.new()
+		bar.add_theme_constant_override("separation", 8)
+		server_list.add_child(bar)
+		_btn(bar, "steam servers", func(): br.refresh(false))
+		_btn(bar, "lan servers", func(): br.refresh(true))
+		if br.busy:
+			var w := Label.new()
+			w.text = "looking..."
+			bar.add_child(w)
+		for sv in _servers.slice(0, 12):
+			var where := " · %s" % sv.map if sv.map != "" else ""
+			var r := _row(server_list, "%s  (%d/%d)%s · %d ms" % [sv.name, sv.cats, sv.max, where, sv.ping])
+			var a: String = sv.addr
+			var p: int = sv.port
+			if a != "":
+				_btn(r, "join", func(): Net.join_server(a, p))
+	# anyone can type an address: a friend's server, or one steam doesn't list
+	var direct := HBoxContainer.new()
+	direct.add_theme_constant_override("separation", 8)
+	server_list.add_child(direct)
+	var le := LineEdit.new()
+	le.placeholder_text = "server ip  (or ip:port)"
+	le.text = _addr_text
+	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	le.text_changed.connect(func(t): _addr_text = t)
+	le.text_submitted.connect(func(t): Net.join_server(t))
+	direct.add_child(le)
+	_btn(direct, "join", func(): Net.join_server(_addr_text))

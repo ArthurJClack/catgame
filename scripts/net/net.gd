@@ -12,6 +12,8 @@ extends Node
 ## how people find each other:
 ##   - steam (default): press M. host a lobby, invite friends through the steam overlay, or
 ##     browse public lobbies. needs steam running. see NetSteamTransport for the app id story.
+##   - dedicated servers: the m menu's server list (steam server browser) or direct join by ip.
+##     run one with `--headless -- --server` (NetDedicatedServer, steam listing: NetSteamServer)
 ##   - lan / direct ip: `-- --net-host` and `-- --net-join <ip>` (NetEnetTransport)
 ##   - `-- --nettest`: loopback test, your own cat echoed back through a fake laggy network
 
@@ -23,6 +25,10 @@ const EVENT_REPEATS := 4      # each life event rides along in this many snapsho
 const PEER_TIMEOUT := 8.0
 
 var steam: NetSteamTransport
+var browser: NetServerBrowser   # dedicated server list (steam)
+var server: NetDedicatedServer  # set when this game IS a dedicated server
+var server_info := {}           # set while connected to a dedicated server: name, map, motd, max
+var server_addr := ""
 var transport: Node = null     # whichever transport is live
 var peers := {}                # id -> NetPeer
 var my_name := "cat"
@@ -40,6 +46,8 @@ var _hello_key := ""
 var _player: Node = null
 var _was_floor := true
 var _was_claw := false
+var _join_t := 0.0
+var _map_done := false
 
 
 func _ready() -> void:
@@ -48,6 +56,9 @@ func _ready() -> void:
 	if my_name == "":
 		my_name = "cat"
 	var args := OS.get_cmdline_user_args()
+	if NetDedicatedServer.wanted(args):
+		_start_server(args)
+		return
 	if "--nettest" in args:
 		var lt := NetLoopTransport.new()
 		# knobs for the test: --net-hz 30 --net-lag 60 (ms) --net-jitter 20 (ms) --net-loss 0.02
@@ -70,7 +81,11 @@ func _ready() -> void:
 			et.port = int(args[pi + 1])
 		if args.find("--net-name") >= 0 and args.find("--net-name") + 1 < args.size():
 			my_name = args[args.find("--net-name") + 1]
-		_use(et)
+		if et.hosting:
+			_use(et)
+		else:
+			join_server.call_deferred(et.address, et.port)   # a host or a dedicated server
+			et.free()
 	elif not _quiet_run(args):
 		steam = NetSteamTransport.new()
 		steam.name = "Steam"
@@ -79,14 +94,124 @@ func _ready() -> void:
 		if steam.start():
 			my_name = steam.my_name
 			steam.status.connect(_set_status)
-			steam.lobby_changed.connect(func(): changed.emit())
+			steam.lobby_changed.connect(func():
+				# took a steam invite while on a server: the lobby wins
+				if steam.in_lobby() and on_server():
+					leave_server()
+				changed.emit())
 			_use(steam, false)
 			_set_status("steam ready as %s. host a lobby or join one" % my_name)
+			browser = NetServerBrowser.new()
+			browser.name = "ServerBrowser"
+			add_child(browser)
+			browser.setup(steam.steam)
+			browser.status.connect(_set_status)
 		else:
 			_set_status(steam.why)
+		# steam's server browser (or a shortcut) started us with +connect ip:port
+		var all := OS.get_cmdline_args()
+		var ci := all.find("+connect")
+		if ci >= 0 and ci + 1 < all.size():
+			var hp := all[ci + 1].split(":")
+			join_server.call_deferred(hp[0], int(hp[1]) if hp.size() > 1 else NetEnetTransport.PORT)
 	if DisplayServer.get_name() != "headless" and not _quiet_run(args):
 		ui = preload("res://scripts/net/lobby_ui.gd").new()
 		add_child(ui)
+
+
+func _start_server(args: PackedStringArray) -> void:
+	# a dedicated server: no window, no cat. swap whatever level loaded for an empty scene
+	Engine.max_fps = 120                       # forwarding latency <= ~8 ms without spinning a core
+	Engine.physics_ticks_per_second = 30
+	server = NetDedicatedServer.new()
+	server.name = "Server"
+	server.proto = PROTO
+	server.configure(args)
+	add_child(server)
+	if not server.start():
+		get_tree().quit(1)
+		return
+	var cs := get_tree().current_scene
+	if cs == null or cs.scene_file_path != "res://server.tscn":
+		get_tree().change_scene_to_file.call_deferred("res://server.tscn")
+
+
+## join a dedicated server (or anyone running --net-host) by address
+func join_server(addr: String, port: int = NetEnetTransport.PORT) -> void:
+	addr = addr.strip_edges()
+	if addr == "":
+		return
+	if ":" in addr and addr.count(":") == 1:
+		port = int(addr.get_slice(":", 1))
+		addr = addr.get_slice(":", 0)
+	leave_server()
+	if steam and steam.in_lobby():
+		steam.leave_lobby()
+	var et := NetEnetTransport.new()
+	et.address = addr
+	et.port = port
+	_switch_to(et)
+	if transport != et:
+		return
+	server_addr = "%s:%d" % [addr, port]
+	_join_t = 0.0
+	_map_done = false
+	et.lost.connect(_on_server_lost)
+	_set_status("connecting to %s..." % server_addr)
+
+
+func leave_server() -> void:
+	if not (transport is NetEnetTransport):
+		return
+	var t: NetEnetTransport = transport
+	for id in t.members():
+		t.send(id, PackedByteArray([CatNetState.T_BYE]), true)
+	t.poll()
+	_switch_to(steam if steam and steam.ready_ok else null)
+	t.close()
+	t.queue_free()
+	var was: String = str(server_info.get("name", server_addr))
+	server_info = {}
+	server_addr = ""
+	if was != "":
+		_set_status("left %s" % was)
+
+
+func on_server() -> bool:
+	return transport is NetEnetTransport and server_addr != ""
+
+
+func _on_server_lost() -> void:
+	var nm: String = server_info.get("name", server_addr)
+	var ever := not server_info.is_empty()
+	leave_server()
+	_set_status("lost the connection to %s" % nm if ever else "couldn't reach %s (wrong address, or its udp port isn't open)" % nm)
+
+
+## swap the live transport: everyone from the old one leaves
+func _switch_to(t: Node) -> void:
+	if transport and is_instance_valid(transport):
+		for id in peers.keys():
+			_on_peer_left(id)
+		for pair in [["packet", _on_packet], ["peer_joined", _on_peer_joined], ["peer_left", _on_peer_left]]:
+			if transport.is_connected(pair[0], pair[1]):
+				transport.disconnect(pair[0], pair[1])
+	transport = null
+	_hello_key = ""
+	if t == null:
+		changed.emit()
+		return
+	if t == steam:
+		transport = steam
+		steam.packet.connect(_on_packet)
+		steam.peer_joined.connect(_on_peer_joined)
+		steam.peer_left.connect(_on_peer_left)
+		for m in steam.members():
+			_on_peer_joined(m)
+		changed.emit()
+		return
+	_use(t)
+	changed.emit()
 
 
 func _quiet_run(args: PackedStringArray) -> bool:
@@ -222,6 +347,8 @@ func _check_hello() -> void:
 	if key != _hello_key:
 		_hello_key = key
 		_send_hello_to(transport.members())
+		if not server_info.is_empty():
+			transport.send(1, _hello_bytes(), true)
 
 
 func _send_hello_to(ids: Array) -> void:
@@ -290,6 +417,35 @@ func _on_packet(from: int, data: PackedByteArray) -> void:
 			changed.emit()
 		CatNetState.T_BYE:
 			_on_peer_left(from)
+		CatNetState.T_INFO:
+			if from == 1 and transport is NetEnetTransport:
+				_on_server_info(NetDedicatedServer.read_info(data))
+
+
+func _on_server_info(info: Dictionary) -> void:
+	server_info = info
+	_set_status("on %s" % info.name)
+	if info.proto != PROTO:
+		_flash("%s runs a different game version, update both" % info.name)
+	elif info.motd != "":
+		_flash(info.motd)
+	# the server knows us by our hello (name on the server list, who's where)
+	if transport:
+		transport.send(1, _hello_bytes(), true)
+	# everyone starts in the server's level (you can still wander off, you'll only see cats
+	# in the same level as you)
+	var map: String = info.map
+	if not _map_done and map != "" and map != _scene_path() and ResourceLoader.exists(map):
+		_map_done = true
+		print("net: heading to %s, where the server is" % scene_label(map))
+		var root := get_tree().current_scene
+		if is_instance_valid(_player):
+			Engine.set_meta("cat_style", _player.get("style"))
+		if root and root.has_method("go_scene"):
+			root.call("go_scene", map)
+		else:
+			get_tree().change_scene_to_file.call_deferred(map)
+	_map_done = true
 
 
 # ------------------------------------------------------------------ per frame
@@ -302,6 +458,10 @@ func _process(dt: float) -> void:
 		transport.poll()
 	if steam and transport != steam:
 		steam.poll()
+	if on_server() and server_info.is_empty():
+		_join_t += dt
+		if _join_t > 10.0:
+			_on_server_lost()
 	var here := _scene_path()
 	var root := get_tree().current_scene
 	var t := NetPeer.now()
@@ -349,16 +509,20 @@ func go_to(id: int) -> void:
 		get_tree().change_scene_to_file.call_deferred(path)
 
 
-func scene_label(path: String) -> String:
+static func scene_label(path: String) -> String:
 	match path:
 		"res://main.tscn": return "the house"
 		"res://forest.tscn": return "the forest"
 		"res://stealth.tscn": return "the docks"
+		"res://trail.tscn": return "the trail"
+		"res://arena.tscn": return "the arena"
 	return path.get_file().get_basename()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		if server and is_instance_valid(server):
+			server.close()
 		if transport and is_instance_valid(transport):
 			var b := PackedByteArray([CatNetState.T_BYE])
 			for id in transport.members():

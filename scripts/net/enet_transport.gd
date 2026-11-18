@@ -4,16 +4,23 @@ extends Node
 ## `CatGame.exe -- --net-join 192.168.1.20` on the others (udp port 24680, or --net-port).
 ## star shaped: the host forwards everyone's packets to everyone else, so clients only ever
 ## talk to the host. every packet is [u32 sender id] + payload.
+##
+## the same thing runs the dedicated server (NetDedicatedServer): `dedicated` = the host has no cat
+## of its own, so it isn't in the roster and nobody sees a "cat 1" join. it only forwards and
+## sends its own messages (server info) to clients.
 
 signal packet(from_id: int, data: PackedByteArray)
 signal peer_joined(id: int)
 signal peer_left(id: int)
+signal lost   # client: the connection to the host failed or dropped
 
 const PORT := 24680
 const MAX_CLIENTS := 7
 
 var my_id := 0
 var hosting := false
+var dedicated := false
+var max_clients := MAX_CLIENTS
 var address := ""
 var port := PORT
 var _peer: MultiplayerPeer
@@ -28,7 +35,7 @@ func start() -> bool:
 		return false
 	var err: int
 	if hosting:
-		err = e.create_server(port, MAX_CLIENTS)
+		err = e.create_server(port, max_clients)
 	else:
 		err = e.create_client(address, port)
 	if err != OK:
@@ -39,7 +46,7 @@ func start() -> bool:
 	_peer.peer_disconnected.connect(func(i): _links.erase(i))
 	if hosting:
 		my_id = 1
-		_roster = [1]
+		_roster = [] if dedicated else [1]
 	return true
 
 
@@ -82,11 +89,15 @@ func poll() -> void:
 		if st == MultiplayerPeer.CONNECTION_CONNECTED and not _was_connected:
 			_was_connected = true
 			my_id = _peer.get_unique_id()
-		elif st == MultiplayerPeer.CONNECTION_DISCONNECTED and _was_connected:
-			_was_connected = false
-			for i in members():
-				peer_left.emit(i)
-			_roster = []
+		elif st == MultiplayerPeer.CONNECTION_DISCONNECTED:
+			if _was_connected:
+				_was_connected = false
+				for i in members():
+					peer_left.emit(i)
+				_roster = []
+			_peer = null
+			lost.emit()
+			return
 	while _peer.get_available_packet_count() > 0:
 		var from_link := _peer.get_packet_peer()
 		var mode := _peer.get_packet_mode()
@@ -122,7 +133,7 @@ var _links := {}   # host: ids of connected clients
 
 func _host_roster() -> void:
 	# who's here: ENet tells the host about joins/leaves through peer ids it has seen
-	var now_ids: Array = [1]
+	var now_ids: Array = [] if dedicated else [1]
 	for i in _links:
 		now_ids.append(i)
 	now_ids.sort()
@@ -163,6 +174,10 @@ func _read_roster(body: PackedByteArray) -> void:
 	for i in old:
 		if i != my_id and not i in _roster:
 			peer_left.emit(i)
+
+
+func connected() -> bool:
+	return _peer != null and (hosting or _peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED)
 
 
 func close() -> void:
