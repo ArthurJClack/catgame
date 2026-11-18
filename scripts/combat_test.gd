@@ -367,7 +367,7 @@ func _commit_test() -> bool:
 	bot.move = Vector2.ZERO
 	await _secs(0.5)
 	print("M swat at a trot: phases %s, speed %.2f -> %.2f m/s while the paw's out, body turned %.2f rad of 1.5 by the recovery" % [str(phases), v0, v_act, turned])
-	ok = ok and phases == ["wind", "active", "recover"] and v0 > 2.5 and v_act < 1.4 and turned < 0.45
+	ok = ok and phases == ["wind", "active", "recover"] and v0 > 2.5 and v_act < 2.0 and turned < 0.45
 	bot.yaw = p.yaw
 	# N: mash: a second click mid swat is buffered and comes out at the chain point
 	_reset_cat(Vector3(0, 0.02, 1.0))
@@ -500,6 +500,32 @@ func _commit_test() -> bool:
 	var h_big := await _hop_height(1.0)
 	print("U hop %.2f m tapped, %.2f m fully charged" % [h_tap, h_big])
 	ok = ok and h_big > h_tap * 1.4
+	# V: every swat lunges a bit: into open air the full step, at a rat it stops just short + hits
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 1.5))
+	_face(Vector3(0, 0.02, -2))
+	await _secs(0.3)
+	var z0 := p.global_position.z
+	_paws(true, false)
+	await _ticks(3)
+	_paws(false, false)
+	await _secs(0.5)
+	var open_d := z0 - p.global_position.z
+	r = _still_rat(PI)
+	r.hp = 9.0
+	r.max_hp = 9.0
+	_reset_cat(Vector3(0, 0.02, 0.56))
+	_face(r.global_position)
+	await _secs(0.3)
+	var gap0 := p.global_position.distance_to(r.global_position)
+	_paws(false, true)
+	await _ticks(3)
+	_paws(false, false)
+	await _secs(0.5)
+	var gap1 := Vector2(p.global_position.x - r.global_position.x, p.global_position.z - r.global_position.z).length()
+	var near_side := gap1 - 0.16 * r.s
+	print("V lunge: open air %.2f m, at a rat %.2f -> %.2f m (near side %.2f m off), rat took %.1f, rig gather peak test %s" % [open_d, gap0, gap1, near_side, r.max_hp - r.hp, str(CatCombat.MOVES.swat.has("lunge"))])
+	ok = ok and open_d > 0.12 and open_d < 0.4 and gap1 < gap0 - 0.05 and near_side > CatCombat.LUNGE_STOP - 0.05 and r.max_hp - r.hp >= 1.0
 	return ok
 
 
@@ -742,12 +768,12 @@ func _commitshow() -> void:
 	cam.look_at(Vector3(0, 0.13, 0.3))
 	# 1: one swat, half speed, phases called out
 	Engine.time_scale = 0.4
-	_say("souls style commitment", "every attack: wind up, paw out, recovery")
+	_say("souls style commitment", "every swat: wind up + lunge, paw out, scratch, recovery")
 	await _secs(0.4)
 	_paws(true, false)
 	await _ticks(4)
 	_paws(false, false)
-	await _watch(0.6, "one swat  (0.4x)")
+	await _watch(0.6, "lunge + scratch  (0.4x)", "steps in, claws drag down and back")
 	# 2: mash: clicks are buffered and come out on the beat
 	_paws(false, true)
 	await _ticks(3)
@@ -851,4 +877,21 @@ func _commitshow() -> void:
 	await _pounce(1.0)
 	await _secs(0.6)
 	box.queue_free()
+	# 9: first person: the fp paws lunge + scratch too
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 0.6))
+	var r2 := _dummy_rat(PI, Vector3(0, 0.02, 0))
+	_face(r2.global_position)
+	p.set_third_person(false)
+	p.cam.current = true
+	Engine.time_scale = 0.5
+	_say("first person  (0.5x)", "lunge in, scratch, left right left")
+	await _secs(0.3)
+	for k in 3:
+		_paws(k % 2 == 0, k % 2 == 1)
+		await _ticks(3)
+		_paws(false, false)
+		await _secs(0.32)
+	await _secs(0.4)
+	Engine.time_scale = 1.0
 	get_tree().quit()

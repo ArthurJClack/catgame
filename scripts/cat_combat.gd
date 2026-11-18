@@ -70,6 +70,8 @@ const POUNCE_RANGE := 3.6     # soft lock reach (horizontal)
 const MAGNET_R := 0.55        # prey this close to where the free arc lands gets locked
 
 const STRIKE_T := 0.12        # click -> paw lands (cat_player._do_swat impact timer, rig whip at ~0.12)
+const LUNGE_FROM := 0.35      # into the wind up the hind legs push: the lunge starts here (fraction)
+const LUNGE_STOP := 0.24      # stops this short of the target's near side (m), never shoves into it
 const BUFFER := 0.4           # a paw / dodge pressed mid attack waits this long for its slot
 const DODGE_BUFFER := 0.5
 enum { A_OFF, A_WIND, A_ACTIVE, A_RECOVER }
@@ -77,10 +79,10 @@ enum { A_OFF, A_WIND, A_ACTIVE, A_RECOVER }
 ## cancel: into the recovery, a dodge may roll out of it. move / turn: per phase (wind, active,
 ## recover) wasd scale and body turn rate (rad/s). plant: how hard the feet brake per phase
 const MOVES := {
-	"swat": {"wind": STRIKE_T, "active": 0.06, "recover": 0.24, "chain": 0.10, "cancel": 0.14,
-		"move": [0.3, 0.1, 0.5], "turn": [3.0, 0.0, 2.0], "plant": [5.0, 7.0, 2.0]},
-	"rake": {"wind": STRIKE_T, "active": 0.04, "recover": 0.20, "chain": 0.08, "cancel": 0.12,
-		"move": [0.25, 0.1, 0.4], "turn": [3.0, 0.0, 1.5], "plant": [5.0, 7.0, 2.0]},
+	"swat": {"wind": STRIKE_T, "active": 0.06, "recover": 0.24, "chain": 0.10, "cancel": 0.14, "lunge": 1.5,
+		"move": [0.3, 0.1, 0.5], "turn": [3.0, 0.0, 2.0], "plant": [5.0, 7.0, 14.0]},
+	"rake": {"wind": STRIKE_T, "active": 0.04, "recover": 0.20, "chain": 0.08, "cancel": 0.12, "lunge": 1.0,
+		"move": [0.25, 0.1, 0.4], "turn": [3.0, 0.0, 1.5], "plant": [5.0, 7.0, 14.0]},
 	"grab_out": {"wind": 0.0, "active": 0.0, "recover": 0.26, "chain": 0.18, "cancel": 0.16,
 		"move": [0.0, 0.0, 0.2], "turn": [0.0, 0.0, 1.5], "plant": [0.0, 0.0, 8.0]},
 	"land": {"wind": 0.0, "active": 0.0, "recover": 0.45, "chain": 0.3, "cancel": 0.25,
@@ -117,6 +119,9 @@ var buf_rake := false
 var buf_t := 0.0
 var dodge_buf := 0.0
 var interrupts := 0
+var atk_target: Node3D = null # what the strike went for (lunge aims at it, stops short of it)
+var lunge_d := 0.0            # how far the last lunge carried (tests)
+var _lunge_start := Vector3.ZERO
 var clock := 0.0              # combat time, for tests (fire_clock = when the last strike started)
 var fire_clock := 0.0
 var dodge_cancels := 0
@@ -175,6 +180,20 @@ func move_scale() -> float:
 
 func turn_cap() -> float:
 	return INF if atk == "" else MOVES[atk].turn[atk_phase - 1]
+
+
+## 0..1 how much the body gathers low into the strike (rig crouch): chest drops in the wind up
+func gather_w() -> float:
+	if not atk in ["swat", "rake"]:
+		return 0.0
+	match atk_phase:
+		A_WIND:
+			return 0.4 * smoothstep(0.0, MOVES[atk].wind, atk_t)
+		A_ACTIVE:
+			return 0.4
+		A_RECOVER:
+			return 0.4 * (1.0 - smoothstep(0.0, MOVES[atk].recover, atk_t))
+	return 0.0
 
 
 func phase_name() -> String:
@@ -239,10 +258,29 @@ func _atk_step(dt: float) -> void:
 		if atk_phase == A_RECOVER and atk_t >= m.recover:
 			_end_move()
 	if atk != "" and p.is_on_floor():
-		# feet planted: whatever speed it came in with bleeds off
-		var k: float = exp(-float(MOVES[atk].plant[atk_phase - 1]) * dt)
-		p.velocity.x *= k
-		p.velocity.z *= k
+		var m2: Dictionary = MOVES[atk]
+		var lv: float = m2.get("lunge", 0.0)
+		var lunging: bool = lv > 0.0 and ((atk_phase == A_WIND and atk_t >= m2.wind * LUNGE_FROM) or atk_phase == A_ACTIVE)
+		if lunging:
+			# the lunge: the hind legs drive the body forward into the strike, onto the target
+			var fwd: Vector3 = -p.global_transform.basis.z
+			var room := 9.0
+			if is_instance_valid(atk_target):
+				var to: Vector3 = atk_target.global_position - p.global_position
+				to.y = 0.0
+				var rad: float = 0.16 * float(atk_target.get("s")) if "s" in atk_target else 0.06
+				room = to.length() - rad - LUNGE_STOP
+				if to.length() > 0.01:
+					fwd = fwd.slerp(to.normalized(), 0.5).normalized()
+			var spd := clampf(room / maxf(dt, 0.001), 0.0, lv) if room > 0.0 else 0.0
+			p.velocity.x = fwd.x * spd
+			p.velocity.z = fwd.z * spd
+			lunge_d = Vector2(p.global_position.x - _lunge_start.x, p.global_position.z - _lunge_start.z).length()
+		else:
+			# feet planted: whatever speed it came in with bleeds off
+			var k: float = exp(-float(m2.plant[atk_phase - 1]) * dt)
+			p.velocity.x *= k
+			p.velocity.z *= k
 	if dodge_buf > 0.0 and can_dodge():
 		dodge_buf = 0.0
 		if atk != "":
@@ -374,6 +412,9 @@ func _fire(i: int, rake: bool) -> bool:
 	start_move("rake" if rake else "swat", i)
 	fire_clock = clock
 	player._do_swat(i, rake)
+	atk_target = player._swat_prey if is_instance_valid(player._swat_prey) else (player._swat_rb if is_instance_valid(player._swat_rb) else null)
+	_lunge_start = player.global_position
+	lunge_d = 0.0
 	return true
 
 

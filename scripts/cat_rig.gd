@@ -1343,11 +1343,17 @@ func animate(dt: float) -> void:
 					var u := (_swat_t - 0.07) / 0.08
 					sw_p = wind.lerp(strike, u * u)
 					sw_r = lerpf(-0.9, 0.55, u)
+				elif _swat_t < 0.24:
+					# the scratch: claws hooked in, the paw drags down and back toward the chest
+					var u := smoothstep(0.0, 1.0, (_swat_t - 0.15) / 0.09)
+					sw_p = strike.lerp(strike + Vector3(-side * 0.015, -0.05, 0.075), u)
+					sw_r = lerpf(0.55, 0.95, u)
 				else:
-					var u := smoothstep(0.0, 1.0, (_swat_t - 0.15) / 0.17)
-					sw_p = strike.lerp(foot, u)
-					sw_p.y += sin(PI * u) * 0.02
-					sw_r = lerpf(0.55, prot, u)
+					var rk := strike + Vector3(-side * 0.015, -0.05, 0.075)
+					var u := smoothstep(0.0, 1.0, (_swat_t - 0.24) / 0.08)
+					sw_p = rk.lerp(foot, u)
+					sw_p.y += sin(PI * u) * 0.015
+					sw_r = lerpf(0.95, prot, u)
 				foot = sw_p
 				prot = sw_r
 			fp_foot[i] = foot - Vector3((HOME[i] as Vector3).x * track, 0.0, (HOME[i] as Vector3).z)

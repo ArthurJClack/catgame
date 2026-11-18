@@ -1038,7 +1038,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 
 	rig.drive_velocity = velocity
 	rig.on_floor = is_on_floor() or mantling or clambering or climbing or scratching
-	rig.crouch = maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85)
+	rig.crouch = maxf(maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85), combat.gather_w())
 	rig.charge = charge
 	rig.look_pitch = pitch * 0.6 * (1.0 - w_face)
 	# the head turns a little toward where you're looking
@@ -2281,6 +2281,8 @@ func _slash_fx(dir: Vector3, sweep: Vector3, prey: Node3D, hits: Array[RigidBody
 	if prey != null:
 		var q := prey.global_position + Vector3.UP * 0.06 * float(prey.get("s") if "s" in prey else 0.5)
 		c = q + (eye - q).normalized() * 0.04
+	if prey == null and hits.is_empty() and view_mode == 0:
+		return     # a whiff in first person: the streak would be drawn right across the lens
 	var a := c - sweep * 0.11 + Vector3.UP * 0.05
 	var b := c + sweep * 0.09 - Vector3.UP * 0.035
 	SlashFx.streak(self, a, b, -dir * 0.03 + Vector3.UP * 0.01, Color(1.0, 0.82, 0.78) if prey != null else Color(1.0, 0.95, 0.85))
