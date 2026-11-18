@@ -303,7 +303,6 @@ func _eat_check() -> void:
 		if Vector2(d.x, d.z).length() < EAT_R and d.y > -0.3 and d.y < 0.4:
 			treats_eaten += 1
 			_play("crunch", f.global_position, 0.7, randf_range(0.9, 1.15))
-			player.call("_event", "ate a treat (%d)" % treats_eaten)
 			f.queue_free()
 			treats.remove_at(i)
 
@@ -311,7 +310,6 @@ func _eat_check() -> void:
 func _solve(id: String, at: Vector3) -> void:
 	solved[id] = int(solved.get(id, 0)) + 1
 	_play("chime", at, 0.8)
-	player.call("_event", "puzzle: " + id)
 
 
 func _bag_tick() -> void:
