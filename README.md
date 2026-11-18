@@ -165,6 +165,10 @@ you can still wander off, you just only see cats in the same level.
 - the steam server list needs the GodotSteam *Server* extension (ci puts it in the server builds) and, on
   linux, steam's `steamclient.so` in `~/.steam/sdk64/` (steamcmd `+login anonymous +app_update 1007`, see
   `run_server.sh`). without either it's a direct-ip server and says so in its log.
+- GodotSteam Server is pinned to **v4.0.1**: v4.3 / v4.4 crash inside `serverInit` (they parse the ip
+  with a steam networking call before steam is up), and v4.0.1's release lib crashes on load in godot 4.3,
+  so the server builds use the **debug** export templates (its debug lib works). ci proves it every run:
+  the exported linux server logs on to steam and valve's public api (`GetServersAtAddress`) lists it.
 - anonymous logon gets a new server id each start. a game server login token
   (https://steamcommunity.com/dev/managegameservers, app 480 for now) via `--token` or `CATGAME_GSLT`
   keeps it.
