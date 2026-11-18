@@ -42,7 +42,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/godot
-          key: godot-${{ env.GODOT_VERSION }}-win-linux-templates
+          key: godot-${{ env.GODOT_VERSION }}-win-linux-templates-v2
 
       - name: get godot + windows / linux export templates
         run: |
@@ -51,9 +51,9 @@ jobs:
           if [ ! -f Godot_v${GODOT_VERSION}-stable_linux.x86_64 ]; then
             curl -sSLo g.zip $base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && unzip -q g.zip && rm g.zip
           fi
-          if [ ! -f templates/windows_release_x86_64.exe ] || [ ! -f templates/linux_release.x86_64 ]; then
+          if [ ! -f templates/windows_release_x86_64.exe ] || [ ! -f templates/linux_debug.x86_64 ]; then
             curl -sSLo t.tpz $base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
-            unzip -q -o t.tpz 'templates/windows_*' 'templates/linux_release.x86_64' 'templates/version.txt' && rm t.tpz
+            unzip -q -o t.tpz 'templates/windows_*' 'templates/linux_*.x86_64' 'templates/version.txt' && rm t.tpz
           fi
           dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
           mkdir -p $dest && cp templates/* $dest/
@@ -125,8 +125,10 @@ jobs:
           # relay works: server + two clients on localhost
           timeout 120 $G --headless --path . --script res://tests/server_test.gd
           mkdir -p build/server-linux build/server-win build/servers
-          timeout 900 $G --headless --path . --export-release "Linux Server" build/server-linux/CatGameServer.x86_64
-          timeout 900 $G --headless --path . --export-release "Windows Server" build/server-win/CatGameServer.exe
+          # debug templates on purpose: GodotSteam Server v4.0.1's template_release lib crashes on load
+          # in godot 4.3, its template_debug lib is the one that inits + logs on fine
+          timeout 900 $G --headless --path . --export-debug "Linux Server" build/server-linux/CatGameServer.x86_64
+          timeout 900 $G --headless --path . --export-debug "Windows Server" build/server-win/CatGameServer.exe
           for d in build/server-linux build/server-win; do
             echo 480 > $d/steam_appid.txt
             cp tools/server/* $d/
