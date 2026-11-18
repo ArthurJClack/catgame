@@ -262,6 +262,11 @@ func alive() -> bool:
 	return state != DEAD
 
 
+## where a lock on (cat_lock_on.gd) aims: the middle of the body
+func lock_point() -> Vector3:
+	return global_position + Vector3.UP * 0.1 * s
+
+
 # ---------------------------------------------------------------- brain
 
 func _physics_process(dt: float) -> void:

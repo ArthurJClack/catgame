@@ -3,7 +3,7 @@ extends Node3D
 ## and branches and steps up onto low stones and steps by itself (run_assist.gd + the step up in
 ## cat_player.gd). logs, big rocks and the creek need a jump (space).
 ##   r restart at the trailhead · t jump to the next section · b auto step on/off · 1-8 swap cat
-##   v camera · h hide help · f5 / tab back to the house
+##   v camera · h hide help · f5 back to the house · tab lock on
 ## preview: `-- --still x,y,z,tx,ty,tz`, `-- --run` (a bot runs the loop with a camera director, for
 ## the preview video), `-- --runtest` (bot lap, prints every step up + jump and where it got stuck)
 
@@ -192,7 +192,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			player._event("auto step " + ("on" if player.auto_step else "off"))
 		KEY_H:
 			help_label.visible = not help_label.visible
-		KEY_F5, KEY_TAB:
+		KEY_F5:
 			_go_home()
 
 

@@ -207,7 +207,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			atmos.skip = 3.0
 			player.last_event = "time passes..."
 			player.last_event_t = 0.0
-		KEY_F5, KEY_TAB:
+		KEY_F5:
 			_go_home()
 
 

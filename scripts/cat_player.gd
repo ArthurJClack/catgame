@@ -220,6 +220,15 @@ var health: CatHealth          # hits from enemies (souls_rat.gd), nine lives (c
 var souls_hud: SoulsHud        # health + stamina bars, top left
 var dash: CatDash              # souls style dodge: dart / side leap / whirl / backstep (cat_dash.gd)
 var prev_dash := false
+var lock: CatLockOn            # souls style tab lock on (cat_lock_on.gd)
+var prev_lock := false
+var _lock_r := -1.0             # radius being circled while strafing a lock (-1 = not circling)
+const LOCK_STRAFE := 0.8       # x trot: circling / strafing a locked target
+const LOCK_BACK := 0.6         # x trot: backing off a locked target (normal back up is a slow 0.25)
+## the lock on target (Node3D) or null. other systems duck type this ("lock_target" in player)
+var lock_target: Node3D:
+	get:
+		return lock.target if lock and lock.active() else null
 
 var _aim_root: Node3D
 var _aim_ring: MeshInstance3D
@@ -265,6 +274,9 @@ func _ready() -> void:
 	souls_hud = SoulsHud.new()
 	souls_hud.player = self
 	add_child(souls_hud)
+	lock = CatLockOn.new()
+	lock.player = self
+	add_child(lock)
 
 	cam_pivot = Node3D.new()
 	cam_pivot.position.y = EYE_STAND
@@ -323,6 +335,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		# browsers' pointer lock sometimes reports a bogus huge jump for one event: drop it
 		if OS.has_feature("web") and rel.length() > 250.0:
 			return
+		if lock.active():
+			lock.mouse(rel.x)    # locked: the camera stays on the target, a flick switches targets
+			return
 		orb_yaw -= rel.x * mouse_sens
 		if view_mode == 2:
 			orb_pitch = clampf(orb_pitch - rel.y * mouse_sens, -1.4, 0.6)
@@ -371,6 +386,7 @@ func _read_input() -> Dictionary:
 		"toggle_view": Input.is_physical_key_pressed(KEY_V),
 		"drop": Input.is_physical_key_pressed(KEY_E),
 		"dash": Input.is_physical_key_pressed(KEY_ALT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_XBUTTON1),
+		"lock_on": Input.is_physical_key_pressed(KEY_TAB),   # press = lock / unlock (cat_lock_on.gd)
 	}
 
 
@@ -395,6 +411,13 @@ func _physics_process(dt: float) -> void:
 		inp["move"] = Vector2.ZERO
 	var prev_yaw := yaw
 	var prev_pitch := pitch
+	var lock_in: bool = inp.get("lock_on", false)
+	if lock_in and not prev_lock:
+		lock.toggle()
+	prev_lock = lock_in
+	lock.physics_tick(dt)
+	# locked on and not running: square up to the target and strafe round it
+	var lock_face: bool = lock.active() and not (inp.get("sprint", false) or inp.get("canter", false))
 	if inp.has("yaw"):
 		yaw = inp.yaw
 	if inp.has("pitch"):
@@ -414,7 +437,7 @@ func _physics_process(dt: float) -> void:
 	# the way a wall kick goes: where you steer relative to the camera, or where you look
 	var aim_yaw: float = yaw if inp.has("yaw") else orb_yaw
 	_kick_aim = Basis(Vector3.UP, aim_yaw) * (Vector3(mv.x, 0, -mv.y).normalized() if mv.length() > 0.05 else Vector3.FORWARD)
-	if inp.has("yaw"):
+	if inp.has("yaw") and not lock.active():
 		orb_yaw = yaw    # scripted bot: camera and body share one heading, old body-relative controls
 	else:
 		# every view: wasd is relative to where you look, the cat turns to face where it's going
@@ -424,7 +447,25 @@ func _physics_process(dt: float) -> void:
 			pitch = lerpf(pitch, orb_pitch * 0.5, clampf(dt * 6.0, 0, 1))
 		var busy := climbing or clambering or scratching or mantling or dash.busy() or kick_plant_t > 0.0 or _kick_turn_t > 0.0 or combat.locks_move()
 		var face_look: bool = charging or clawing or combat.any_down() or inp.get("scratch", false) or inp.get("aim", false)
-		if mv.length() > 0.05 and not busy:
+		if lock_face:
+			# souls lock: the body keeps its face on the target, wasd (camera relative) becomes
+			# body relative strafing. the rig angles the body into the travel and keeps the head on it
+			if not busy:
+				yaw += clampf(wrapf(lock.yaw_to() - yaw, -PI, PI), -12.0 * dt, 12.0 * dt)
+			if mv.length() > 0.05:
+				var lw := Basis(Vector3.UP, yaw).inverse() * (Basis(Vector3.UP, orb_yaw) * Vector3(mv.x, 0, -mv.y))
+				mv = Vector2(lw.x, -lw.z)
+			# pure a / d: hold the radius you started circling at (stepping sideways off a
+			# point you keep turning to face spirals outward otherwise)
+			var tr := lock.point() - global_position
+			var rr := Vector2(tr.x, tr.z).length()
+			if absf(mv.y) < 0.25 and absf(mv.x) > 0.3:
+				if _lock_r < 0.0:
+					_lock_r = rr
+				mv.y += clampf((rr - _lock_r) * 2.5, -0.6, 0.6)
+			else:
+				_lock_r = -1.0
+		elif mv.length() > 0.05 and not busy:
 			var wd := Basis(Vector3.UP, orb_yaw) * Vector3(mv.x, 0, -mv.y)
 			var ty := atan2(-wd.x, -wd.z)
 			var diff := wrapf(ty - yaw, -PI, PI)
@@ -514,15 +555,20 @@ func _physics_process(dt: float) -> void:
 	var side := signf(mv.x) if absf(mv.x) > 0.3 else 0.0
 	_hop_cool = maxf(_hop_cool - dt, 0.0)
 	var ground_mv := Vector2(0.0, mv.y)
+	if lock_face:
+		# locked on: a/d walk round the target instead of hopping
+		ground_mv = Vector2(mv.x * LOCK_STRAFE, mv.y * (LOCK_STRAFE if mv.y > 0.0 else LOCK_BACK))
 	if is_on_floor() and not (mantling or clambering or climbing or scratching or charging):
-		if want_crouch_peek(inp):
+		if lock_face:
+			pass
+		elif want_crouch_peek(inp):
 			ground_mv.x = mv.x * 0.45
 		elif side != 0.0 and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12) and not dash.busy() and dash.buffer <= 0.0 and stamina.spend(CatStamina.SIDE_HOP):
 			_side_hop(side, fwd, right)
 	_prev_side = side
 	if is_on_floor():
 		mv = ground_mv
-		if mv.y < 0.0:
+		if mv.y < 0.0 and not lock_face:
 			mv.y *= BACKUP_SPEED / TROT_SPEED
 	var wish := (fwd * mv.y + right * mv.x)
 	wish.y = 0
@@ -926,11 +972,17 @@ func _process(_dt: float) -> void:
 		p = global_position   # teleport / respawn: don't smear
 	var off := global_transform.basis.inverse() * (p - global_position)
 	cam_pivot.position = eye_local + off
+	lock.frame_steer(_dt)
 	# mouse look lands every frame, not every physics tick
 	cam_pivot.rotation = Vector3(orb_pitch if view_mode == 2 else pitch, wrapf(orb_yaw - rotation.y, -PI, PI), 0)
 	paw_anchor.rotation.x = -cam_pivot.rotation.x
 	_carry_follow()
 	rig.transform = Transform3D(_rig_base.basis, _rig_base.origin + off)
+
+
+## world point the lock on aims at (target body centre), or Vector3.ZERO when not locked
+func lock_point() -> Vector3:
+	return lock.point() if lock else Vector3.ZERO
 
 
 ## the rig normally just follows the body. on walls it turns to face the surface,
