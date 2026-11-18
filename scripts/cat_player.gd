@@ -45,6 +45,7 @@ const EYE_STAND := 0.25
 const EYE_CROUCH := 0.14
 const LEAP_RANGE := 3.2       # horizontal reach of an aimed leap
 const MANTLE_MAX := 0.3       # ledges up to this are just hopped onto
+const STEP_MOUNT := 0.23      # walking into something up to this high (~chest, 22 cm + slack) steps up onto it by itself
 const CLAMBER_MAX := 0.85     # up to this above the feet: grab with the forepaws + haul up
 const HANG := 0.40            # ledge height above the feet while hanging
 const CLIMB_SPEED := 1.25
@@ -71,7 +72,7 @@ const BACKUP_SPEED := 0.8     # backing up is slow and careful
 var _hop_cool := 0.0
 var _prev_side := 0.0
 var _hopped_now := false
-var auto_bound := true        # glide up small steps + bound over/onto stuff at a run (run_assist.gd)
+var auto_step := true         # glide up roots / lips underfoot (run_assist.gd). the cat never jumps by itself
 
 ## when set, input is read from here instead of the keyboard (used by the preview bot)
 var bot := {}
@@ -737,14 +738,6 @@ func _physics_process(dt: float) -> void:
 		else:
 			scramble_t = 0.0
 
-	# rough ground at a run: bound over / onto logs, rocks, ledges and ditches (run_assist.gd)
-	if grounded and auto_bound and ground_time > 0.05 and wish_len > 0.3 and not (want_crouch or charging or clawing):
-		if RunAssist.bound(self, hv, dt, G, RADIUS):
-			grounded = false
-			jumped_this_air = true
-			hv = Vector3(velocity.x, 0, velocity.z)   # a standing hop sets its own pace
-			_event("bound %s" % RunAssist.last_bound.kind)
-
 	# gravity
 	if grounded:
 		# landing out of a wall slide used to leave this stuck on, so the paws stayed in the scramble pose
@@ -772,7 +765,7 @@ func _physics_process(dt: float) -> void:
 		elif canter:
 			stamina.drain(CatStamina.CANTER, dt)
 
-	if grounded and auto_bound:
+	if grounded and auto_step:
 		RunAssist.step_up(self, hv, dt)   # roots, branches, stone lips: glide up, paws step
 	move_and_slide()
 	_track_walls()
@@ -790,11 +783,15 @@ func _physics_process(dt: float) -> void:
 				_try_ledge(into)
 		elif pushing and is_on_floor() and _is_climbable(wall_collider) and jump_pressed and climb_cool <= 0.0:
 			_start_climb(wall_normal)
-		elif pushing and is_on_floor() and not want_crouch and not charging:
-			# small steps + thresholds (<=22 cm): a cat just hops up without thinking, keeping its pace
-			var li := _ledge_info(into, global_position, 0.22)
-			if not li.is_empty() and _try_ledge(into):
-				mantle_quick = maxf(1.5, wish_len * TROT_SPEED)
+
+	# small stuff up to chest height (curbs, steps, rocks, logs): walking into it the cat just steps
+	# up onto it, forepaws first then the hind legs, no leap. anything taller needs a jump
+	if is_on_floor() and not (mantling or clambering or climbing or want_crouch or charging):
+		var bump := _bump_dir()
+		if bump != Vector3.ZERO and wish_dir.dot(bump) > 0.4:
+			var li := _ledge_info(bump, global_position, STEP_MOUNT)
+			if not li.is_empty() and _try_ledge(bump):
+				mantle_quick = maxf(1.5, maxf(hv.length(), wish_len * TROT_SPEED))
 
 	# fell out of the world somehow: respawn
 	if global_position.y < -5.0:
@@ -1126,6 +1123,15 @@ func _track_walls() -> void:
 			wall_time = 0.0
 
 
+## what the cat walked into this tick: direction into a wall or a steep lump (too steep to walk up), or ZERO
+func _bump_dir() -> Vector3:
+	for i in get_slide_collision_count():
+		var n := get_slide_collision(i).get_normal()
+		if n.y < 0.72 and n.y > -0.4 and Vector2(n.x, n.z).length() > 0.1:
+			return -Vector3(n.x, 0, n.z).normalized()
+	return Vector3.ZERO
+
+
 func _is_climbable(o: Object) -> bool:
 	return o != null and is_instance_valid(o) and o is Node and (o as Node).is_in_group("climbable")
 
@@ -1401,7 +1407,8 @@ func _fits(feet: Vector3) -> bool:
 
 
 func _mantle_step(dt: float) -> void:
-	mantle_t += dt / (0.14 if mantle_quick > 0.0 else 0.22)
+	# a step up is quicker the faster the cat comes in, so a run doesn't stall on a curb
+	mantle_t += dt / (clampf(0.42 / mantle_quick, 0.08, 0.14) if mantle_quick > 0.0 else 0.22)
 	var t := minf(mantle_t, 1.0)
 	var up_t := clampf(t / 0.65, 0.0, 1.0)
 	var fw_t := clampf((t - 0.35) / 0.65, 0.0, 1.0)
@@ -1414,7 +1421,7 @@ func _mantle_step(dt: float) -> void:
 	if t >= 1.0:
 		mantling = false
 		var fwd := -global_transform.basis.z
-		velocity = fwd * maxf(1.2, minf(mantle_quick, 3.2))
+		velocity = fwd * maxf(1.2, mantle_quick)   # keeps the pace it came in at
 		mantle_quick = 0.0
 
 

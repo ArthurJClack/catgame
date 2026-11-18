@@ -1,7 +1,7 @@
 class_name PawDust
 extends Node
 ## dirt / dust kicked up right under a paw, and only when that paw actually pushes hard:
-## takeoffs (hop, pounce, leap, auto bound), hard landings, sprint starts, hard stops,
+## takeoffs (hop, pounce, leap), hard landings, sprint starts, hard stops,
 ## sharp cuts, wall kicks. steady running at a constant speed kicks up nothing.
 ##
 ## how it works: every physics tick the body's change in velocity (the push the ground had

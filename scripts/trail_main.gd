@@ -1,11 +1,11 @@
 extends Node3D
 ## the running trail (res://trail.tscn): a loop of rough singletrack to run. the cat glides over roots
-## and branches, and at a run bounds over logs and rocks, onto stone steps and slabs, and across the creek
-## by itself (see run_assist.gd).
-##   r restart at the trailhead · t jump to the next section · b auto bound on/off · 1-8 swap cat
+## and branches and steps up onto low stones and steps by itself (run_assist.gd + the step up in
+## cat_player.gd). logs, big rocks and the creek need a jump (space).
+##   r restart at the trailhead · t jump to the next section · b auto step on/off · 1-8 swap cat
 ##   v camera · h hide help · f5 / tab back to the house
 ## preview: `-- --still x,y,z,tx,ty,tz`, `-- --run` (a bot runs the loop with a camera director, for
-## the preview video), `-- --runtest` (bot lap, prints every bound and how far it got)
+## the preview video), `-- --runtest` (bot lap, prints every step up + jump and where it got stuck)
 
 var player: CatPlayer
 var info := {}
@@ -20,7 +20,8 @@ var run_bot := false
 var run_test := false
 var lap_s := 0.0          # distance run along the trail this session
 var _last_s := 0.0
-var bounds := 0
+var jumps := 0
+var steps := 0
 var _was_floor := true
 var _cam_pos := Vector3.ZERO
 var _cam_look := Vector3.ZERO
@@ -30,7 +31,7 @@ var _slow := 1.0
 var _bot_log: Array = []
 var _stuck_t := 0.0
 var _land_ok := 0
-var _dbg_prev := ""
+var _was_mantle := false
 
 
 func _ready() -> void:
@@ -151,7 +152,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the trail: roots, logs, a rock garden, stone steps, drop offs, a creek. run it (shift canter, double tap shift gallop)\nthe cat glides over roots + branches and bounds over / onto logs, rocks and steps by itself at a run\nr restart · t next section · b auto bound on/off · 1-8 swap cat · v camera · h hide help · f5 back to the house"
+	help_label.text = "the trail: roots, logs, a rock garden, stone steps, drop offs, a creek. run it (shift canter, double tap shift gallop)\nthe cat glides over roots + branches and steps up onto low stuff by itself. space to jump logs, rocks and the creek\nr restart · t next section · b auto step on/off · 1-8 swap cat · v camera · h hide help · f5 back to the house"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)
@@ -187,8 +188,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_place(TrailLevel.markers[sec_i][1] + 0.3)
 			player._event(TrailLevel.markers[sec_i][0])
 		KEY_B:
-			player.auto_bound = not player.auto_bound
-			player._event("auto bound " + ("on" if player.auto_bound else "off"))
+			player.auto_step = not player.auto_step
+			player._event("auto step " + ("on" if player.auto_step else "off"))
 		KEY_H:
 			help_label.visible = not help_label.visible
 		KEY_F5, KEY_TAB:
@@ -221,21 +222,20 @@ func _physics_process(dt: float) -> void:
 		lap_s += ds
 	_last_s = s
 	var fl := player.is_on_floor()
-	if not fl and _was_floor and player.velocity.y > 0.5 and player.last_event.begins_with("bound"):
-		bounds += 1
+	if player.mantling and not _was_mantle:
+		steps += 1
 		if run_test:
-			var lb: Dictionary = RunAssist.last_bound
-			print("[trail] bound #%d %s at s=%.1f (%s) speed %.1f vy %.2f peak %.2f d %.2f" % [bounds, lb.kind, s, TrailLevel.section(s), lb.speed, lb.vy, lb.h, lb.d])
+			print("[trail] step up #%d %s at s=%.1f (%s)" % [steps, player.last_event, s, TrailLevel.section(s)])
+	_was_mantle = player.mantling
+	if not fl and _was_floor and player.velocity.y > 0.5 and not player.mantling:
+		jumps += 1
+		if run_test:
+			print("[trail] jump #%d at s=%.1f (%s) vy %.2f" % [jumps, s, TrailLevel.section(s), player.velocity.y])
 	_was_floor = fl
 	if p.y < TrailLevel.surface_y(p.x, p.z) - 1.5:
 		_place(s)
 	if run_bot:
 		_bot(dt, s)
-	if run_test and OS.get_environment("TRAIL_DBG") != "" and RunAssist.dbg != _dbg_prev:
-		var r := OS.get_environment("TRAIL_DBG").split_floats(",")
-		if s > r[0] and s < r[1]:
-			print("  s=%.2f y=%.2f %s" % [s, p.y, RunAssist.dbg])
-		_dbg_prev = RunAssist.dbg
 
 
 # ------------------------------------------------------------------ bot + camera director
@@ -258,17 +258,17 @@ func _bot(dt: float, s: float) -> void:
 	player.bot.canter = pace == "canter"
 	player.bot.sprint = pace == "gallop"
 	player.bot.move = Vector2(0, 1)
-	# stuck (ran into something it can't bound): hop
+	# stuck (ran into something too tall to step up onto): jump, like a player would
 	var hs := Vector2(player.velocity.x, player.velocity.z).length()
 	_stuck_t = _stuck_t + dt if hs < 0.6 else 0.0
 	player.bot.jump = _stuck_t > 0.5 and _stuck_t < 0.6
 	if run_test:
 		if lap_s > TrailLevel.trail_len + 2.0 or t > 120.0:
-			print("[trail] lap done: %.1f m in %.1f s, %d bounds, stuck time logged %s" % [lap_s, t, bounds, str(_bot_log)])
+			print("[trail] lap done: %.1f m in %.1f s, %d step ups, %d jumps, stuck at %s" % [lap_s, t, steps, jumps, str(_bot_log)])
 			get_tree().quit()
 		if _stuck_t > 0.5 and (_bot_log.is_empty() or absf(_bot_log[-1] - s) > 1.0):
 			_bot_log.append(snappedf(s, 0.1))
-			print("[trail] stuck at s=%.1f (%s) pos %s  last check: %s" % [s, sec, str(p.snapped(Vector3.ONE * 0.01)), RunAssist.dbg])
+			print("[trail] stuck at s=%.1f (%s) pos %s" % [s, sec, str(p.snapped(Vector3.ONE * 0.01))])
 
 
 func _process(dt: float) -> void:
@@ -280,7 +280,7 @@ func _process(dt: float) -> void:
 	var v := player.velocity
 	var hs := Vector2(v.x, v.z).length()
 	var sec := TrailLevel.section(_last_s)
-	hud_label.text = "%d fps\n%.1f m/s (%.0f km/h)   %s\nsection: %s   bounds %d   auto bound %s" % [Engine.get_frames_per_second(), hs, hs * 3.6, player.surface, sec, bounds, "on" if player.auto_bound else "off"]
+	hud_label.text = "%d fps\n%.1f m/s (%.0f km/h)   %s\nsection: %s   step ups %d   jumps %d   auto step %s" % [Engine.get_frames_per_second(), hs, hs * 3.6, player.surface, sec, steps, jumps, "on" if player.auto_step else "off"]
 	if player.last_event_t < 0.9:
 		event_label.text = player.last_event
 		event_label.modulate.a = 1.0 - player.last_event_t / 0.9
@@ -288,7 +288,7 @@ func _process(dt: float) -> void:
 		event_label.text = ""
 
 
-## shot list for the preview: chase / side dolly / low front / first person, slow-mo on bounds in side shots
+## shot list for the preview: chase / side dolly / low front / first person, slow-mo on jumps in side shots
 func _director(dt: float) -> void:
 	hud.visible = false
 	var rdt := dt / maxf(Engine.time_scale, 0.05)

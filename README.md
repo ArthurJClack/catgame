@@ -103,15 +103,17 @@ f8 from the house. a ~137 m loop of dirt singletrack built to show off running: 
 (0.5 m terrain grid with ruts and lumps, gravel, pebbles, leaf litter, twigs, moss) and sections of small stuff:
 roots under old oaks, fallen logs across the path, a rock garden with flat slabs, stone steps up a ridge,
 drop offs down the far side, a creek ditch, then a debris mix of stumps, logs, rocks and branches.
-- running over rough ground (`scripts/run_assist.gd`, on for the player everywhere, `auto_bound`):
-  - roots, branches and stone lips up to 11 cm: the body glides up while the paws step (no jump)
-  - at a run (> 1.1 m/s) anything bigger up to 60 cm, or a ditch: the cat reads the ground ahead, finds the
-    smallest real ballistic arc that clears it (or lands on top when the top is flat and wide enough)
-    and launches at the spot that arc needs, so it keeps its pace. the rig does the takeoff + landing
-  - taller than that it runs into it and the old mantle / clamber takes over
-- r restart · t next section · b auto bound on/off · f5 back to the house
-- `-- --runtest` (headless ok): a bot runs a lap and prints every bound and anywhere it got stuck
-  (`TRAIL_DBG=s0,s1` prints the ground read between those trail distances). `-- --run` = preview video
+- running over rough ground: the cat never jumps by itself, only when you press space
+  - roots, branches and stone lips up to 11 cm: the body glides up while the paws step
+    (`scripts/run_assist.gd`, `auto_step`, on for the player everywhere)
+  - walking or running into anything up to ~22 cm (curbs, steps, low rocks, small logs): it steps up onto it,
+    forepaws then hinds, no leap, and keeps its pace (`STEP_MOUNT`, the quick mantle in cat_player.gd)
+  - taller than that (hurdle logs, big rocks, the creek, the 26 cm stone steps): jump
+- r restart · t next section · b auto step on/off · f5 back to the house
+- `-- --runtest` (headless ok): a bot runs a lap (jumping only when it gets stuck) and prints every step up,
+  jump and stuck spot. `-- --run` = preview video
+- `res://steptest.tscn` (headless): runs the cat at walk/trot/canter/gallop into boxes, a round rock and a
+  lying log of 6-35 cm, checks it never launches itself and mounts everything up to 22 cm
 
 ## install + auto updates (windows)
 
