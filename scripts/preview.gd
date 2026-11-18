@@ -1064,15 +1064,16 @@ func _run_swattest() -> void:
 	bot.pitch = -0.7
 	for i in 30:
 		await get_tree().physics_frame
-	bot.claw = true
-	await get_tree().physics_frame
+	bot.paw_r = true      # hold a paw with nothing to rake = claw hook (cat_combat.gd)
+	for i in 46:
+		await get_tree().physics_frame
 	print("claw rb: ", p.claw_rb, " static: ", p.claw_static)
 	for i in 60:
 		bot.yaw = -0.8 * i / 60.0
 		await get_tree().physics_frame
 	if p.claw_rb:
 		print("dragged to: ", p.claw_rb.global_position.snapped(Vector3.ONE * 0.01))
-	bot.claw = false
+	bot.paw_r = false
 	await get_tree().physics_frame
 	# claw at the floor and drag marks
 	p.global_position = Vector3(-1.0, 0.02, 1.2)
@@ -1080,14 +1081,15 @@ func _run_swattest() -> void:
 	bot.pitch = -0.9
 	for i in 20:
 		await get_tree().physics_frame
-	bot.claw = true
-	await get_tree().physics_frame
+	bot.paw_r = true      # hold a paw with nothing to rake = claw hook (cat_combat.gd)
+	for i in 46:
+		await get_tree().physics_frame
 	print("floor claw static: ", p.claw_static)
 	for i in 60:
 		bot.yaw = 0.6 * i / 60.0
 		await get_tree().physics_frame
 	print("marks: ", p._marks.size())
-	bot.claw = false
+	bot.paw_r = false
 	# stairs: walk up the bedroom wing stairs
 	p.global_position = Vector3(5.8, 0.02, -3.55)
 	bot.yaw = -PI / 2

@@ -12,6 +12,7 @@ extends RefCounted
 const DIALS := [
 	"crouch", "charge", "look_yaw", "look_pitch", "scramble", "slip_claws", "climb", "clamber",
 	"clamber_pull", "rear", "scratch", "scratch_dist", "sit", "stretch", "groom", "loaf", "balance", "pin",
+	"grip",
 ]
 
 const T_HELLO := 1

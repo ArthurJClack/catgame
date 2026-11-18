@@ -117,6 +117,10 @@ var claw_on := false
 var claw_i := 1
 var claw_target := Vector3.ZERO
 var _claw_w := [0.0, 0.0]
+## two paw grip (both mouse buttons): both fore paws clamp down on claw_target (world) and hold.
+## grip_squeeze() pulses them (claws dig in) on every bite / squeeze
+var grip := 0.0
+var _squeeze_t := -1.0
 var _swat_t := -1.0
 var _swat_i := 1
 var _swat_target := Vector3.ZERO
@@ -170,6 +174,10 @@ var _bal_s := 0.0
 var _load_s := [0.6, 0.6, 0.6, 0.6]
 var _lean := 0.0
 var _hear_age := 9.0
+## the living layer: breathing, loose skin, whiskers, ears, pupils, idle acts, startle (cat_soma.gd)
+var soma := CatSoma.new()
+var chin: MeshInstance3D
+var whiskers := []   # [node, rest transform, root point, side] per whisker
 
 # ---- multiplayer (see scripts/net/). everything random the rig does by itself (glances, ear
 # flicks, blinks, tail twitches) and everything it is told once (swats, sounds) is written to
@@ -205,10 +213,14 @@ func apply_life(ev: Array) -> void:
 			_twitch(float(ev[1]))
 		"s":
 			swat(int(ev[1]), ev[2])
+		"q":
+			grip_squeeze()
 		"h":
 			hear(ev[1], float(ev[2]))
 		"L":
 			gait.queue_lift(int(ev[1]), float(ev[2]), float(ev[3]))
+		"a":
+			soma.act(str(ev[1]), float(ev[2]))
 	_net_apply = false
 
 # ---------------- model style ----------------
@@ -618,6 +630,7 @@ func _build_head() -> void:
 	_style_mat(mz)
 	var ch := LowPoly.part(head, LowPoly.box(), muzzle_col, Vector3(0, -0.031, -0.032), Vector3(0.022, 0.012, 0.02))
 	_style_mat(ch)
+	chin = ch
 	LowPoly.part(head, LowPoly.box(), pink, Vector3(0, -0.009, -0.04 - 0.013 * mzs), Vector3(0.012, 0.008, 0.006))
 	# ears
 	var ear_mesh := LowPoly.cone(4)
@@ -649,6 +662,7 @@ func _build_head() -> void:
 			var a := Vector3(side * 0.018, -0.018 + k * 0.004, -0.045)
 			var b := a + Vector3(side * 0.06, -0.012 + k * 0.01, 0.012 + k * 0.004)
 			w.transform = Transform3D(LowPoly.seg_xform(b, a).basis * Basis().scaled(Vector3(0.0012, 1, 0.0012)), (a + b) * 0.5)
+			whiskers.append([w, w.transform, a, float(side)])
 
 
 ## hide the visible model but keep its shadow (first person body)
@@ -681,12 +695,21 @@ func is_swatting() -> bool:
 	return _swat_t >= 0.0
 
 
+## grip: both clamped fore paws dig in for a moment
+func grip_squeeze() -> void:
+	if remote_life and not _net_apply:
+		return
+	_log(["q"])
+	_squeeze_t = 0.0
+
+
 func _setup_gait() -> void:
 	_gait_setup = true
 	_sit_s = sit
 	_loaf_s = loaf
 	add_to_group("cat_ears")
 	gait.rig = self
+	soma.setup(self)
 	gait.max_stance = MAX_STANCE * 0.74
 	gait.max_stance_gallop = MAX_STANCE * 0.78
 	# don't let the paws stand on whatever body carries the rig (the player capsule)
@@ -701,6 +724,13 @@ func animate(dt: float) -> void:
 	_t += dt
 	if not _gait_setup:
 		_setup_gait()
+	# what the cat does by itself when left alone (sits down, grooms, stretches) goes in on top
+	# of what the owner asked for, for this frame only
+	var in_pose := [sit, loaf, groom, stretch]
+	sit = maxf(sit, soma.auto_sit)
+	loaf = maxf(loaf, soma.auto_loaf)
+	groom = maxf(groom, soma.auto_groom)
+	stretch = maxf(stretch, soma.auto_stretch)
 	var gx := global_transform
 	var gb := gx.basis.orthonormalized()
 	var inv := gb.inverse()
@@ -731,8 +761,8 @@ func animate(dt: float) -> void:
 
 	# sitting and lying down go in stages, never as one blend: the hind end goes down first,
 	# then the front paws walk back / fold under. getting up runs the other way
-	_sit_s = move_toward(_sit_s, sit, dt * 1.8)
-	_loaf_s = move_toward(_loaf_s, loaf, dt * 1.5)
+	_sit_s = move_toward(_sit_s, sit, dt * (1.8 if sit >= _sit_s else soma.rise_rate))
+	_loaf_s = move_toward(_loaf_s, loaf, dt * (1.5 if loaf >= _loaf_s else maxf(1.5, soma.rise_rate)))
 	var sit_h := smoothstep(0.0, 0.62, _sit_s)
 	var sit_f := smoothstep(0.38, 1.0, _sit_s)
 	var loaf_h := smoothstep(0.0, 0.55, _loaf_s)
@@ -829,6 +859,7 @@ func animate(dt: float) -> void:
 	var move_amt := clampf(speed_s / 0.12, 0.0, 1.0)
 	var still := (1.0 - move_amt) * (1.0 - _air_w)
 	_still_t = _still_t + dt if (still > 0.95 and on_floor) else 0.0
+	soma.pre(dt)
 
 	# ---------- groom cycle (lick the paw, then wipe the face) ----------
 	if groom > 0.01:
@@ -971,7 +1002,7 @@ func animate(dt: float) -> void:
 	var ra := rear * 1.02 + clamber * lerpf(1.3, 0.0, pull_e)
 	var hz := pelvis_z
 	var base_y := BODY_H - crouch * 0.085 - charge * 0.03 - sit_h * 0.075 + gal_bob * (1.0 - _air_w) - stretch * 0.02 - climb * 0.07
-	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y
+	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y + soma.dip
 	base_y = lerpf(base_y, BODY_H * 0.4 + (_fgy + _hgy) * 0.5, (loaf_h + loaf_f) * 0.5)
 	pivot.position.y = base_y + hz * sin(ra)
 	pivot.position.z = -sit_h * 0.035 + hz * (1.0 - cos(ra)) - clamber * (1.0 - pull_e) * 0.15 + stretch * 0.03 + _iner.z
@@ -1002,9 +1033,9 @@ func animate(dt: float) -> void:
 	# the spine bends along the turn: the tighter the circle the more the chest leads the hips
 	var twist := clampf(_yaw_rate * 0.17 / maxf(speed_s, 0.7), -0.42, 0.42) * nc * (1.0 - _air_w)
 	chest.rotation.y = -yaw_off * 0.35 + twist * 0.5 + _yaw_c
-	chest.rotation.z = _roll_c + (_tum_c - _tum_p)
+	chest.rotation.z = _roll_c + (_tum_c - _tum_p) + soma.roll_c
 	# butt wiggle before a pounce
-	pelvis.rotation.z = sin(_t * 19.0) * 0.14 * charge + _roll_p
+	pelvis.rotation.z = sin(_t * 19.0) * 0.14 * charge + _roll_p + soma.roll_p
 	pelvis.rotation.y = sin(_t * 19.0) * 0.06 * charge + yaw_off * 0.2 - twist * 0.5 + _yaw_p + still_w * sin(_t * 0.41) * 0.035
 	# breathing (slower + deeper when loafing)
 	var br := 1.0 + sin(_t * lerpf(2.4, 1.5, loaf)) * lerpf(0.012, 0.02, loaf) * (1.0 - move_amt * 0.5)
@@ -1129,8 +1160,12 @@ func animate(dt: float) -> void:
 	claws = maxf(claws, maxf(pin, _air_w * hs * clampf(rise + 0.8, 0.0, 1.0)))
 	claws_out = LowPoly.damp(claws_out, claws, 14.0, dt)
 	var land_l := rinv * land_point
-	if (_swat_t >= 0.0 and _swat_t < 0.26) or claw_on:
+	if (_swat_t >= 0.0 and _swat_t < 0.26) or claw_on or grip > 0.3:
 		claws_out = maxf(claws_out, 1.0)
+	if _squeeze_t >= 0.0:
+		_squeeze_t += dt
+		if _squeeze_t > 0.25:
+			_squeeze_t = -1.0
 	for i in 4:
 		var front := i < 2
 		var side := -1.0 if i % 2 == 0 else 1.0
@@ -1286,6 +1321,14 @@ func animate(dt: float) -> void:
 			if _claw_w[i] > 0.001:
 				foot = foot.lerp(to_local(claw_target), _claw_w[i])
 				prot = lerpf(prot, 0.5, _claw_w[i])
+			# two paw grip: both paws clamped either side of the target's spine, digging in
+			if grip > 0.001:
+				var gp := to_local(claw_target) + Vector3(side * 0.032, 0.0, 0.0)
+				if _squeeze_t >= 0.0:
+					var k := sin(clampf(_squeeze_t / 0.25, 0.0, 1.0) * PI)
+					gp += Vector3(-side * 0.012, -0.012, 0.018) * k
+				foot = foot.lerp(gp, grip)
+				prot = lerpf(prot, 0.65, grip)
 			# swat: wind out to the side, whip across, recover
 			if _swat_t >= 0.0 and _swat_i == i:
 				var wind := Vector3(side * 0.105, BODY_H * 0.62, home.z - 0.07)
@@ -1323,6 +1366,7 @@ func animate(dt: float) -> void:
 				foot = foot.lerp(wt_p, hcw)
 				heel = lerpf(heel, 0.35, hcw)
 				prot = lerpf(prot, 1.35, hcw)
+		foot += soma.paw_off[i]
 		_solve_leg(i, foot, side, prot, heel, load)
 		# toes spread under weight and curl when the paw is folded back in the air
 		var spl := load * (1.0 - fw)
@@ -1341,6 +1385,11 @@ func animate(dt: float) -> void:
 
 	# ---------- tail ----------
 	_update_tail(dt, ww, wt, wg, move_amt)
+	soma.post(dt)
+	sit = in_pose[0]
+	loaf = in_pose[1]
+	groom = in_pose[2]
+	stretch = in_pose[3]
 
 
 ## strings the loin blocks along a curve from the back of the rib cage to the front of the
@@ -1428,6 +1477,7 @@ func hear(pos: Vector3, loud := 1.0) -> void:
 	_hear_w = clampf(loud, 0.0, 1.0)
 	_hear_t = 1.1 + _hear_w * 0.8
 	_hear_age = 0.0
+	soma.heard(pos, loud)
 
 
 ## where the eyes are (world). steady: the neck has already taken the body's bob out
@@ -1582,7 +1632,8 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 		var limb_a := atan2(-reach.z, maxf(-reach.y, 0.02))
 		_scap[i] = clampf(limb_a * 0.6, -0.5, 0.55)
 		var sb := Basis(Vector3.RIGHT, _scap[i])
-		var rise := load * 0.012 + crouch * 0.016
+		# stalking low the blades work like pistons: the one over the loaded paw pokes right up
+		var rise := load * (0.012 + 0.02 * crouch) + crouch * 0.008
 		top += cb * Vector3(0, rise, 0)
 		var sh := top + cb * (sb * rest)
 		var hint := Vector3(0, -0.2 - rear * 0.9 - clamber * 0.6, 1.0)
@@ -1727,6 +1778,8 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	var p := to_local(tail_base.global_position)
 	var pb := global_transform.basis.orthonormalized().inverse() * tail_base.global_transform.basis.orthonormalized()
 	var lash := 1.0 + charge * 2.5
+	var tail_floor := on_floor and climb < 0.1 and clamber < 0.1 and _air_w < 0.1
+	var floor_y := _hgy + 0.011 * float(S_.tail_r)
 	var curl := 0.0
 	for i in TAIL_N:
 		var fi := float(i) / TAIL_N
@@ -1736,6 +1789,10 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 		var y := _tail_p[4] * i + sin(_t * _tail_p[3] * TAU - i * 0.55) * _tail_p[2] * lash * (0.3 + fi) + _ty[i]
 		var dir := pb * Vector3(sin(y) * cos(a), sin(a), cos(y) * cos(a))
 		var np := p + dir * TAIL_SEG
+		# the tail lies on the floor, it does not go through it
+		if tail_floor and np.y < floor_y:
+			np.y = floor_y
+			np = p + (np - p).normalized() * TAIL_SEG
 		tail_segs[i].transform = LowPoly.seg_xform(p, np)
 		tail_joints[i].position = np
 		p = np

@@ -4,7 +4,8 @@ extends Node3D
 ## dodge through it (alt / mouse4) and swat them from behind. health + stamina top left,
 ## nine lives under them. clearing a wave patches you back up.
 ##   r restart the pit · h hide help · 1-8 swap cat · v camera · f5 / tab back to the house
-## preview: `-- --arenatest` (headless rules check), `-- --arenashow` (bot fight for the video)
+## preview: `-- --arenatest` (headless rules check), `-- --arenashow` (bot fight for the video),
+## `-- --combattest` / `-- --combatshow` (paw combat: swats, rakes, two paw grip; combat_test.gd)
 
 const R := 6.0                # pit radius
 const WAVES := [
@@ -36,8 +37,8 @@ var spawn := Vector3(0, 0.02, 4.4)
 func _ready() -> void:
 	process_priority = 10
 	var args := OS.get_cmdline_user_args()
-	test_mode = "--arenatest" in args
-	show_mode = "--arenashow" in args
+	test_mode = "--arenatest" in args or "--combattest" in args
+	show_mode = "--arenashow" in args or "--combatshow" in args
 	_setup_env()
 	_build_pit()
 	player = CatPlayer.new()
@@ -51,7 +52,7 @@ func _ready() -> void:
 	if test_mode or show_mode:
 		help_label.visible = false
 		player.bot = {"move": Vector2.ZERO, "stamina": true}
-		var t := ArenaTest.new()
+		var t: ArenaTest = CombatTest.new() if ("--combattest" in args or "--combatshow" in args) else ArenaTest.new()
 		t.arena = self
 		add_child(t)
 		return
@@ -378,7 +379,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the rat pit: rats can only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nalt / mouse4 dodge (i-frames) · mouse1 swat · hold space + release / q leap = pounce (heavy hit) · watch your stamina\nr restart · 1-8 swap cat · v camera · h hide help · f5 back to the house"
+	help_label.text = "the rat pit: rats can only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nalt / mouse4 dodge (i-frames) · mouse1 / mouse2 left / right paw (hold = rake) · both = rear up + pin it (can't walk while holding) · hold space + release / q leap = pounce (heavy hit) · watch your stamina\nr restart · 1-8 swap cat · v camera · h hide help · f5 back to the house"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)
