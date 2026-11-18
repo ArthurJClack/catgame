@@ -177,6 +177,8 @@ func frame_steer(dt: float) -> void:
 	var p = player
 	var k := 1.0 - exp(-TURN_K * dt)
 	var piv: Vector3 = p.global_position + Vector3.UP * 0.25
+	if p.view_mode == 0 and p.cam:
+		piv = p.cam.global_position   # first person: aim from the camera (it rides the head)
 	var to := point() - piv
 	var flat := Vector2(to.x, to.z).length()
 	if flat < 0.05:
