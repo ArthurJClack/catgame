@@ -114,7 +114,9 @@ func _physics_process(dt: float) -> void:
 		air_t = 0.0
 	if player.global_position.y > h * 0.6 and player.is_on_floor():
 		got_on = true
-	if t > 3.0 or player.global_position.z < -4.0:
+	# a walk is ~1 m/s now (momentum: half tilt = walk), so it gets longer to reach the obstacle
+	var limit := 5.5 if player.bot.get("move", Vector2.ONE).y < 0.6 else 3.0
+	if t > limit or player.global_position.z < -4.0:
 		_next()
 
 
