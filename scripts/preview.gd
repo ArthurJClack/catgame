@@ -2019,6 +2019,25 @@ func _run_movetest() -> void:
 			CatPad.sim.axes[a] = v
 		var button := func(b: JoyButton, down: bool) -> void:
 			CatPad.sim.buttons[b] = down
+		# 7a. a device whose "right stick y" is parked at -1 (throttle, wheel pedal, unmapped pad) used to
+		# read as the stick held up = camera stuck looking up. it must stay ignored until it centres once
+		CatPad.rearm()
+		p.pitch = 0.0
+		axis.call(JOY_AXIS_RIGHT_Y, -1.0)
+		for i in 30:
+			await get_tree().process_frame
+		var stuck_pitch := p.pitch
+		axis.call(JOY_AXIS_RIGHT_Y, 0.0)
+		await get_tree().process_frame
+		axis.call(JOY_AXIS_RIGHT_Y, -1.0)    # now a real push up works
+		for i in 10:
+			await get_tree().process_frame
+		var real_pitch := p.pitch
+		axis.call(JOY_AXIS_RIGHT_Y, 0.0)
+		p.pitch = 0.0
+		print("pad: parked axis 30 frames -> pitch %.3f, after centring a real push -> %.3f" % [stuck_pitch, real_pitch])
+		ok = ok and absf(stuck_pitch) < 0.001 and real_pitch > 0.05
+		await _ticks(2)    # every axis seen at rest = armed
 		axis.call(JOY_AXIS_LEFT_Y, -0.55)    # a bit over half forward
 		await _ticks(300)
 		var v_half: float = hs.call()
