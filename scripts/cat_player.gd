@@ -13,7 +13,9 @@ extends CharacterBody3D
 ##   forepaws slam down and pin whatever's under them.
 ## controls: wasd move, shift canter (double tap = gallop), ctrl/c stalk, space jump/kick, q / mouse3 aim leap,
 ## f scratch, mouse1 / mouse2 left / right paw (tap swat, hold rake / claw hook, both = rear up + grip,
-## cat_combat.gd), v third person, esc mouse
+## cat_combat.gd), v third person, esc mouse, x / caps lock walk
+## momentum: speed builds with power-limited accel and coasts off (consts under "momentum"), turn rate drops with speed
+## gamepad: cat_pad.gd, merged in _read_input. stick tilt -> speed_for_tilt() (creep / walk / trot)
 
 const G := 9.8
 const STALK_SPEED := 0.7
@@ -21,10 +23,20 @@ const TROT_SPEED := 3.2
 const SPRINT_SPEED := 11.0
 const CANTER_SPEED := 6.0
 const DOUBLE_TAP := 0.3
-const GROUND_ACCEL := 16.0
-const SPRINT_ACCEL := 12.0
-const GROUND_DECEL := 22.0
 const FRICTION := 5.0
+# ---- momentum: the cat has weight. speed builds and bleeds instead of snapping ----
+const WALK_SPEED := 1.0       # real cats walk ~0.7-1.0 m/s
+const CREEP_SPEED := 0.25     # the slowest the stick (just past the deadzone) asks for
+const WALK_TILT := 0.45       # keyboard walk (hold x / caps lock) = this much stick
+const PUSH_ACCEL := 9.0       # m/s2 the legs can shove the body from a stand
+const PUSH_POWER := 24.0      # push fades as speed climbs (accel ~ power / v): trot in ~0.4 s, gallop ~2.5 s
+const COAST_DECEL := 3.0      # let go of everything: the body rolls on and the legs soak it up
+const COAST_DRAG := 0.45      #   + this per m/s (gallop to stand ~1.5 s / ~6 m, walk ~0.25 s)
+const GAIT_DOWN_DECEL := 6.5  # still going but asking for a slower gait: stride shortens over ~1 s
+const GAIT_DOWN_DRAG := 0.3
+const BRAKE_DECEL := 11.0     # pushing the other way / dropping to a crouch: paws dig in (grip caps it, so it skids)
+const TURN_RATE_SLOW := 10.0  # body turn rad/s at a stand
+const TURN_RATE_FAST := 2.4   #   and at full gallop: a running cat carves wide arcs
 const TURN_ASK := 48.0   # sideways accel the cat asks for when carving a turn (grip caps it)
 const AIR_ACCEL := 60.0
 const AIR_WISH_CAP := 0.9
@@ -354,6 +366,11 @@ func _unhandled_input(event: InputEvent) -> void:
 var _shift_prev := false
 var _shift_last_tap := -10.0
 var _galloping := false
+var _caps_prev := false
+var walk_lock := false        # caps lock walk toggle
+var _brake_ask := false
+var _backing := false
+var _turn_factor := 1.0
 
 
 func _read_input() -> Dictionary:
@@ -373,8 +390,20 @@ func _read_input() -> Dictionary:
 	if Input.is_physical_key_pressed(KEY_S): mv.y -= 1
 	if Input.is_physical_key_pressed(KEY_A): mv.x -= 1
 	if Input.is_physical_key_pressed(KEY_D): mv.x += 1
-	return {
-		"move": mv.limit_length(1.0),
+	mv = mv.limit_length(1.0)
+	# walk: hold x (or tap caps lock to keep walking). the keys then ask for a half pushed stick,
+	# which the speed curve turns into a real cat walk (~1 m/s) instead of the trot
+	var caps := Input.is_physical_key_pressed(KEY_CAPSLOCK)
+	if caps and not _caps_prev:
+		walk_lock = not walk_lock
+	_caps_prev = caps
+	if mv != Vector2.ZERO:
+		CatPad.last_used_pad = false
+	var walking := Input.is_physical_key_pressed(KEY_X) or walk_lock
+	if walking and not shift:
+		mv *= WALK_TILT
+	var kb := {
+		"move": mv,
 		"canter": shift and not _galloping,
 		"sprint": shift and _galloping,
 		"crouch": Input.is_physical_key_pressed(KEY_CTRL) or Input.is_physical_key_pressed(KEY_C),
@@ -388,6 +417,11 @@ func _read_input() -> Dictionary:
 		"dash": Input.is_physical_key_pressed(KEY_ALT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_XBUTTON1),
 		"lock_on": Input.is_physical_key_pressed(KEY_TAB),   # press = lock / unlock (cat_lock_on.gd)
 	}
+	# gamepad (cat_pad.gd): every action has a button, the left stick's tilt picks the speed
+	var pad := CatPad.read()
+	if not pad.is_empty() and CatPad.walk_toggle and not (pad.canter or pad.sprint):
+		pad.move *= WALK_TILT
+	return CatPad.merge(kb, pad)
 
 
 var log_events := false
@@ -439,6 +473,8 @@ func _physics_process(dt: float) -> void:
 	_kick_aim = Basis(Vector3.UP, aim_yaw) * (Vector3(mv.x, 0, -mv.y).normalized() if mv.length() > 0.05 else Vector3.FORWARD)
 	if inp.has("yaw") and not lock.active():
 		orb_yaw = yaw    # scripted bot: camera and body share one heading, old body-relative controls
+		_turn_factor = 1.0
+		_brake_ask = false
 	else:
 		# every view: wasd is relative to where you look, the cat turns to face where it's going
 		# and runs forward (no strafing). standing still, the head looks around first and the
@@ -447,6 +483,8 @@ func _physics_process(dt: float) -> void:
 			pitch = lerpf(pitch, orb_pitch * 0.5, clampf(dt * 6.0, 0, 1))
 		var busy := climbing or clambering or scratching or mantling or dash.busy() or kick_plant_t > 0.0 or _kick_turn_t > 0.0 or combat.locks_move()
 		var face_look: bool = charging or clawing or combat.any_down() or inp.get("scratch", false) or inp.get("aim", false)
+		_turn_factor = 1.0
+		_brake_ask = false
 		if lock_face:
 			# souls lock: the body keeps its face on the target, wasd (camera relative) becomes
 			# body relative strafing. the rig angles the body into the travel and keeps the head on it
@@ -469,8 +507,16 @@ func _physics_process(dt: float) -> void:
 			var wd := Basis(Vector3.UP, orb_yaw) * Vector3(mv.x, 0, -mv.y)
 			var ty := atan2(-wd.x, -wd.z)
 			var diff := wrapf(ty - yaw, -PI, PI)
-			yaw += clampf(diff, -10.0 * dt, 10.0 * dt)
-			mv = Vector2(0, mv.length() * clampf(1.2 - absf(diff), 0.15, 1.0))
+			# momentum: the faster it's going, the slower the body can swing round
+			var spd := Vector2(velocity.x, velocity.z).length()
+			var tr := lerpf(TURN_RATE_SLOW, TURN_RATE_FAST, smoothstep(0.8, SPRINT_SPEED, spd)) if is_on_floor() else TURN_RATE_SLOW
+			yaw += clampf(diff, -tr * dt, tr * dt)
+			# asking to go back the way it came at speed: plant the paws and brake before turning round
+			_brake_ask = absf(diff) > 1.7 and spd > 1.2
+			# mid turn the cat eases off (a little at speed, where it carves instead of pivoting).
+			# the tilt itself stays, so the gait you asked for comes back as soon as it's lined up
+			_turn_factor = clampf(1.25 - absf(diff) * lerpf(1.0, 0.5, smoothstep(2.0, SPRINT_SPEED, spd)), 0.15, 1.0)
+			mv = Vector2(0, mv.length())
 		elif not busy:
 			var ld := wrapf(orb_yaw - yaw, -PI, PI)
 			if face_look:
@@ -568,8 +614,7 @@ func _physics_process(dt: float) -> void:
 	_prev_side = side
 	if is_on_floor():
 		mv = ground_mv
-		if mv.y < 0.0 and not lock_face:
-			mv.y *= BACKUP_SPEED / TROT_SPEED
+		_backing = mv.y < 0.0 and not lock_face
 	var wish := (fwd * mv.y + right * mv.x)
 	wish.y = 0
 	var wish_len := minf(wish.length(), 1.0)
@@ -709,28 +754,43 @@ func _physics_process(dt: float) -> void:
 	var hv_before := hv
 
 	# ---------------- horizontal movement ----------------
-	var target_speed := TROT_SPEED
+	# how hard the stick (or keys) push picks the gait: nudge = creep, half = walk, full = trot.
+	# run buttons on top of that need a near full push
+	var target_speed := speed_for_tilt(wish_len)
 	if want_crouch:
-		target_speed = STALK_SPEED
-	elif sprint:
+		target_speed = minf(target_speed, STALK_SPEED * clampf(wish_len / 0.7, 0.35, 1.0))
+	elif sprint and wish_len > 0.8:
 		target_speed = SPRINT_SPEED
-	elif canter:
+	elif canter and wish_len > 0.8:
 		target_speed = CANTER_SPEED
+	if _backing:
+		target_speed = minf(target_speed, BACKUP_SPEED)
 	if charging:
 		target_speed = 0.0
+	if grounded:
+		target_speed *= _turn_factor
+	else:
+		target_speed *= wish_len   # air steering keeps the old feel
 
 	if grounded:
-		var target := wish_dir * target_speed * wish_len
-		var accel := GROUND_DECEL
-		if wish_len > 0.01:
-			accel = SPRINT_ACCEL if ((sprint or canter) and hv.length() > TROT_SPEED) else GROUND_ACCEL
+		var target := wish_dir * target_speed
 		var cur := hv.length()
+		# momentum: what the legs can do depends on what's asked and how fast the body already goes
+		var accel: float
+		if wish_len <= 0.01 and not want_crouch:
+			accel = COAST_DECEL + COAST_DRAG * cur
+		elif _brake_ask or (want_crouch and cur > STALK_SPEED + 0.3) or charging:
+			accel = BRAKE_DECEL
+		elif target_speed < cur - 0.05:
+			accel = GAIT_DOWN_DECEL + GAIT_DOWN_DRAG * cur
+		else:
+			accel = minf(PUSH_ACCEL, PUSH_POWER / maxf(cur, 0.5))
 		if cur > target_speed + 0.1 and ground_time < 0.1:
 			# bhop window: keep momentum if you jump again quickly
 			pass
-		elif cur > target_speed + 0.1 and wish_len > 0.01:
-			# over speed (landed from a fast jump): bleed it with friction but keep steering
-			var newspeed := maxf(cur - FRICTION * cur * dt, target_speed)
+		elif cur > SPRINT_SPEED + 0.3 and wish_len > 0.01 and not _brake_ask:
+			# over speed (faster than any gait, landed from a fast jump): bleed it with friction but keep steering
+			var newspeed := maxf(cur - FRICTION * cur * dt, maxf(target_speed, SPRINT_SPEED))
 			hv = hv.lerp(wish_dir * cur, clampf(8.0 * dt, 0, 1)).normalized() * newspeed
 		else:
 			# the cat wants to carve hard: sideways (turning) the ask is way stronger than
@@ -965,6 +1025,15 @@ func _post(dt: float, _inp: Dictionary) -> void:
 
 
 func _process(_dt: float) -> void:
+	if bot.is_empty():
+		# right stick look lands every frame like the mouse
+		var ld := CatPad.look_delta(_dt)
+		if ld != Vector2.ZERO:
+			orb_yaw += ld.x
+			if view_mode == 2:
+				orb_pitch = clampf(orb_pitch + ld.y, -1.4, 0.6)
+			else:
+				pitch = clampf(pitch + ld.y, -1.45, 1.45)
 	if not _interp_ok:
 		return
 	var p := _phys_prev.lerp(_phys_curr, Engine.get_physics_interpolation_fraction())
@@ -1090,6 +1159,15 @@ func set_style(st: String) -> void:
 	op.get_parent().add_child(paws)
 	op.queue_free()
 	_event("cat: " + CatRig.STYLES[st].label)
+
+
+## stick tilt (0..1) -> ground speed. analog all the way: creep, walk, then up to a trot
+static func speed_for_tilt(m: float) -> float:
+	if m <= 0.01:
+		return 0.0
+	if m <= 0.5:
+		return lerpf(CREEP_SPEED, WALK_SPEED, m / 0.5)
+	return lerpf(WALK_SPEED, TROT_SPEED, smoothstep(0.5, 0.92, m))
 
 
 func want_crouch_peek(inp: Dictionary) -> bool:

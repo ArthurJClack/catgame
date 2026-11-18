@@ -7,6 +7,8 @@ open the folder in godot 4.3+ and hit play (f5).
 
 ## controls
 - wasd moves relative to where you look (same as the orbit cam in every view), the cat turns to run that way and its head follows your look. backing up is slow, a/d = short sideways hop, hold shift = canter (6 m/s), double tap shift + hold = full gallop (11 m/s), ctrl/c stalk (crouch)
+- momentum: the cat has weight. speed builds (trot ~0.4 s, full gallop ~2.5 s) and bleeds off when you let go (gallop rolls ~1.5-2 s), asking to go the other way at speed plants the paws and skids, and the faster it runs the wider it turns. hold x (or tap caps lock) = walk (~1 m/s)
+- controller (`cat_pad.gd`, any pad godot maps, xbox names): left stick tilt = speed (nudge creep, half walk, full trot), right stick look, L3 run (click again = gallop), A jump, B dodge, X scratch, Y view, LT/RT left/right paw (both = rear up + hold), LB aim leap, RB crouch (RB+A pounce), R3 lock on, d-pad down drop, d-pad up walk toggle. radial deadzones with rescale, hysteresis on the triggers
 - space: hop (1 m), in the air next to a wall: wall kick (2 per jump)
 - alt or mouse4: souls style dodge (`cat_dash.gd`). wasd toward the body = low dart, off to the side = startled side leap, behind = whirl round + dart, nothing held = backstep. committed once pressed, i-frames from the push off (`player.is_invulnerable()`), presses during the landing are buffered so dodges chain
 - tab: souls style **lock on** (`cat_lock_on.gd`). locks the camera onto the best thing in view: rat pit rats first, then prey, then any other wildlife, nearest the crosshair wins. a dot marks it. while locked the body stays square to the target and wasd strafes / circles round it (shift still runs, camera stays on it), dodges read wasd relative to the target (s = backstep away, a / d = side leap round it, w = dart in), a quick mouse flick left / right hops the lock to the next target on that side, tab again unlocks. it also breaks when the target dies / is caught (a dead rat hands the lock to the next rat close by), gets past 16 m or stays out of sight for 1.4 s. works in first person, third person and orbit. other code can read `player.lock_target` (Node3D or null) and `player.lock_point()`. bot key `lock_on`. tests: `godot --headless --path . res://arena.tscn -- --locktest`, `--lockshow` renders the clip. (tab used to be "back to the house" in the forest / trail / pit / dock levels, that's f5 now)
@@ -53,7 +55,8 @@ open the folder in godot 4.3+ and hit play (f5).
   spring chain tail, stretch/groom/loaf/scratch/hang/climb/pin poses (5 model styles, one rig)
 - `scripts/toy_mouse.gd` prey toy
 - `scripts/paw_view.gd` first person front legs
-- `scripts/cat_player.gd` movement controller
+- `scripts/cat_player.gd` movement controller (`-- --preview --movetest` checks momentum + the pad, `--movecurve` dumps a speed csv)
+- `scripts/cat_pad.gd` gamepad reader (deadzones, button map, `CatPad.sim` fake pad for tests)
 - `scripts/level.gd` living room gym + gait reference studio
 - `scripts/npc_cat.gd` wandering cats
 - `scripts/preview.gd` scripted showcase (run with `godot -- --preview`, add `--showcase` for
