@@ -119,6 +119,18 @@ drop offs down the far side, a creek ditch, then a debris mix of stumps, logs, r
 - `res://steptest.tscn` (headless): runs the cat at walk/trot/canter/gallop into boxes, a round rock and a
   lying log of 6-35 cm, checks it never launches itself and mounts everything up to 22 cm
 
+### rough ground footwork
+
+paws look where they step: each swing picks a foothold where the paw will actually land (off root / rock
+edges and steep faces, reach rays up to 24 cm up / 20 cm down, never onto something the cat walks under),
+lifts higher to clear what's in between and keeps the toes out of the ground mid swing. the girdles sit
+nearer the lower paw (the cat crouches over dips instead of reaching into them), tilt with the ground
+across them, and the body height is damped in world space so it doesn't hop when the capsule rides a bump.
+`CatGait.rough = false` = the old flat ground behaviour.
+- `res://roughlab.tscn -- --roughtest [--legacy] [--only walk,trot,canter]` (headless): the real controller
+  walks / trots / canters over bumps, roots, rocks, a 15 deg cross slope and 7 cm stone steps, and every
+  frame checks planted paws against the ground under them (ROUGHTEST PASS). `-- --show` = before/after video
+
 ## install + auto updates (windows)
 
 - grab **CatGame-Setup.exe** from the [latest release](https://github.com/ArthurJClack/catgame/releases/latest) and run it.

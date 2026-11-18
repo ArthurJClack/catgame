@@ -99,6 +99,11 @@ var _chest_dy := 0.0
 var _pelvis_dy := 0.0
 var _fgy := 0.0
 var _hgy := 0.0
+# rough ground: last root height (girdle heights are damped in world space, so the body doesn't
+# hop when the capsule rides over a bump) and how far each girdle tilts with the ground across it
+var _root_y_prev := NAN
+var _groll := [0.0, 0.0]
+var _prev_floor_g := false
 var _cx := 0.0
 var _chest_f := Vector3.ZERO
 var _chest_f_init := false
@@ -937,6 +942,17 @@ func animate(dt: float) -> void:
 	var gy := [_fgy, _hgy]
 	var cx_sum := 0.0
 	var cx_w := 0.0
+	var rough := CatGait.rough and use_planting
+	if rough:
+		# the capsule hopped up / down a bump: the planted paws didn't, so neither does the body
+		var ry := gx.origin.y
+		if not is_nan(_root_y_prev) and on_floor and _prev_floor_g and nc > 0.5 and absf(ry - _root_y_prev) < 0.3:
+			_fgy -= ry - _root_y_prev
+			_hgy -= ry - _root_y_prev
+		_root_y_prev = ry
+		_prev_floor_g = on_floor
+	var groll_t := [0.0, 0.0]
+	var groll_ok := [false, false]
 	for h in 2:
 		var wsum := 0.0
 		var drop := 0.0
@@ -963,11 +979,32 @@ func animate(dt: float) -> void:
 		dy[h] = lerpf(walk_dy, run_dy, runw) * move_amt * (1.0 - _air_w)
 		if gn > 0:
 			gy[h] = gsum / gn
+		if rough:
+			# the ground under both paws of the girdle (the swinging one: where it's landing).
+			# the girdle sits nearer the lower paw (the high leg folds, the low one isn't
+			# stretched off its paw: a cat crouches over a dip rather than reaching down into it) and tilts part way with the ground across it
+			var yl := gait.ground_y(h * 2) - gx.origin.y
+			var yr := gait.ground_y(h * 2 + 1) - gx.origin.y
+			var wl := 1.0 if gait.mode[h * 2] == CatGait.PLANTED else (0.5 if gait.mode[h * 2] == CatGait.SWING else 0.0)
+			var wr := 1.0 if gait.mode[h * 2 + 1] == CatGait.PLANTED else (0.5 if gait.mode[h * 2 + 1] == CatGait.SWING else 0.0)
+			if wl + wr > 0.0:
+				var mean := (yl * wl + yr * wr) / (wl + wr)
+				var lo := minf(yl, yr) if wl > 0.0 and wr > 0.0 else mean
+				gy[h] = lerpf(mean, lo, 0.75)
+			if wl > 0.0 and wr > 0.0:
+				var dx := maxf((fl[h * 2 + 1] as Vector3).x - (fl[h * 2] as Vector3).x, 0.07)
+				groll_t[h] = clampf(atan2(yr - yl, dx) * 0.4, -0.22, 0.22)
+				groll_ok[h] = true
 	_chest_dy = LowPoly.damp(_chest_dy, dy[0], 28.0, dt)
 	_pelvis_dy = LowPoly.damp(_pelvis_dy, dy[1], 28.0, dt)
 	var plantw := (1.0 - _air_w) * nc * (1.0 - clamber)
-	_fgy = LowPoly.damp(_fgy, clampf(gy[0], -0.12, 0.14) * plantw, 12.0, dt)
-	_hgy = LowPoly.damp(_hgy, clampf(gy[1], -0.12, 0.14) * plantw, 12.0, dt)
+	var glo := -0.2 if rough else -0.12
+	var ghi := 0.2 if rough else 0.14
+	_fgy = LowPoly.damp(_fgy, clampf(gy[0], glo, ghi) * plantw, 12.0, dt)
+	_hgy = LowPoly.damp(_hgy, clampf(gy[1], glo, ghi) * plantw, 12.0, dt)
+	for h in 2:
+		if groll_ok[h] or not rough:
+			_groll[h] = LowPoly.damp(_groll[h], float(groll_t[h]) * plantw, 10.0, dt)
 	# lean over the paws that are carrying the weight
 	_cx = LowPoly.damp(_cx, (cx_sum / cx_w if cx_w > 0.01 else 0.0) * 0.45 * plantw, 9.0, dt)
 	_bal_s = LowPoly.damp(_bal_s, maxf(balance, _bal_auto) * plantw, 4.0, dt)
@@ -1033,9 +1070,9 @@ func animate(dt: float) -> void:
 	# the spine bends along the turn: the tighter the circle the more the chest leads the hips
 	var twist := clampf(_yaw_rate * 0.17 / maxf(speed_s, 0.7), -0.42, 0.42) * nc * (1.0 - _air_w)
 	chest.rotation.y = -yaw_off * 0.35 + twist * 0.5 + _yaw_c
-	chest.rotation.z = _roll_c + (_tum_c - _tum_p) + soma.roll_c
+	chest.rotation.z = _roll_c + (_tum_c - _tum_p) + soma.roll_c + float(_groll[0])
 	# butt wiggle before a pounce
-	pelvis.rotation.z = sin(_t * 19.0) * 0.14 * charge + _roll_p + soma.roll_p
+	pelvis.rotation.z = sin(_t * 19.0) * 0.14 * charge + _roll_p + soma.roll_p + float(_groll[1])
 	pelvis.rotation.y = sin(_t * 19.0) * 0.06 * charge + yaw_off * 0.2 - twist * 0.5 + _yaw_p + still_w * sin(_t * 0.41) * 0.035
 	# breathing (slower + deeper when loafing)
 	var br := 1.0 + sin(_t * lerpf(2.4, 1.5, loaf)) * lerpf(0.012, 0.02, loaf) * (1.0 - move_amt * 0.5)
