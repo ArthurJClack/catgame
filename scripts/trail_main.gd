@@ -281,9 +281,9 @@ func _process(dt: float) -> void:
 	var hs := Vector2(v.x, v.z).length()
 	var sec := TrailLevel.section(_last_s)
 	hud_label.text = "%d fps\n%.1f m/s (%.0f km/h)   %s\nsection: %s   step ups %d   jumps %d   auto step %s" % [Engine.get_frames_per_second(), hs, hs * 3.6, player.surface, sec, steps, jumps, "on" if player.auto_step else "off"]
-	if player.last_event_t < 0.9:
-		event_label.text = player.last_event
-		event_label.modulate.a = 1.0 - player.last_event_t / 0.9
+	if player.toast_t < 0.9:
+		event_label.text = player.toast
+		event_label.modulate.a = 1.0 - player.toast_t / 0.9
 	else:
 		event_label.text = ""
 

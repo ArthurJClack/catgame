@@ -39,7 +39,7 @@ func _ready() -> void:
 	process_priority = 10
 	var args := OS.get_cmdline_user_args()
 	test_mode = "--arenatest" in args or "--combattest" in args or "--locktest" in args
-	show_mode = "--arenashow" in args or "--combatshow" in args or "--pounceshow" in args or "--lockshow" in args
+	show_mode = "--arenashow" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--lockshow" in args
 	_setup_env()
 	_build_pit()
 	player = CatPlayer.new()
@@ -53,7 +53,7 @@ func _ready() -> void:
 	if test_mode or show_mode:
 		help_label.visible = false
 		player.bot = {"move": Vector2.ZERO, "stamina": true}
-		var t: ArenaTest = CombatTest.new() if ("--combattest" in args or "--combatshow" in args or "--pounceshow" in args) else ArenaTest.new()
+		var t: ArenaTest = CombatTest.new() if ("--combattest" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args) else ArenaTest.new()
 		if "--locktest" in args or "--lockshow" in args:
 			t = LockTest.new()
 		t.arena = self
@@ -171,7 +171,7 @@ func _physics_process(dt: float) -> void:
 
 func _process(_dt: float) -> void:
 	if event_label and player:
-		event_label.text = player.last_event if player.last_event_t < 2.2 else ""
+		event_label.text = player.toast if player.toast_t < 2.2 else ""
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -382,7 +382,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the rat pit: rats can only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nalt / mouse4 dodge (i-frames) · mouse1 / mouse2 left / right paw (hold = rake) · both = rear up + pin it (can't walk while holding), release both = pounce · hold space + release / q leap = pounce (heavy hit) · watch your stamina\ntab lock on (wasd circles, flick mouse = switch rat, dodges go relative to it) · r restart · 1-8 swap cat · v camera · h hide help · f5 back to the house"
+	help_label.text = "the rat pit: rats can only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nalt / mouse4 dodge (i-frames) · mouse1 / mouse2 left / right paw (hold = rake) · hold space = pounce (heavy hit, leads a running rat) · g / mouse5 grab + pin it (can't walk while holding) · attacks are committed: dodge out of the recovery · watch your stamina\ntab lock on (wasd circles, flick mouse = switch rat, dodges go relative to it) · r restart · 1-8 swap cat · v camera · h hide help · f5 back to the house"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)

@@ -12,6 +12,8 @@ func _ready() -> void:
 		_ctest.call_deferred()
 	elif "--pounceshow" in OS.get_cmdline_user_args():
 		_pshow.call_deferred()
+	elif "--commitshow" in OS.get_cmdline_user_args():
+		_commitshow.call_deferred()
 	else:
 		_cshow.call_deferred()
 
@@ -91,7 +93,7 @@ func _ctest() -> void:
 	await _ticks(2)
 	print("C hold left at nothing: claw hold with the left paw %s, released %s" % [str(hooked), str(not p.clawing)])
 	ok = ok and hooked and not p.clawing
-	# D: both = rear up, slam down, hold. no walking while both paws hold it
+	# D: grab button = quick reach (no rearing up), slam down, hold. no walking while both paws hold it
 	await _clear_rats()
 	_reset_cat(Vector3(0, 0.02, 0.4))
 	r = _still_rat(PI)               # facing the cat
@@ -99,11 +101,9 @@ func _ctest() -> void:
 	await _ticks(3)
 	var sw0 := c.swats
 	st0 = p.stamina.value
-	_paws(true, false)
-	await _ticks(2)                  # second button a few ms later: still a chord
-	_paws(true, true)
+	bot.grab = true
 	await _secs(0.12)
-	var rear_mid: float = c.rear_w
+	var rear_mid: float = p.rig.rear
 	var eye_mid: float = p.eye_local.y
 	await _secs(0.2)
 	var held := r.held_by == p
@@ -114,19 +114,19 @@ func _ctest() -> void:
 	await _secs(0.5)
 	var moved := p.global_position.distance_to(pos0)
 	var grip_w: float = p.rig.get("grip")
-	print("D both paws: swats %d, rear %.2f eye %.2f m, slam %.1f dmg, held %s, moved %.3f m trying to walk + hop, rig grip %.2f, ticks %d, stamina -%.0f" % [c.swats - sw0, rear_mid, eye_mid, slam, str(held), moved, grip_w, c.grip_ticks, st0 - p.stamina.value])
-	ok = ok and c.swats == sw0 and rear_mid > 0.5 and held and is_equal_approx(slam, 1.5) and moved < 0.05 and grip_w > 0.9 and c.grip_ticks >= 1
+	print("D grab: swats %d, rig rear %.2f (none) eye %.2f m, slam %.1f dmg, held %s, moved %.3f m trying to walk + hop, rig grip %.2f, ticks %d, stamina -%.0f" % [c.swats - sw0, rear_mid, eye_mid, slam, str(held), moved, grip_w, c.grip_ticks, st0 - p.stamina.value])
+	ok = ok and c.swats == sw0 and rear_mid < 0.05 and held and is_equal_approx(slam, 1.5) and moved < 0.05 and grip_w > 0.9 and c.grip_ticks >= 1
 	# E: let go of one paw -> the rat's free and so are you
 	bot.jump = false
-	_paws(true, false)
+	bot.grab = false
 	await _ticks(2)
 	pos0 = p.global_position
 	await _secs(0.4)
 	moved = p.global_position.distance_to(pos0)
-	print("E released right: rat free %s, gripping %s, cat walks %.2f m in 0.4 s, no stray swat %s" % [str(r.held_by == null), str(c.gripping()), moved, str(c.swats == sw0)])
+	print("E released grab: rat free %s, gripping %s, cat walks %.2f m in 0.4 s, no stray swat %s" % [str(r.held_by == null), str(c.gripping()), moved, str(c.swats == sw0)])
 	ok = ok and r.held_by == null and not c.gripping() and moved > 0.3 and c.swats == sw0
 	bot.move = Vector2.ZERO
-	_paws(false, false)
+	bot.grab = false
 	await _ticks(2)
 	# F: hold on and it wriggles out after break_t (the brute sooner)
 	await _clear_rats()
@@ -138,7 +138,7 @@ func _ctest() -> void:
 	await _ticks(3)
 	if OS.has_environment("ARENA_DBG"):
 		print("  F pre: y %.3f floor %s climb %s clamber %s mantle %s scratch %s charge %s dash %s" % [p.global_position.y, p.is_on_floor(), p.climbing, p.clambering, p.mantling, p.scratching, p.charging, p.dash.busy()])
-	_paws(true, true)
+	bot.grab = true
 	var t := 0.0
 	var held_for := 0.0
 	while t < 3.0:
@@ -149,11 +149,11 @@ func _ctest() -> void:
 			held_for += dt
 		elif held_for > 0.0:
 			break
-	_paws(true, false)               # let go of one (no pounce)
+	bot.grab = false
 	await _secs(0.2)
 	print("F brute held %.2f s then wriggled free (break_t %.2f), cat still gripping %s" % [held_for, r.break_t, str(c.gripping())])
 	ok = ok and absf(held_for - r.break_t) < 0.05 and r.held_by == null
-	_paws(false, false)
+	bot.grab = false
 	await _ticks(2)
 	# G: grab it from behind: the slam lands double
 	await _clear_rats()
@@ -163,12 +163,12 @@ func _ctest() -> void:
 	await _secs(0.15)
 	r.hp = 99.0
 	r.max_hp = 99.0
-	_paws(true, true)
+	bot.grab = true
 	await _secs(0.27)
 	var back := r.max_hp - r.hp
-	_paws(true, false)               # let go of one: no pounce onto it
+	bot.grab = false
 	await _secs(0.2)
-	_paws(false, false)
+	bot.grab = false
 	await _ticks(2)
 	print("G grab from behind: slam %.1f dmg" % back)
 	ok = ok and is_equal_approx(back, 3.0)
@@ -182,7 +182,7 @@ func _ctest() -> void:
 	_face(r.global_position)
 	await _ticks(3)
 	p.stamina.value = 20.0
-	_paws(true, true)
+	bot.grab = true
 	t = 0.0
 	while t < 4.0 and (c.gripping() or t < 0.1):
 		await get_tree().physics_frame
@@ -190,21 +190,21 @@ func _ctest() -> void:
 		r.break_t = 99.0
 	print("H 20 stamina, holding a rat: slips after %.2f s, gripping %s" % [t, str(c.gripping())])
 	ok = ok and not c.gripping() and t < 2.8
-	_paws(false, false)
+	bot.grab = false
 	await _ticks(2)
-	# I: nothing in reach: rear, drop into the pounce crouch, release both = free projectile pounce
+	# I: hold space: the pounce crouch, release both = free projectile pounce
 	await _clear_rats()
 	_reset_cat(Vector3(0, 0.02, 2.0))
 	_face(Vector3(0, 0.02, -1.0))
 	bot.pitch = -0.15
 	await _ticks(3)
-	_paws(true, true)
+	bot.pounce = true
 	await _secs(0.9)
 	var aimed := c.aiming()
 	var pred: Vector3 = c.pounce.point
 	var pkind: String = c.pounce.kind
 	var n0 := c.pounces
-	_paws(false, false)
+	bot.pounce = false
 	if OS.has_environment("ARENA_DBG"):
 		for k in 6:
 			await get_tree().physics_frame
@@ -224,11 +224,11 @@ func _ctest() -> void:
 	_face(Vector3(0.35, 0.02, 0.0))   # aiming ~0.35 m to the side of it
 	bot.pitch = -0.1
 	await _ticks(3)
-	_paws(true, true)
+	bot.pounce = true
 	await _secs(0.9)
 	pkind = c.pounce.kind
 	pred = c.pounce.point
-	_paws(false, false)
+	bot.pounce = false
 	land = await _land_spot()
 	await _secs(0.3)
 	var dmg := r.max_hp - r.hp
@@ -249,32 +249,258 @@ func _ctest() -> void:
 	_face(Vector3(0, 0.1, 0.1))
 	bot.pitch = -0.1
 	await _ticks(3)
-	_paws(true, true)
+	bot.pounce = true
 	await _secs(0.9)
 	pkind = c.pounce.kind
 	pred = c.pounce.point
-	_paws(false, false)
+	bot.pounce = false
 	land = await _land_spot()
 	await _secs(0.3)
 	print("K ledge: kind %s, top at %.2f m, landed y %.2f, miss %.3f m" % [pkind, pred.y, land.y, Vector2(land.x - pred.x, land.z - pred.z).length()])
 	ok = ok and pkind == "ledge" and land.y > 0.4
 	box.queue_free()
 	await _ticks(2)
-	# L: let go of just one = cancel, no pounce
+	# L: a paw press while aiming = call it off, no pounce
 	_reset_cat(Vector3(0, 0.02, 1.0))
 	_face(Vector3(0, 0.02, -1.0))
 	await _ticks(3)
 	n0 = c.pounces
-	_paws(true, true)
+	bot.pounce = true
 	await _secs(0.6)
-	_paws(true, false)
-	await _secs(0.3)
+	_paws(true, false)               # a paw instead = call it off
+	await _ticks(2)
 	_paws(false, false)
-	await _secs(0.2)
-	print("L let go of one while aiming: pounces %d, aiming %s, cat y %.2f" % [c.pounces - n0, str(c.aiming()), p.global_position.y])
+	await _secs(0.3)
+	bot.pounce = false
+	await _secs(0.4)
+	print("L paw while aiming: pounces %d, aiming %s, cat y %.2f" % [c.pounces - n0, str(c.aiming()), p.global_position.y])
 	ok = ok and c.pounces == n0 and not c.aiming() and p.global_position.y < 0.05
+	ok = (await _commit_test()) and ok
 	print("COMBATTEST ", "PASS" if ok else "FAIL")
 	get_tree().quit()
+
+
+var _runner: Node3D = null
+var _runner_v := Vector3.ZERO
+
+
+## drives the space filter by hand: held for t, then let go. what came out over the whole press
+func _hold_space(t: float, dt: float) -> Dictionary:
+	var out := {"jump": false, "pounce": false, "charge": 0.0}
+	var e := 0.0
+	while e < t:
+		var o: Dictionary = p._space_filter(true, true, dt)
+		out.pounce = out.pounce or o.pounce
+		out.jump = out.jump or o.jump
+		e += dt
+	var o2: Dictionary = p._space_filter(false, true, dt)
+	out.jump = out.jump or o2.jump
+	out.charge = o2.hop_charge
+	return out
+
+
+func _hop_height(charge: float) -> float:
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	await _secs(0.3)
+	var y0 := p.global_position.y
+	bot.hop_charge = charge
+	bot.jump = true
+	await _ticks(2)
+	bot.jump = false
+	var top := y0
+	var t := 0.0
+	while t < 1.5:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		top = maxf(top, p.global_position.y)
+		if t > 0.2 and p.is_on_floor():
+			break
+	bot.erase("hop_charge")
+	await _secs(0.3)
+	return top - y0
+
+
+## steps physics ticks until cond() or max_t, returns the time it took (max_t if never)
+func _until(cond: Callable, max_t := 1.5) -> float:
+	var t := 0.0
+	while t < max_t:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		if cond.call():
+			return t
+	return max_t
+
+
+## souls commitment (cat_combat.gd MOVES): phases, movement + turn lock, buffered swats,
+## dodge only from the cancel point, stagger out of a wind up, committed grab reach
+func _commit_test() -> bool:
+	var ok := true
+	var c := p.combat
+	var sw: Dictionary = CatCombat.MOVES.swat
+	# M: trotting in, swat: the feet plant, the body won't swing round, phases run in order
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 2.5))
+	_face(Vector3(0, 0.02, -3))
+	bot.move = Vector2(0, 1)
+	await _secs(0.8)
+	var v0 := Vector2(p.velocity.x, p.velocity.z).length()
+	var y0: float = p.yaw
+	_paws(true, false)
+	await _until(func(): return c.atk_phase == CatCombat.A_WIND)
+	bot.yaw = y0 + 1.5               # yank the view round mid attack
+	p.orb_yaw = bot.yaw
+	var phases := []
+	var v_act := 99.0
+	var t := 0.0
+	while t < 0.6:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		if c.atk_phase == CatCombat.A_ACTIVE:
+			v_act = minf(v_act, Vector2(p.velocity.x, p.velocity.z).length())
+		var ph: String = c.phase_name()
+		if phases.is_empty() or phases[-1] != ph:
+			phases.append(ph)
+		if c.atk_phase == CatCombat.A_RECOVER and phases.size() == 3:
+			break
+	var turned := absf(wrapf(p.yaw - y0, -PI, PI))
+	_paws(false, false)
+	bot.move = Vector2.ZERO
+	await _secs(0.5)
+	print("M swat at a trot: phases %s, speed %.2f -> %.2f m/s while the paw's out, body turned %.2f rad of 1.5 by the recovery" % [str(phases), v0, v_act, turned])
+	ok = ok and phases == ["wind", "active", "recover"] and v0 > 2.5 and v_act < 1.4 and turned < 0.45
+	bot.yaw = p.yaw
+	# N: mash: a second click mid swat is buffered and comes out at the chain point
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	_face(Vector3(0, 0.02, -1))
+	await _ticks(3)
+	var s0 := c.swats
+	_paws(true, false)
+	await _until(func(): return c.swats > s0)
+	var f1: float = c.fire_clock
+	await _ticks(2)
+	_paws(false, true)               # right paw while the left is still winding up
+	await _ticks(3)
+	_paws(false, false)
+	var early := c.swats - s0
+	await _until(func(): return c.swats > s0 + 1)
+	var gap: float = c.fire_clock - f1
+	await _secs(0.5)
+	var want: float = sw.wind + sw.active + sw.chain
+	print("N mash left, right: right paw buffered (swats right after click %d), came out %.2f s after the left (chain point %.2f), right paw %s" % [early, gap, want, str(p.rig.get("_swat_i") == 1)])
+	ok = ok and early == 1 and absf(gap - want) < 0.02 and c.swats - s0 == 2 and p.rig.get("_swat_i") == 1
+	# O: dodge pressed in the wind up waits for the cancel point, then rolls out of the recovery
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	_face(Vector3(0, 0.02, -1))
+	await _ticks(3)
+	var d0: int = p.dash.count
+	_paws(true, false)
+	await _until(func(): return c.atk_phase == CatCombat.A_WIND)
+	await _ticks(1)
+	bot.dash = true
+	await _ticks(2)
+	bot.dash = false
+	await _until(func(): return p.dash.state != CatDash.IDLE)
+	var td: float = c.clock - c.fire_clock
+	_paws(false, false)
+	await _secs(0.7)
+	var wcan: float = sw.wind + sw.active + sw.cancel
+	print("O dodge pressed in the wind up: rolled %.2f s into the swat (cancel point %.2f), dodges %d, cancels %d" % [td, wcan, p.dash.count - d0, c.dodge_cancels])
+	ok = ok and p.dash.count - d0 == 1 and absf(td - wcan) < 0.02 and c.dodge_cancels >= 1
+	# P: bitten in the wind up: staggered out, the paw never lands
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 0.36))
+	var r := _still_rat(PI)
+	r.hp = 9.0
+	r.max_hp = 9.0
+	_face(r.global_position)
+	await _secs(0.6)
+	p.health.grace = 0.0
+	var i0: int = c.interrupts
+	_paws(true, false)
+	await _until(func(): return c.atk_phase == CatCombat.A_WIND)
+	await _ticks(2)
+	p.health.damage(0.5, r.global_position, 0.5)
+	_paws(false, false)
+	await _secs(0.4)
+	print("P hit mid wind up: interrupted %d, rat took %.1f dmg, still attacking %s" % [c.interrupts - i0, r.max_hp - r.hp, str(c.committed())])
+	ok = ok and c.interrupts - i0 == 1 and is_equal_approx(r.hp, r.max_hp) and not c.committed()
+	p.health.value = CatHealth.MAX
+	# Q: tap grab: the reach still finishes, then a recovery, no pounce
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	_face(Vector3(0, 0.02, -1))
+	await _secs(0.3)
+	var n0 := c.pounces
+	bot.grab = true
+	await _secs(0.05)
+	bot.grab = false
+	await _secs(0.05)
+	var still_rearing: bool = c.grip_phase == CatCombat.G_REACH
+	var tr := await _until(func(): return c.atk == "grab_out")
+	var out_ok: bool = c.atk == "grab_out"
+	await _secs(0.4)
+	print("Q tap grab: still reaching after letting go %s, grab_out recovery %s, pounces %d" % [str(still_rearing), str(out_ok), c.pounces - n0])
+	ok = ok and still_rearing and out_ok and c.pounces == n0 and not c.committed()
+	# R: both paws next to a rat = two swats (left, then the right buffered), no grab, no pounce
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 0.4))
+	r = _still_rat(PI)
+	r.hp = 99.0
+	r.max_hp = 99.0
+	_face(r.global_position)
+	await _ticks(3)
+	var sw0 := c.swats
+	_paws(true, true)
+	await _secs(0.4)
+	var aim_r: bool = c.aiming()
+	var held_r: bool = r.held_by == p
+	_paws(false, false)
+	await _secs(0.3)
+	print("R both paws by a rat: swats %d, pounce crouch %s, grabbed %s" % [c.swats - sw0, str(aim_r), str(held_r)])
+	ok = ok and c.swats - sw0 == 2 and not aim_r and not held_r
+	# S: a rat running across: the pounce leads it and lands where it got to
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	r = _still_rat(-PI * 0.5)
+	r.hp = 99.0
+	r.max_hp = 99.0
+	r.global_position = Vector3(-1.0, 0.02, 0.4)
+	_face(Vector3(0, 0.02, 0.4))
+	bot.pitch = -0.05
+	_runner = r
+	_runner_v = Vector3(1.2, 0, 0)
+	await _ticks(3)
+	bot.pounce = true
+	await _secs(0.8)
+	var lead_kind: String = c.pounce.kind
+	var lead_pt: Vector3 = c.pounce.point
+	var rat_then: Vector3 = r.global_position
+	bot.pounce = false
+	var land_s := await _land_spot()
+	var rat_at := r.global_position
+	_runner = null
+	await _secs(0.3)
+	var lead := Vector2(lead_pt.x - rat_then.x, lead_pt.z - rat_then.z).length()
+	var off := Vector2(rat_at.x - land_s.x, rat_at.z - land_s.z).length()
+	print("S rat running 1.2 m/s across: kind %s, aimed %.2f m ahead of it, landed %.2f m from where it got to, pin dmg %.1f" % [lead_kind, lead, off, r.max_hp - r.hp])
+	ok = ok and lead_kind in ["prey", "lock"] and lead > 0.3 and off < 0.45 and r.max_hp - r.hp >= 2.5
+	# T: space: tap = hop, hold = higher hop, hold long = pounce mode (the human input filter)
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	await _ticks(3)
+	var dt := 1.0 / 144.0
+	var f_tap := _hold_space(0.06, dt)
+	var f_mid := _hold_space(0.3, dt)
+	var f_long := _hold_space(0.6, dt)
+	var f_air: Dictionary = p._space_filter(true, false, dt)
+	p._space_filter(false, false, dt)
+	print("T space filter: tap %s, 0.3 s %s, 0.6 s %s, air press jumps at once %s" % [str(f_tap), str(f_mid), str(f_long), str(f_air.jump)])
+	ok = ok and f_tap.jump and f_tap.charge == 0.0 and f_mid.jump and f_mid.charge > 0.3 and f_mid.charge < 0.8 and not f_mid.pounce and f_long.pounce and not f_long.jump and f_air.jump
+	# U: a charged hop goes higher than a tapped one
+	var h_tap := await _hop_height(0.0)
+	var h_big := await _hop_height(1.0)
+	print("U hop %.2f m tapped, %.2f m fully charged" % [h_tap, h_big])
+	ok = ok and h_big > h_tap * 1.4
+	return ok
 
 
 # ---------------------------------------------------------------- show reel
@@ -285,6 +511,8 @@ var _dummy_pos := Vector3.ZERO
 
 
 func _physics_process(_dt: float) -> void:
+	if is_instance_valid(_runner) and _runner.get("held_by") == null and not (_runner.has_method("pinned") and _runner.pinned()):
+		_runner.global_position += _runner_v * _dt     # test S: moved by position only (no velocity to read)
 	# show reel: the rat is a training dummy, it never attacks (still flinches + struggles)
 	if is_instance_valid(_dummy) and _dummy.held_by == null and _dummy.state in [SoulsRat.IDLE, SoulsRat.CHASE, SoulsRat.WINDUP, SoulsRat.LUNGE]:
 		_dummy.state = SoulsRat.RECOVER
@@ -348,18 +576,17 @@ func _cshow() -> void:
 	await _secs(1.3)
 	_paws(false, false)
 	await _secs(0.5)
-	_say("hold both  (half speed)", "rear up on the hind legs, then pin it with both paws")
+	_say("g = grab  (half speed)", "quick reach, both paws pin it (no rearing up)")
 	Engine.time_scale = 0.5
-	_paws(true, true)
+	bot.grab = true
 	await _secs(0.9)
 	Engine.time_scale = 1.0
-	_say("both paws holding", "holding w: can't walk without a free paw")
+	_say("holding", "holding w: can't walk without a free paw")
 	bot.move = Vector2(0, 1)
 	await _secs(0.9)
-	_say("let go of one", "free to walk again")
-	_paws(true, false)
+	_say("let go of g", "free to walk again")
+	bot.grab = false
 	await _secs(0.7)
-	_paws(false, false)
 	bot.move = Vector2.ZERO
 	await _secs(0.3)
 	# first person: grab one from behind
@@ -375,9 +602,9 @@ func _cshow() -> void:
 	await _secs(0.9)
 	_paws(false, false)
 	await _secs(0.3)
-	_paws(true, true)
+	bot.grab = true
 	await _secs(1.8)
-	_paws(false, false)
+	bot.grab = false
 	await _secs(0.6)
 	get_tree().quit()
 
@@ -404,9 +631,9 @@ func _block(pos: Vector3, size: Vector3) -> StaticBody3D:
 
 ## hold both, aim for `wind` s, let go of both, follow the flight with the side camera
 func _pounce(wind: float, cam_side := true) -> void:
-	_paws(true, true)
+	bot.pounce = true
 	await _secs(wind)
-	_paws(false, false)
+	bot.pounce = false
 	var t := 0.0
 	while t < 1.3:
 		await get_tree().physics_frame
@@ -436,9 +663,9 @@ func _pshow() -> void:
 	bot.pitch = 0.0
 	cam.global_position = Vector3(2.3, 0.7, 2.0)
 	cam.look_at(Vector3(0, 0.15, 1.6))
-	_say("hold both", "rears up, then drops into the pounce crouch (the arc shows where it lands)")
+	_say("hold space", "past the hop: pounce crouch, the line shows exactly where it lands")
 	await _pounce(1.1)
-	_say("let go of both", "free projectile: no steering, sticks the landing dead still")
+	_say("let go", "low forward arc, no steering, sticks the landing dead still")
 	await _secs(0.6)
 	# 2: soft lock: aim off to the side of a rat, it bends onto it
 	await _clear_rats()
@@ -476,4 +703,152 @@ func _pshow() -> void:
 	await _secs(0.3)
 	await _pounce(0.9, false)
 	await _secs(0.8)
+	get_tree().quit()
+
+
+# ---------------------------------------------------------------- commitment reel (--commitshow)
+
+## waits t seconds, the subtitle shows the attack phase live (wind up / paw out / recovery)
+func _watch(t: float, title: String, extra := "") -> void:
+	var c := p.combat
+	var e := 0.0
+	while e < t:
+		await get_tree().physics_frame
+		e += get_physics_process_delta_time()
+		var ph: String = {"wind": "WIND UP", "active": "PAW OUT", "recover": "RECOVERY"}.get(c.phase_name(), "")
+		if c.buf_paw >= 0:
+			ph += "   + buffered " + ("left" if c.buf_paw == 0 else "right")
+		if c.dodge_buf > 0.0:
+			ph += "   + dodge waiting"
+		_say(title, (ph + "   " + extra) if ph != "" else extra)
+
+
+func _commitshow() -> void:
+	_labels()
+	arena.hud.visible = true
+	cam = Camera3D.new()
+	cam.fov = 46
+	cam.near = 0.02
+	arena.add_child(cam)
+	cam.current = true
+	p.set_third_person(true)
+	p.set_style("block")
+	await _ticks(10)
+	await _clear_rats()
+	_reset_cat(Vector3(0, 0.02, 0.5))
+	var r := _dummy_rat(PI, Vector3(0, 0.02, 0))
+	_face(r.global_position)
+	cam.global_position = Vector3(1.05, 0.38, 0.12)
+	cam.look_at(Vector3(0, 0.13, 0.3))
+	# 1: one swat, half speed, phases called out
+	Engine.time_scale = 0.4
+	_say("souls style commitment", "every attack: wind up, paw out, recovery")
+	await _secs(0.4)
+	_paws(true, false)
+	await _ticks(4)
+	_paws(false, false)
+	await _watch(0.6, "one swat  (0.4x)")
+	# 2: mash: clicks are buffered and come out on the beat
+	_paws(false, true)
+	await _ticks(3)
+	_paws(false, false)
+	await _ticks(10)
+	_paws(true, false)
+	await _ticks(3)
+	_paws(false, false)
+	await _watch(0.25, "mashing  (0.4x)", "extra clicks wait their turn")
+	_paws(false, true)
+	await _ticks(3)
+	_paws(false, false)
+	await _watch(0.6, "mashing  (0.4x)", "extra clicks wait their turn")
+	# 3: dodge pressed in the wind up rolls out of the recovery
+	_paws(true, false)
+	await _ticks(4)
+	_paws(false, false)
+	await _ticks(6)
+	bot.move = Vector2(1, 0)
+	bot.dash = true
+	await _ticks(3)
+	bot.dash = false
+	await _watch(0.7, "dodge mid swat  (0.4x)", "comes out at the cancel point")
+	bot.move = Vector2.ZERO
+	Engine.time_scale = 1.0
+	await _secs(0.5)
+	# 4: trotting in: the feet plant
+	await _clear_rats()
+	_dummy = null
+	_reset_cat(Vector3(0, 0.02, 2.4))
+	_face(Vector3(0, 0.02, -3))
+	cam.global_position = Vector3(1.6, 0.45, 1.2)
+	cam.look_at(Vector3(0, 0.12, 1.0))
+	bot.move = Vector2(0, 1)
+	_say("swat at a trot", "the feet plant, the body won't swing round")
+	await _secs(0.55)
+	_paws(true, false)
+	await _ticks(4)
+	_paws(false, false)
+	await _watch(0.6, "swat at a trot", "the feet plant, the body won't swing round")
+	bot.move = Vector2.ZERO
+	await _secs(0.4)
+	# 5: grab on its own button, no rearing up
+	_reset_cat(Vector3(0, 0.02, 0.5))
+	r = _dummy_rat(PI, Vector3(0, 0.02, 0))
+	_face(r.global_position)
+	cam.global_position = Vector3(1.05, 0.38, 0.12)
+	cam.look_at(Vector3(0, 0.13, 0.3))
+	_say("g = grab", "quick reach, both paws pin it, no rearing up")
+	await _secs(0.3)
+	bot.grab = true
+	await _secs(1.2)
+	bot.grab = false
+	await _secs(0.5)
+	# 6: space: tap hop, held hop, hold = pounce mode with the line
+	await _clear_rats()
+	_dummy = null
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	_face(Vector3(0, 0.02, -2))
+	cam.global_position = Vector3(2.2, 0.55, 0.6)
+	cam.look_at(Vector3(0, 0.4, 0.8))
+	_say("space: tap", "hop")
+	await _secs(0.3)
+	bot.jump = true
+	await _ticks(2)
+	bot.jump = false
+	await _secs(0.9)
+	_say("space: hold a bit", "higher hop")
+	bot.hop_charge = 1.0
+	bot.jump = true
+	await _ticks(2)
+	bot.jump = false
+	await _secs(1.1)
+	bot.erase("hop_charge")
+	# 7: pounce onto a running rat: the lock leads it
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	r = _still_rat(-PI * 0.5)
+	r.hp = 50.0
+	r.max_hp = 50.0
+	r.global_position = Vector3(-1.3, 0.02, 0.4)
+	_face(Vector3(0, 0.02, 0.4))
+	bot.pitch = -0.05
+	cam.global_position = Vector3(2.3, 0.75, 2.0)
+	cam.look_at(Vector3(-0.2, 0.1, 1.2))
+	_runner = r
+	_runner_v = Vector3(1.0, 0, 0)
+	_say("space: hold long", "pounce mode: the line shows the exact path, it leads the running rat")
+	await _pounce(1.0, false)
+	_runner = null
+	_say("lands on it", "dead still, no slide, pinned")
+	await _secs(0.8)
+	# 8: ledge snap
+	await _clear_rats()
+	var box := _block(Vector3(0, 0.25, 0.1), Vector3(1.0, 0.5, 0.7))
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	_face(Vector3(0, 0.1, 0.4))
+	bot.pitch = -0.08
+	cam.global_position = Vector3(2.3, 0.8, 1.8)
+	cam.look_at(Vector3(0, 0.25, 1.2))
+	_say("still snaps to ledges", "and the tab lock target, and prey")
+	await _pounce(1.0)
+	await _secs(0.6)
+	box.queue_free()
 	get_tree().quit()
