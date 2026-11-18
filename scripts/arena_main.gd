@@ -50,6 +50,8 @@ func _ready() -> void:
 	player.health.died.connect(_on_died)
 	player.souls_hud.show_lives = true
 	_build_hud()
+	if not (test_mode or show_mode) or "--puzzletest" in args:
+		Puzzles.pit(self, player)   # lanterns on the pillars (puzzles.gd)
 	if test_mode or show_mode:
 		help_label.visible = false
 		player.bot = {"move": Vector2.ZERO, "stamina": true}

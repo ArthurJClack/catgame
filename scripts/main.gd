@@ -51,6 +51,7 @@ func _ready() -> void:
 		npcs.append(n)
 
 	_build_hud()
+	Puzzles.farm(self, player)   # knock it off, sunbeam perch, doormat gifts (puzzles.gd)
 	preview_mode = "--preview" in OS.get_cmdline_user_args()
 	if preview_mode:
 		var p := Preview.new()
