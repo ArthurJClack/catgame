@@ -34,10 +34,41 @@ static var last_used_pad := false   # last real input came from the pad (for hud
 static var sim := {}
 
 
-static func _axis(d: int, a: JoyAxis) -> float:
+## axes that have been seen resting near centre on the current device. an axis only counts once it
+## has been armed: wheels, flight sticks, throttles, headsets and unmapped pads often report an axis
+## parked at -1 / +1 forever (e.g. a throttle on the "right stick y" slot), which used to read as
+## the right stick held full up = the camera constantly looking up. a real stick rests at centre
+## the moment you let go, so it arms on the first frame and nothing changes for real pads.
+const ARM_REST := 0.25
+static var _armed := {}
+static var _armed_dev := -2
+
+
+## forget which axes are armed (new device, or tests swapping the fake pad)
+static func rearm() -> void:
+	_armed.clear()
+	_armed_dev = -2
+
+
+static func _raw_axis(d: int, a: JoyAxis) -> float:
 	if not sim.is_empty():
 		return sim.get("axes", {}).get(a, 0.0)
 	return Input.get_joy_axis(d, a)
+
+
+static func _axis(d: int, a: JoyAxis) -> float:
+	if d != _armed_dev:
+		_armed.clear()
+		_armed_dev = d
+	var v := _raw_axis(d, a)
+	if not _armed.get(a, false):
+		# triggers rest at 0 (or -1 on some raw drivers), sticks rest at 0
+		var trig := a == JOY_AXIS_TRIGGER_LEFT or a == JOY_AXIS_TRIGGER_RIGHT
+		if (v < ARM_REST) if trig else (absf(v) < ARM_REST):
+			_armed[a] = true
+		else:
+			return 0.0
+	return v
 
 
 static func _dev() -> int:
@@ -47,7 +78,12 @@ static func _dev() -> int:
 	if pads.is_empty():
 		device = -1
 	elif not pads.has(device):
+		# prefer a real gamepad (one godot has a mapping for) over wheels / hotas / odd hid devices
 		device = pads[0]
+		for p in pads:
+			if Input.is_joy_known(p):
+				device = p
+				break
 	return device
 
 
