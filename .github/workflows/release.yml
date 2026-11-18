@@ -100,10 +100,12 @@ jobs:
       # dedicated servers (scripts/net/dedicated_server.gd). they carry GodotSteam *Server* (steam
       # server list) instead of the client GodotSteam. if that download fails they still build, as
       # direct-ip servers, and none of this can break the game release
+      # pinned: GodotSteam Server v4.3 / v4.4 crash inside serverInit (they parse the ip with a
+      # steam networking call that isn't up yet). v4.0.1 inits and logs on fine (tested in ci)
       - name: get godotsteam server
         id: gss
         continue-on-error: true
-        run: GODOTSTEAM_FLAVOR=server bash tools/fetch_godotsteam.sh
+        run: GODOTSTEAM_FLAVOR=server GODOTSTEAM_URL=https://codeberg.org/godotsteam/godotsteam-server/releases/download/v4.0.1-gde/godotsteam-server-gdextension-plugin.zip bash tools/fetch_godotsteam.sh
 
       - name: export dedicated servers
         continue-on-error: true
@@ -155,26 +157,20 @@ jobs:
           ./steamcmd.sh +quit > /dev/null 2>&1 || true
           mkdir -p ~/.steam/sdk64 && cp linux64/steamclient.so ~/.steam/sdk64/
           cd "$GITHUB_WORKSPACE"
-          command -v gdb >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb) >/dev/null || true
-          # which GodotSteam Server build survives serverInit (v4.3/v4.4 parse the ip with a steam
-          # networking call that crashes before init). each one in the editor binary, debug libs
+          # the GodotSteam Server build inits + logs on (editor binary, debug lib)
           G=~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64
           mv addons/godotsteam "$RUNNER_TEMP/gs_client2"
-          for v in v4.0-gde v4.0.1-gde v4.3-gde; do
-            echo "== GodotSteam Server $v"
-            rm -rf addons/godotsteam_server
-            GODOTSTEAM_FLAVOR=server GODOTSTEAM_URL="https://codeberg.org/godotsteam/godotsteam-server/releases/download/$v/godotsteam-server-gdextension-plugin.zip" bash tools/fetch_godotsteam.sh > /dev/null 2>&1 || { echo "fetch failed"; continue; }
-            echo "res://$(ls addons/godotsteam_server/*.gdextension)" > .godot/extension_list.cfg
-            CATGAME_STEAM_TRACE=1 timeout 40 $G --headless --path . --script res://tests/steam_server_init.gd 2>&1 | grep -v "already registered\|class_db" | tail -12 || true
-          done
+          echo "res://$(ls addons/godotsteam_server/*.gdextension)" > .godot/extension_list.cfg
+          timeout 60 $G --headless --path . --script res://tests/steam_server_init.gd 2>&1 | grep -v "already registered\|class_db" | tail -6 || true
           mv "$RUNNER_TEMP/gs_client2" addons/godotsteam
-          (cd build/server-linux && CATGAME_STEAM_TRACE=1 timeout 90 gdb -q -batch -ex run -ex bt --args ./CatGameServer.x86_64 --headless -- --name "catgame ci $GITHUB_RUN_ID" --port 24792 --query-port 27016 > ../../steam-live.log 2>&1) &
+          # now the exported server, for real: log on, then ask valve's public web api if it's listed
+          (cd build/server-linux && timeout 60 ./CatGameServer.x86_64 --headless -- --name "catgame ci $GITHUB_RUN_ID" --port 24792 --query-port 27016 > ../../steam-live.log 2>&1) &
           sleep 30
           ip=$(curl -s https://api.ipify.org)
           echo "runner ip $ip"
           curl -s "https://api.steampowered.com/ISteamApps/GetServersAtAddress/v1/?addr=$ip" | tee servers.json
           echo
-          sleep 5
+          wait || true
           cat steam-live.log
           grep -q "on the steam server list" steam-live.log && grep -q '"gamedir":"catgame"' servers.json && echo "LISTED on steam"
 

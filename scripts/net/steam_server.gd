@@ -42,16 +42,15 @@ func start() -> bool:
 		return false
 	api = Engine.get_singleton("SteamServer")
 	if OS.get_name() == "Linux" and _steamclient_path() == "":
-		# steam's server library needs steamclient.so, and GodotSteam Server crashes the whole
-		# process (instead of failing) when serverInitEx runs without it. so look first
+		# steam's server library needs steamclient.so: say what's missing instead of a vague failure
 		why = "no steamclient.so in ~/.steam/sdk64 (see run_server.sh to get it): running without the steam server list, direct ip still works"
 		return false
 	OS.set_environment("SteamAppId", str(NetSteamTransport.STEAM_APP_ID))
 	OS.set_environment("SteamGameId", str(NetSteamTransport.STEAM_APP_ID))
 	var init_name := "serverInitEx" if api.has_method("serverInitEx") else "serverInit"
-	if OS.get_environment("CATGAME_STEAM_INIT") != "":
-		init_name = OS.get_environment("CATGAME_STEAM_INIT")
-	var r = _call(init_name, _init_args(init_name))
+	var r = _call(init_name, _init_args(init_name, ""))
+	if r is Dictionary and str(r.get("verbal", "")).to_lower().contains("ip"):
+		r = _call(init_name, _init_args(init_name, "0.0.0.0"))   # some builds want an explicit any-address
 	var ok := false
 	if r is Dictionary:
 		ok = int(r.get("status", 1)) == 0
@@ -99,7 +98,7 @@ func _steamclient_path() -> String:
 
 ## serverInitEx(ip, game_port, query_port, server_mode, version_string) in GodotSteam 4.x. read the
 ## argument names instead of trusting the order, and give ints / strings to whatever wants them
-func _init_args(method: String) -> Array:
+func _init_args(method: String, ip: String) -> Array:
 	for m in api.get_method_list():
 		if m.name != method:
 			continue
@@ -112,7 +111,7 @@ func _init_args(method: String) -> Array:
 			elif n.contains("port"):
 				out.append(game_port)
 			elif n.contains("ip"):
-				out.append(OS.get_environment("CATGAME_STEAM_IP") if is_str else 0)
+				out.append(ip if is_str else 0)
 			elif n.contains("mode"):
 				out.append(SERVER_MODE_LISTED)
 			elif n.contains("version"):

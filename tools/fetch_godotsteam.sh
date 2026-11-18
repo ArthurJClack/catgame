@@ -57,6 +57,11 @@ try_zip() {
   return 0
 }
 
+# GodotSteam Server v4.3 / v4.4 crash in serverInit (ip parsed with a steam networking call before
+# init); v4.0.1 works, so the server flavor defaults to it
+if [ "$FLAVOR" = "server" ] && [ -z "${GODOTSTEAM_URL:-}" ]; then
+  GODOTSTEAM_URL="https://codeberg.org/godotsteam/godotsteam-server/releases/download/v4.0.1-gde/godotsteam-server-gdextension-plugin.zip"
+fi
 if [ -n "${GODOTSTEAM_URL:-}" ]; then
   try_zip "$GODOTSTEAM_URL" && exit 0
   echo "GODOTSTEAM_URL didn't work"; exit 1
