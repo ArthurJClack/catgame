@@ -236,6 +236,7 @@ var lock: CatLockOn            # souls style tab lock on (cat_lock_on.gd)
 var prev_lock := false
 var _lock_r := -1.0             # radius being circled while strafing a lock (-1 = not circling)
 const LOCK_STRAFE := 0.8       # x trot: circling / strafing a locked target
+const LOCK_ACCEL := 16.0       # squared up to a lock target the cat takes quick short steps, no run up
 const LOCK_BACK := 0.6         # x trot: backing off a locked target (normal back up is a slow 0.25)
 ## the lock on target (Node3D) or null. other systems duck type this ("lock_target" in player)
 var lock_target: Node3D:
@@ -785,6 +786,8 @@ func _physics_process(dt: float) -> void:
 			accel = GAIT_DOWN_DECEL + GAIT_DOWN_DRAG * cur
 		else:
 			accel = minf(PUSH_ACCEL, PUSH_POWER / maxf(cur, 0.5))
+		if lock_face and wish_len > 0.01:
+			accel = maxf(accel, LOCK_ACCEL)
 		if cur > target_speed + 0.1 and ground_time < 0.1:
 			# bhop window: keep momentum if you jump again quickly
 			pass
