@@ -16,6 +16,9 @@ var fur_dark := Color(0.58, 0.30, 0.12)
 var belly := Color(0.96, 0.90, 0.80)
 var eye_color := Color(0.62, 0.86, 0.22)
 var nose_color := Color(0.88, 0.50, 0.55)
+var pad_color := Color(0.93, 0.55, 0.6)      # toe beans (first person paws read this)
+var whisker_color := Color(0.95, 0.95, 0.92)
+var coat_flat := false   # solid coat with no lighter muzzle / underside (the black cat)
 var pattern := "tabby" # "tabby", "solid", "tux"
 var socks := false
 
@@ -228,8 +231,11 @@ func apply_life(ev: Array) -> void:
 ## proportions, cross sections and low poly fur trick. the animation rig is shared.
 const STYLES := {
 	# block base: flat painted facets
-	"block_black":     {"label": "block black cat", "base": "block", "sides": 4, "head": 1.02, "leg": 1.02, "girth": 0.96, "len": 1.02, "ear": 1.1, "tail_r": 0.95, "tail_len": 1.12, "muzzle": 1.0, "fur": "painted",
-		"coat": {"fur": Color(0.075, 0.075, 0.085), "dark": Color(0.04, 0.04, 0.05), "belly": Color(0.1, 0.1, 0.115), "eye": Color(1.0, 0.86, 0.12), "pattern": "solid", "socks": false}},
+	# all black, lanky: long legs + body, slim, small head, big ears, long whip tail.
+	# "flat" = no lighter muzzle / underside, nose + pads + inner ears black too
+	"block_black":     {"label": "block black cat", "base": "block", "sides": 4, "head": 0.96, "leg": 1.1, "girth": 0.87, "len": 1.09, "ear": 1.18, "tail_r": 0.85, "tail_len": 1.24, "muzzle": 1.08, "fur": "painted",
+		"coat": {"fur": Color(0.06, 0.06, 0.068), "dark": Color(0.035, 0.035, 0.042), "belly": Color(0.06, 0.06, 0.068), "eye": Color(1.0, 0.8, 0.06), "pattern": "solid", "socks": false,
+			"flat": true, "nose": Color(0.045, 0.04, 0.045), "pad": Color(0.05, 0.045, 0.05), "whisker": Color(0.32, 0.32, 0.34)}},
 	"block":           {"label": "block tabby", "base": "block", "sides": 4, "head": 1.0, "leg": 1.0, "girth": 1.0, "len": 1.0, "ear": 1.0, "tail_r": 1.0, "tail_len": 1.0, "muzzle": 1.0, "fur": "painted",
 		"coat": {"fur": Color(0.86, 0.52, 0.24), "dark": Color(0.58, 0.30, 0.12), "belly": Color(0.96, 0.90, 0.80), "eye": Color(0.62, 0.86, 0.22), "pattern": "tabby", "socks": false}},
 	"block_tux":       {"label": "block tuxedo", "base": "block", "sides": 4, "head": 1.02, "leg": 1.0, "girth": 0.98, "len": 1.0, "ear": 1.05, "tail_r": 1.0, "tail_len": 1.05, "muzzle": 1.0, "fur": "painted",
@@ -310,6 +316,10 @@ func build() -> void:
 		eye_color = ct.eye
 		pattern = ct.pattern
 		socks = ct.socks
+		coat_flat = ct.get("flat", false)
+		nose_color = ct.get("nose", nose_color)
+		pad_color = ct.get("pad", pad_color)
+		whisker_color = ct.get("whisker", whisker_color)
 	var L: float = S_.len
 	var Lg: float = S_.leg
 	var Gi: float = S_.girth
@@ -609,7 +619,7 @@ func _fur_color(region: String, c: Vector3, n: Vector3, scl: Vector3, body_z: fl
 			elif region == "head" and c.y < -0.25 and c.z < -0.1:
 				col = belly
 		_:
-			if lower:
+			if lower and not coat_flat:
 				col = fur.lightened(0.12)
 	# flat faces get a small light/dark tint by which way they face, keeps blocks readable
 	col = col.lightened(clampf(n.y * 0.06, 0.0, 0.06)).darkened(clampf(-n.y * 0.12, 0.0, 0.12))
@@ -624,7 +634,7 @@ func _build_head() -> void:
 	_body_part(head, "head", Vector3(0, 0.002, 0.0), Vector3(0.078, 0.066, 0.07), Vector3.ZERO, -0.3, "skull")
 	for side in [-1, 1]:
 		_body_part(head, "head", Vector3(side * 0.024, -0.016, -0.012), Vector3(0.042, 0.04, 0.05), Vector3(0, side * 0.15, 0), -0.31, "cheek")
-	var muzzle_col := belly if pattern != "solid" else fur.lightened(0.1)
+	var muzzle_col := belly if pattern != "solid" else (fur if coat_flat else fur.lightened(0.1))
 	var mzs: float = S_.get("muzzle", 1.0)
 	var mz := LowPoly.part(head, LowPoly.box(), muzzle_col, Vector3(0, -0.019, -0.027 - 0.013 * mzs), Vector3(0.036, 0.024, 0.026 * mzs))
 	_style_mat(mz)
@@ -658,7 +668,7 @@ func _build_head() -> void:
 		eyes.append(eye)
 		# whiskers
 		for k in 3:
-			var w := LowPoly.part(head, LowPoly.box(0.0), Color(0.95, 0.95, 0.92), Vector3.ZERO, Vector3.ONE)
+			var w := LowPoly.part(head, LowPoly.box(0.0), whisker_color, Vector3.ZERO, Vector3.ONE)
 			var a := Vector3(side * 0.018, -0.018 + k * 0.004, -0.045)
 			var b := a + Vector3(side * 0.06, -0.012 + k * 0.01, 0.012 + k * 0.004)
 			w.transform = Transform3D(LowPoly.seg_xform(b, a).basis * Basis().scaled(Vector3(0.0012, 1, 0.0012)), (a + b) * 0.5)
