@@ -750,8 +750,119 @@ func _run() -> void:
 		Engine.time_scale = 1.0
 		_end()
 
+	if _want("climb"):
+		# a rough post / tree face: the rig is laid onto it the way cat_player._orient_rig does
+		# (feet on the wall, nose up) and driven up it in the player's climbing bursts
+		var wx := 72.0
+		var wz := -0.3
+		_block(Vector3(wx, 3.0, wz - 0.2), Vector3(2.4, 6.0, 0.4), Color(0.42, 0.33, 0.25))
+		_spawn(Vector3(wx, 0.5, wz))
+		var n := Vector3(0, 0, 1)
+		cat.global_transform = Transform3D(Basis(n.cross(Vector3.DOWN).normalized(), n, Vector3.DOWN), Vector3(wx, 0.5, wz))
+		cat.climb = 1.0
+		cat.on_floor = true
+		Engine.time_scale = slow
+		_climb_begin()
+		var t := 0.0
+		var cp := Vector3(wx, 0.5, wz)
+		var cv := Vector3.ZERO
+		var cy := 0.5
+		while t < 13.0 * slow:
+			await get_tree().process_frame
+			var dt := get_process_delta_time()
+			var ph := t / slow
+			var mv := Vector2.ZERO
+			if ph < 1.5:
+				caption.text = "hanging on: claws in, gravity pulling on the body"
+			elif ph < 6.5:
+				caption.text = "climbing up (W): reach, grip, haul"
+				mv = Vector2(0, 1)
+			elif ph < 7.7:
+				caption.text = "shuffling sideways (D)"
+				mv = Vector2(1, 0)
+			elif ph < 9.8:
+				caption.text = "hanging on"
+			else:
+				caption.text = "backing down (S)"
+				mv = Vector2(0, -1)
+			# the rig animated last frame against where we put it then: measure before moving it
+			_climb_sample(mv)
+			var burst := 0.55 + 0.45 * maxf(0.0, sin(cat.phase * TAU + 0.6))
+			var up_v := (1.25 * burst if mv.y > 0.0 else 0.45) * mv.y
+			var want := Vector3.UP * up_v + Vector3(1, 0, 0) * mv.x * 0.45
+			cv = cv.move_toward(want, 20.0 * dt)
+			cp += cv * dt
+			cat.global_position = cp
+			cat.drive_velocity = cv
+			t += dt
+			var c := cp + Vector3(0, -0.05, 0)
+			match view:
+				"quarter":
+					cam.global_position = c + Vector3(0.75, -0.35, 0.95) * cam_dist
+				"top":
+					cam.global_position = c + Vector3(0.0, -0.05, 1.2) * cam_dist
+				_:
+					cam.global_position = c + Vector3(1.25, -0.05, 0.12) * cam_dist
+			cam.look_at(c + Vector3(0, 0.0, 0.08), Vector3.UP)
+		Engine.time_scale = 1.0
+		_climb_end()
+
 	if report_path != "":
 		var f := FileAccess.open(report_path, FileAccess.WRITE)
 		f.store_string(JSON.stringify(results, "  "))
 		f.close()
 	get_tree().quit()
+
+
+# ---- climb metrics: how splayed the paws are, whether gripping paws hold their spot on the
+# wall, how far the hind end hangs, and how much the tail swings against the hips
+var cm := {}
+
+func _climb_begin() -> void:
+	cm = {"fw": [], "hw": [], "slip": [], "sag": [], "hang_sag": [], "sway": [], "tail_x": [], "prev": [null, null, null, null], "hold": 0, "frames": 0}
+
+
+func _climb_sample(mv: Vector2) -> void:
+	var inv := cat.global_transform.affine_inverse()
+	var lp := []
+	for i in 4:
+		lp.append(inv * (cat.legs[i].paw.global_position as Vector3))
+	cm.fw.append(absf(lp[0].x - lp[1].x))
+	cm.hw.append(absf(lp[2].x - lp[3].x))
+	# a paw counts as gripping when it is on the wall (rig y ~ 0); it should not slide there
+	for i in 4:
+		var wp: Vector3 = cat.legs[i].paw.global_position
+		var on_wall: bool = (lp[i] as Vector3).y < 0.03
+		var cs = cat.get("_cg_sw")
+		if cs != null:
+			on_wall = float(cs[i]) < 0.0
+		if on_wall and cm.prev[i] != null and cm.frames > 10:
+			cm.slip.append(((cm.prev[i] as Vector3) - wp).length())
+			if dbg and cm.slip[-1] > 0.006:
+				print("SLIP f%d paw%d %.1fmm sw=%s" % [cm.frames, i, cm.slip[-1] * 1000.0, str(cat.get("_cg_sw"))])
+		cm.prev[i] = wp if on_wall else null
+	var pel := inv * cat.pelvis.global_position
+	var sag := pel.z - cat.pelvis_z
+	cm.sag.append(sag)
+	if mv == Vector2.ZERO:
+		cm.hang_sag.append(sag)
+	cm.sway.append(pel.x)
+	cm.get_or_add("chest_y", []).append((inv * cat.chest.global_position).y)
+	cm.get_or_add("pel_y", []).append(pel.y)
+	cm.get_or_add("head_y", []).append((inv * cat.head.global_position).y)
+	if cat.tail_joints.size() > 0:
+		cm.tail_x.append((inv * cat.tail_joints[-1].global_position).x)
+	cm.frames += 1
+
+
+func _climb_end() -> void:
+	var r := {
+		"fore_spread_mm": snappedf(_mean(cm.fw) * 1000.0, 0.1), "hind_spread_mm": snappedf(_mean(cm.hw) * 1000.0, 0.1),
+		"grip_slip_mean_mm": snappedf(_mean(cm.slip) * 1000.0, 0.01), "grip_slip_max_mm": snappedf(_max(cm.slip) * 1000.0, 0.01),
+		"hip_sag_mm": snappedf(_mean(cm.sag) * 1000.0, 0.1), "hang_sag_mm": snappedf(_mean(cm.hang_sag) * 1000.0, 0.1),
+		"hip_sway_std_mm": snappedf(_std(cm.sway) * 1000.0, 0.1), "tail_x_std_mm": snappedf(_std(cm.tail_x) * 1000.0, 0.1),
+		"chest_off_wall_mm": snappedf(_mean(cm.chest_y) * 1000.0, 0.1), "hips_off_wall_mm": snappedf(_mean(cm.pel_y) * 1000.0, 0.1),
+		"head_off_wall_mm": snappedf(_mean(cm.head_y) * 1000.0, 0.1),
+	}
+	results["climb"] = r
+	print("LAB climb ", JSON.stringify(r))

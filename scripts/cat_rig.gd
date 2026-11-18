@@ -157,6 +157,26 @@ var _launch := 0.0
 var _tum_c := 0.0
 var _tum_p := 0.0
 var _climb_prev := 0.0
+# climbing (see _climb_paws): splayed, clawed in, and hanging off the grips under gravity.
+# each paw holds a world spot on the wall (_cg) until its turn to reach for a new one
+const CL_OFFS := [0.62, 0.70, 0.20, 0.24]   # LF RF LH RH: hinds push + swing up, then the fronts reach
+const CL_SW := [0.3, 0.3, 0.28, 0.28]       # share of the cycle each paw is off the wall
+var climb_splay := 1.0                      # how wide the limbs spread on a wall (0 = old narrow pose)
+var _cg := [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _cg_from := [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _cg_sw := [-1.0, -1.0, -1.0, -1.0]      # -1 gripping, else reach progress 0..1
+var _cg_init := false
+var _cg_phase := 0.0
+var _cg_idle_t := 0.0
+var _cg_foot := [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _cg_prot := [0.0, 0.0, 0.0, 0.0]
+var _cg_hold := [1.0, 1.0, 1.0, 1.0]        # 0..1 how much weight each grip is taking
+var _paw_yaw := [0.0, 0.0, 0.0, 0.0]
+var _hang_c := Vector3.ZERO                 # chest / hips swinging off the grips (rig space, m)
+var _hang_cv := Vector3.ZERO
+var _hang_p := Vector3.ZERO
+var _hang_pv := Vector3.ZERO
+var _hang_roll := 0.0
 var _still_t := 0.0
 var _glance := Vector2.ZERO
 var _glance_to := Vector2.ZERO
@@ -922,6 +942,15 @@ func animate(dt: float) -> void:
 	if climb > 0.0:
 		gait.phase = fposmod(gait.phase + climb * (1.5 + 1.4 * speed_s) * move_amt * dt, 1.0)
 	phase = gait.phase
+	if climb > 0.0:
+		_climb_paws(dt, gxf, move_amt)
+	else:
+		_cg_init = false
+		_hang_c = Vector3.ZERO
+		_hang_p = Vector3.ZERO
+		_hang_cv = Vector3.ZERO
+		_hang_pv = Vector3.ZERO
+		_hang_roll = 0.0
 	var p2 := phase * TAU
 	var fl := []
 	for i in 4:
@@ -1001,7 +1030,7 @@ func animate(dt: float) -> void:
 	var pull_e := smoothstep(0.3, 1.0, clamber_pull)
 	var ra := rear * 1.02 + clamber * lerpf(1.3, 0.0, pull_e)
 	var hz := pelvis_z
-	var base_y := BODY_H - crouch * 0.085 - charge * 0.03 - sit_h * 0.075 + gal_bob * (1.0 - _air_w) - stretch * 0.02 - climb * 0.07
+	var base_y := BODY_H - crouch * 0.085 - charge * 0.03 - sit_h * 0.075 + gal_bob * (1.0 - _air_w) - stretch * 0.02 - climb * lerpf(0.07, 0.145, climb_splay)
 	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y + soma.dip
 	base_y = lerpf(base_y, BODY_H * 0.4 + (_fgy + _hgy) * 0.5, (loaf_h + loaf_f) * 0.5)
 	pivot.position.y = base_y + hz * sin(ra)
@@ -1040,6 +1069,14 @@ func animate(dt: float) -> void:
 	# breathing (slower + deeper when loafing)
 	var br := 1.0 + sin(_t * lerpf(2.4, 1.5, loaf)) * lerpf(0.012, 0.02, loaf) * (1.0 - move_amt * 0.5)
 	chest.scale = Vector3(br, br, 1.0)
+	# on a wall the body hangs off its grips: chest and hips swing as two pendulums under
+	# whichever paws are holding, the hind end sags whenever the hind paws let go
+	pivot.position += _hang_c * climb
+	pelvis.position.x = (_hang_p.x - _hang_c.x) * climb
+	pelvis.position.y = (_hang_p.y - _hang_c.y) * climb
+	pelvis.position.z += (_hang_p.z - _hang_c.z) * climb
+	chest.rotation.z += (float(_cg_hold[0]) - float(_cg_hold[1])) * 0.14 * climb * climb_splay + _hang_roll * climb
+	pelvis.rotation.z += (float(_cg_hold[2]) - float(_cg_hold[3])) * 0.18 * climb * climb_splay - _hang_roll * 0.6 * climb
 
 	_solve_spine()
 
@@ -1081,7 +1118,7 @@ func animate(dt: float) -> void:
 	if not _head_f_init:
 		_neck_rest = neck.position
 	neck.position = _neck_rest
-	neck.rotation.x = -body_pitch * 0.55 + lk_pitch * 0.35 - crouch * 0.34 - wg * 0.25 + stretch * 0.3 - pin * 0.35 + scratch * 0.15 - g_lick * 0.42 - g_wipe * 0.15 - loaf * 0.15 + climb * 0.1
+	neck.rotation.x = -body_pitch * 0.55 + lk_pitch * 0.35 - crouch * 0.34 - wg * 0.25 + stretch * 0.3 - pin * 0.35 + scratch * 0.15 - g_lick * 0.42 - g_wipe * 0.15 - loaf * 0.15 + climb * lerpf(0.1, -0.22, climb_splay)
 	head.rotation.x = -body_pitch * 0.45 + lk_pitch * 0.65 + crouch * 0.2 + wg * 0.12 + stretch * 0.25 - g_lick * 0.38 + lick_bob - g_wipe * 0.2
 	neck.rotation.y = -body_yaw * 0.5 + lk_yaw * 0.4 + turn_lead + g_lick * 0.25
 	head.rotation.y = -body_yaw * 0.5 + lk_yaw * 0.6 + turn_lead * 0.6 + g_lick * 0.3
@@ -1172,6 +1209,8 @@ func animate(dt: float) -> void:
 		var home: Vector3 = homes[i]
 		var fw: float = gait.free_w[i]
 		var pp := _paw_pose(i)
+		# toes turned out on the wall (fore paws up and out, hind feet more sideways)
+		_paw_yaw[i] = -side * (0.38 if front else 0.6) * climb * climb_splay
 		_prot_s[i] = LowPoly.damp(_prot_s[i], pp[0], 38.0, dt)
 		_heel_s[i] = LowPoly.damp(_heel_s[i], pp[1], 38.0, dt)
 		var foot: Vector3 = fl[i]
@@ -1185,10 +1224,10 @@ func animate(dt: float) -> void:
 			var fprot := 0.0
 			var fheel := 0.0
 			if climb > 0.0:
-				var r := _gait_foot(3, i, home, lift_amt * move_amt)
-				ff = home.lerp(r[0], climb)
-				fprot = float(r[1]) * climb * move_amt
-				fheel = float(r[2]) * climb * move_amt
+				# clawed into the wall, limbs spread wide (see _climb_paws)
+				ff = home.lerp(_cg_foot[i], climb)
+				fprot = float(_cg_prot[i]) * climb
+				fheel = (0.0 if front else 0.22 * float(_cg_hold[i])) * climb * climb_splay
 			foot = foot.lerp(ff, fw)
 			prot = lerpf(prot, fprot, fw)
 			heel = lerpf(heel, fheel, fw)
@@ -1567,6 +1606,107 @@ func _paw_pose(i: int) -> Array:
 	return [prot, heel, lerpf(0.6, sin(PI * s), mv)]
 
 
+## where each paw grips on a wall, rig space: spread well wider than the shoulders / hips,
+## fore paws reaching up past the chest
+func _climb_home(i: int) -> Vector3:
+	var h: Vector3 = HOME[i]
+	var sp := lerpf(1.4, 1.6 if i < 2 else 1.95, climb_splay)
+	return Vector3(h.x * sp, 0.0, h.z + (-0.1 if i < 2 else 0.015) * climb_splay)
+
+
+## climbing paws: each holds its own spot on the wall (claws in) and only lets go to reach
+## for the next. hind paws push and swing up together, then the fore paws reach one after
+## the other. the body hangs off whatever is holding: chest and hips are two damped
+## pendulums pulled down the wall by gravity, swinging under the paws that grip
+func _climb_paws(dt: float, gxf: Transform3D, move_amt: float) -> void:
+	var inv := gxf.affine_inverse()
+	if not _cg_init:
+		_cg_init = true
+		for i in 4:
+			_cg[i] = gxf * _climb_home(i)
+			_cg_sw[i] = -1.0
+			_cg_hold[i] = 1.0
+		_cg_phase = phase
+	var fr := maxf(freq, 2.2)
+	# land ahead of home so the grip passes under it halfway through the hold
+	var reach_len := clampf(speed_s * 0.7 / fr * 0.5, 0.0, 0.07)
+	var dir_l := Vector3(_dir.x, 0.0, _dir.z)
+	var swinging := 0
+	for i in 4:
+		if float(_cg_sw[i]) >= 0.0:
+			swinging += 1
+	for i in 4:
+		var front := i < 2
+		var side := -1.0 if i % 2 == 0 else 1.0
+		var home := _climb_home(i)
+		var grip_l: Vector3 = inv * (_cg[i] as Vector3)
+		if float(_cg_sw[i]) < 0.0:
+			var q0 := fposmod(_cg_phase - float(CL_OFFS[i]), 1.0)
+			var q1 := fposmod(phase - float(CL_OFFS[i]), 1.0)
+			var err := Vector2(grip_l.x - home.x, grip_l.z - home.z).length()
+			var start := move_amt > 0.3 and q1 < q0 and q1 < 0.25   # its turn in the cycle
+			start = start or err > 0.15                              # out of reach: has to let go
+			if move_amt <= 0.3 and swinging == 0 and _cg_idle_t <= 0.0 and err > 0.035:
+				start = true                                         # hanging still: re-grip one at a time
+			if start:
+				_cg_sw[i] = 0.0
+				_cg_from[i] = _cg[i]
+				swinging += 1
+				_cg_idle_t = 0.22
+		var target := home + dir_l * reach_len * move_amt
+		if float(_cg_sw[i]) >= 0.0:
+			_cg_sw[i] = minf(float(_cg_sw[i]) + dt * fr / float(CL_SW[i]), 1.0)
+			var s: float = _cg_sw[i]
+			var e := s * s * (3.0 - 2.0 * s)
+			var f: Vector3 = (inv * (_cg_from[i] as Vector3)).lerp(target, e)
+			var arc := sin(PI * s)
+			f.y += arc * (0.05 if front else 0.034)
+			f.x += side * arc * 0.014
+			_cg_foot[i] = f
+			if front:
+				# paw curled on the way up, then opened with the claws out to strike the bark
+				_cg_prot[i] = -1.1 * sin(PI * minf(s / 0.7, 1.0)) + 0.4 * smoothstep(0.6, 1.0, s)
+			else:
+				_cg_prot[i] = -0.7 * arc
+			_cg_hold[i] = 1.0 - smoothstep(0.0, 0.12, s) * (1.0 - smoothstep(0.88, 1.0, s))
+			if s >= 1.0:
+				_cg_sw[i] = -1.0
+				_cg[i] = gxf * Vector3(target.x, 0.0, target.z)
+		else:
+			_cg_foot[i] = grip_l
+			_cg_prot[i] = 0.2 if front else 0.05
+			_cg_hold[i] = 1.0
+	_cg_phase = phase
+	_cg_idle_t -= dt
+
+	# ---- the hang. gravity in rig space, flattened onto the wall (mostly +z: down the wall)
+	var g_l := gxf.basis.orthonormalized().inverse() * Vector3.DOWN
+	var gp := Vector3(g_l.x, 0.0, g_l.z)
+	var fh := (float(_cg_hold[0]) + float(_cg_hold[1])) * 0.5
+	var hh := (float(_cg_hold[2]) + float(_cg_hold[3])) * 0.5
+	var fx := 0.0
+	var hx := 0.0
+	for k in 2:
+		fx += (_cg_foot[k] as Vector3).x * float(_cg_hold[k])
+		hx += (_cg_foot[k + 2] as Vector3).x * float(_cg_hold[k + 2])
+	fx = fx / (fh * 2.0) if fh > 0.05 else 0.0
+	hx = hx / (hh * 2.0) if hh > 0.05 else 0.0
+	# the burst up the wall leaves the hips behind (they lag, then catch up)
+	var up_acc := clampf(-_acc.dot(gp), -6.0, 10.0)
+	var sp := climb_splay
+	var c_t := gp * (0.006 + 0.024 * (1.0 - fh)) + Vector3(fx * 0.5, 0.024 * (1.0 - fh), 0.0)
+	var p_t := gp * (0.014 + 0.036 * (1.0 - hh) + up_acc * 0.0018) + Vector3(0.0, 0.032 * (1.0 - hh), 0.0)
+	p_t.x = lerpf(c_t.x, hx * 0.5, hh)
+	c_t *= sp
+	p_t *= sp
+	_hang_cv += ((c_t - _hang_c) * 120.0 - _hang_cv * 8.0) * dt
+	_hang_c += _hang_cv * dt
+	_hang_pv += ((p_t - _hang_p) * 75.0 - _hang_pv * 5.5) * dt
+	_hang_p += _hang_pv * dt
+	# a sideways swing of the hips twists the body a touch
+	_hang_roll = LowPoly.damp(_hang_roll, clampf(_hang_pv.x * 1.2, -0.15, 0.15), 10.0, dt)
+
+
 ## phase driven foot path in rig space (only the climbing bound still uses this).
 ## returns [foot position, paw pitch, extra hock angle, load 0..1]
 func _gait_foot(g: int, i: int, home: Vector3, lift: float) -> Array:
@@ -1613,7 +1753,7 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 	var n_l := rel * (gait.nrm[i] as Vector3)
 	var tw := float(gait.load[i]) * (1.0 - float(gait.free_w[i])) * (1.0 - climb)
 	var ax := Vector3.UP.cross(n_l)
-	var R := Basis(Vector3.RIGHT, prot)
+	var R := Basis(Vector3.UP, float(_paw_yaw[i])) * Basis(Vector3.RIGHT, prot)
 	if tw > 0.01 and ax.length_squared() > 1e-6:
 		R = Basis(ax.normalized(), acos(clampf(n_l.y, -1.0, 1.0)) * tw) * R
 	if i < 2:
@@ -1637,6 +1777,8 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 		top += cb * Vector3(0, rise, 0)
 		var sh := top + cb * (sb * rest)
 		var hint := Vector3(0, -0.2 - rear * 0.9 - clamber * 0.6, 1.0)
+		# climbing: elbows stick out sideways and off the wall
+		hint += Vector3(side * 1.5, 0.7, -0.5) * climb * climb_splay
 		var d := (wrist_t - sh).length()
 		gait.stretch[i] = d / (F_UP + F_LO)
 		# nothing bony ties the blade to the ribs: when the leg runs out of reach the whole
@@ -1668,13 +1810,14 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 		if _air_w > 0.0:
 			theta = lerpf(theta, lerpf(0.9, 0.3, clampf(_vy / 3.5, 0.0, 1.0)), _air_w * (1.0 - climb))
 		theta = clampf(theta, 0.05, 1.65)
-		var hock_t := foot + Vector3(0, H_MT * sin(theta), H_MT * cos(theta))
+		var hock_t := foot + Basis(Vector3.UP, float(_paw_yaw[i]) * 0.5) * Vector3(0, H_MT * sin(theta), H_MT * cos(theta))
 		var hd := (hock_t - hip).length()
 		gait.stretch[i] = hd / (H_TH + H_SH)
 		var hover := hd - (H_TH + H_SH - 0.004)
 		if hover > 0.0:
 			hip += (hock_t - hip) / hd * minf(hover, 0.02)
-		var r := LowPoly.ik2(hip, hock_t, H_TH, H_SH, Vector3(0, 0.1, -1.0))
+		# climbing: knees out to the side, frog legged
+		var r := LowPoly.ik2(hip, hock_t, H_TH, H_SH, Vector3(0, 0.1, -1.0) + Vector3(side * 1.6, 0.5, 0.4) * climb * climb_splay)
 		var knee: Vector3 = r[0]
 		var hock: Vector3 = r[1]
 		var foot_a := hock - (hock_t - foot)
@@ -1699,7 +1842,8 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	var stalk := PackedFloat32Array([-0.12, 0.035, 0.32, 2.8, 0.0])
 	var sitp := PackedFloat32Array([-1.1, 0.16, 0.05, 1.0, 0.22])
 	var loafp := PackedFloat32Array([-0.5, 0.05, 0.03, 0.8, 0.27])
-	var climbp := PackedFloat32Array([0.1, 0.0, 0.08, 1.4, 0.0])
+	# climbing: hangs down the wall off the rump, curving back in toward it, swinging slowly
+	var climbp := PackedFloat32Array([0.32, -0.06, 0.07, 0.9, 0.0])
 	var rearp := PackedFloat32Array([-0.95, 0.05, 0.08, 1.2, 0.0])
 	# wall kick: reared up with the rump against the wall, the tail hangs down the spine line, off the wall
 	var kickp := PackedFloat32Array([-0.42, 0.03, 0.04, 1.2, 0.0])
@@ -1739,6 +1883,8 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	# against a righting twist, and on a narrow perch works side to side as a balance pole
 	f_yaw += clampf(-_iner_v.x * 1.6, -0.35, 0.35) - clampf((_tum_c + _tum_p) * 0.5, -1.0, 1.0)
 	f_yaw += _bal_s * (clampf(-_cx * 22.0, -0.4, 0.4) + 0.22 * sin(_t * 5.3) * sin(_t * 1.7))
+	# on a wall it's the counterweight: swings out against the hips as they sway off the grips
+	f_yaw += clampf(-_hang_p.x * 28.0 - _hang_pv.x * 1.5, -0.6, 0.6) * climb
 	f_yaw = clampf(f_yaw, -1.2, 1.2)
 	# the kick's jolt doesn't throw the tail about (it would whip through the wall)
 	f_yaw *= 1.0 - kick_w
@@ -1792,6 +1938,10 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 		# the tail lies on the floor, it does not go through it
 		if tail_floor and np.y < floor_y:
 			np.y = floor_y
+			np = p + (np - p).normalized() * TAIL_SEG
+		elif climb > 0.5 and np.y < 0.014:
+			# nor through the wall it's climbing (rig y = 0 is the wall face)
+			np.y = 0.014
 			np = p + (np - p).normalized() * TAIL_SEG
 		tail_segs[i].transform = LowPoly.seg_xform(p, np)
 		tail_joints[i].position = np
