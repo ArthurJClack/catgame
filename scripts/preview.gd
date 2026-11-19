@@ -458,7 +458,7 @@ func _house() -> void:
 	while tw < 0.3:
 		tw += await _bot_frame()
 	# cut to an outside camera so you can see the whole cat climb
-	_say("chimney", "wall kick back and forth, 3 kicks per jump")
+	_say("chimney", "wall kick: one per jump, touch down to get it back")
 	cam.current = true
 	chase = true
 	await _goto(Vector3(4.62, 0, 1.875), false, 0.08, 2.5, -1.0, 0.1)
@@ -1620,7 +1620,7 @@ func _run_dashtest() -> void:
 			p.global_position.x = -signf(p.global_position.x) * 45.0
 			p._phys_prev = p.global_position
 	print("gallop from full: winded after %.1f s, 1 s later running %.1f m/s (trot is %.1f)" % [winded_at, vw, CatPlayer.TROT_SPEED])
-	ok = ok and winded_at > 4.0 and winded_at < 9.0 and vw < CatPlayer.TROT_SPEED + 0.4
+	ok = ok and winded_at > 2.5 and winded_at < 6.0 and vw < CatPlayer.TROT_SPEED + 0.4
 	bot.sprint = false
 	bot.move = Vector2.ZERO
 	await _ticks(60)
@@ -2049,10 +2049,11 @@ func _run_movetest() -> void:
 		button.call(JOY_BUTTON_LEFT_STICK, false)
 		await _ticks(300)
 		var v_run: float = hs.call()
+		p.stamina.value = CatStamina.MAX    # the gallop only lasts ~3 s on a full bar (souls stamina)
 		button.call(JOY_BUTTON_LEFT_STICK, true)
 		await _ticks(2)
 		button.call(JOY_BUTTON_LEFT_STICK, false)
-		await _ticks(500)
+		await _ticks(380)
 		var v_gal: float = hs.call()
 		axis.call(JOY_AXIS_LEFT_Y, 0.0)
 		await _ticks(500)
@@ -2067,7 +2068,7 @@ func _run_movetest() -> void:
 		var lt: bool = p._read_input().paw_l
 		axis.call(JOY_AXIS_TRIGGER_LEFT, 0.0)
 		print("pad: tilt 0.55 -> %.2f m/s, full -> %.2f, L3 -> %.2f, L3 again -> %.2f, right stick 30 frames -> %.2f rad, LT paw_l %s" % [v_half, v_full, v_run, v_gal, turned, lt])
-		ok = ok and v_half > 0.6 and v_half < 1.6 and absf(v_full - CatPlayer.TROT_SPEED) < 0.2 and absf(v_run - CatPlayer.CANTER_SPEED) < 0.3 and v_gal > 10.0 and turned < -0.05 and lt
+		ok = ok and v_half > 0.6 and v_half < 1.6 and absf(v_full - CatPlayer.TROT_SPEED) < 0.2 and absf(v_run - CatPlayer.CANTER_SPEED) < 0.3 and v_gal > 9.0 and turned < -0.05 and lt
 		CatPad.sim = {}
 	else:
 		print("pad: couldn't fake a pad here, skipped")

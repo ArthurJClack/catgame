@@ -9,11 +9,12 @@ extends CharacterBody3D
 ##   look at the side of something and it finds the top. too high to land on? it leaps
 ##   to grab the edge and hauls itself up (clamber). low ledges are hopped up automatically.
 ##   jump into anything rough (cat tree post, scratching post, curtains) holding W to climb it.
-## scratch: hold F facing a wall / couch / post. pounce: hold C + space (or aim) and release,
-##   forepaws slam down and pin whatever's under them.
+## scratch: hold F facing a wall / couch / post. pounce (the only one): hold space past a hop
+##   (_space_filter) to crouch + aim, let go to launch; forepaws slam down and pin what's under them.
 ## controls: wasd move, shift canter (double tap = gallop), ctrl/c stalk, space jump/kick, q / mouse3 aim leap,
-## f scratch, mouse1 / mouse2 left / right paw (tap swat, hold rake / claw hook, both = rear up + grip,
-## cat_combat.gd), v third person, esc mouse, x / caps lock walk
+## f scratch, mouse1 / mouse2 left / right paw (tap swat, hold rake / claw hook),
+## g / mouse5 grab (pin it with both paws, hold), alt / mouse4 dodge (cat_combat.gd: attacks are committed),
+## v third person, esc mouse, x / caps lock walk
 ## momentum: speed builds with power-limited accel and coasts off (consts under "momentum"), turn rate drops with speed
 ## gamepad: cat_pad.gd, merged in _read_input. stick tilt -> speed_for_tilt() (creep / walk / trot)
 
@@ -41,12 +42,20 @@ const TURN_ASK := 48.0   # sideways accel the cat asks for when carving a turn (
 const AIR_ACCEL := 60.0
 const AIR_WISH_CAP := 0.9
 const HOP_HEIGHT := 1.0
+# space (human input, _space_filter): tap = hop, hold longer = higher hop, hold long enough =
+# pounce mode (the aim line shows; let go to pounce, cat_combat.gd)
+const HOP_TAP := 0.12          # let go before this = plain hop
+const POUNCE_HOLD := 0.45      # held this long on the ground = pounce mode
+const HOP_CHARGE_MUL := 1.6    # a hop let go just before pounce mode goes this much higher (1.6 m)
+var _sp_state := 0             # 0 up, 1 held on the ground, 2 held in the air, 3 pounce mode
+var _sp_t := 0.0
+var _hop_charge := 0.0
 const POUNCE_MIN := 0.6
 const POUNCE_MAX := 1.8
 const CHARGE_TIME := 0.45
 const KICK_UP := 4.4
 const KICK_OUT := 3.0
-const MAX_KICKS := 2
+const MAX_KICKS := 1           # one wall kick per jump (touch the floor to get it back)
 const KICK_PLANT := 0.085     # paws on the wall before the push (real cats: ~0.08-0.15 s of wall contact)
 const NOSE_REACH := 0.29      # nose ahead of the capsule centre (x style length), for the clip guard
 const RUMP_REACH := 0.2       # rump behind it (the tail is allowed to brush things)
@@ -126,8 +135,10 @@ var prev_v := false
 var fov_base := 82.0
 var max_height := 0.0
 var wall_sliding := false
-var last_event := ""
+var last_event := ""            # what the cat last did (logs / tests only: nothing on screen)
 var last_event_t := 0.0
+var toast := ""                 # the only on screen text: level / system messages set by the mains
+var toast_t := 99.0
 
 # parkour state
 var aim_valid := false
@@ -179,7 +190,7 @@ const KICK_LEAN := 0.32           # body tipped back toward the wall so the hind
 var _clip_off := 0.0
 
 # swat / claw: left mouse = left paw, right mouse = right paw (tap swat, hold rake / claw hook,
-# both = rear up + two paw grip). the button logic lives in cat_combat.gd
+# both = two swats), g = grab (two paw grip), space hold = pounce. the button logic lives in cat_combat.gd
 const PAW_MASS := 0.25          # effective mass behind a swatting forepaw (kg)
 const PAW_SPEED := 4.0          # paw tip speed at impact (m/s)
 const CLAW_FORCE := 6.0         # max pull one hooked forepaw manages (N)
@@ -329,11 +340,11 @@ func _build_aim_marker() -> void:
 	_aim_ring.material_override = m.duplicate()
 	_aim_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_aim_root.add_child(_aim_ring)
-	for k in 12:
+	for k in 32:     # dense enough to read as a line: the exact path the pounce / leap flies
 		var d := MeshInstance3D.new()
 		d.mesh = LowPoly.box(0.0)
 		d.material_override = m
-		d.scale = Vector3.ONE * 0.016
+		d.scale = Vector3.ONE * 0.011
 		d.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_aim_root.add_child(d)
 		_aim_dots.append(d)
@@ -411,6 +422,7 @@ func _read_input() -> Dictionary:
 		"jump": Input.is_physical_key_pressed(KEY_SPACE),
 		"paw_l": Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT),
 		"paw_r": Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT),
+		"grab": Input.is_physical_key_pressed(KEY_G) or Input.is_mouse_button_pressed(MOUSE_BUTTON_XBUTTON2),
 		"aim": Input.is_physical_key_pressed(KEY_Q) or Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE),
 		"scratch": Input.is_physical_key_pressed(KEY_F),
 		"toggle_view": Input.is_physical_key_pressed(KEY_V),
@@ -422,7 +434,58 @@ func _read_input() -> Dictionary:
 	var pad := CatPad.read()
 	if not pad.is_empty() and CatPad.walk_toggle and not (pad.canter or pad.sprint):
 		pad.move *= WALK_TILT
-	return CatPad.merge(kb, pad)
+	var d := CatPad.merge(kb, pad)
+	var sp := _space_filter(d.get("jump", false), is_on_floor(), get_physics_process_delta_time())
+	d.jump = sp.jump
+	d.pounce = sp.pounce
+	d.hop_charge = sp.hop_charge
+	return d
+
+
+## space / A on the ground: hop when it's let go (higher the longer it was held), or held past
+## POUNCE_HOLD = pounce mode. off the ground a press is a jump right away (wall kicks, climbing
+## leap offs, scramble holds), and walking off an edge mid hold hops right then (coyote)
+func _space_filter(held: bool, on_ground: bool, dt: float) -> Dictionary:
+	var out := {"jump": false, "pounce": false, "hop_charge": 0.0}
+	match _sp_state:
+		0:
+			if held:
+				if on_ground:
+					_sp_state = 1
+					_sp_t = 0.0
+				else:
+					_sp_state = 2
+					out.jump = true
+		1:
+			if not on_ground:
+				_sp_state = 2 if held else 0
+				out.jump = true
+				out.hop_charge = clampf((_sp_t - HOP_TAP) / (POUNCE_HOLD - HOP_TAP), 0.0, 1.0)
+			elif held:
+				_sp_t += dt
+				if _sp_t >= POUNCE_HOLD:
+					_sp_state = 3
+					out.pounce = true
+			else:
+				_sp_state = 0
+				out.jump = true
+				out.hop_charge = clampf((_sp_t - HOP_TAP) / (POUNCE_HOLD - HOP_TAP), 0.0, 1.0)
+		2:
+			if held:
+				out.jump = true
+			else:
+				_sp_state = 0
+		3:
+			if held:
+				out.pounce = true
+			else:
+				_sp_state = 0
+	return out
+
+
+## 0..1 how far a held space is toward pounce mode (hud / rig gather)
+func space_charge() -> float:
+	return clampf(_sp_t / POUNCE_HOLD, 0.0, 1.0) if _sp_state == 1 else 0.0
 
 
 var log_events := false
@@ -444,6 +507,15 @@ func _physics_process(dt: float) -> void:
 		for k in ["jump", "aim", "dash", "scratch", "sprint", "canter", "crouch"]:
 			inp[k] = false
 		inp["move"] = Vector2.ZERO
+	# the dodge reads the real stick even mid attack (a roll out of a recovery goes where you hold)
+	var dodge_mv: Vector2 = inp.get("move", Vector2.ZERO)
+	if combat.committed():
+		# souls commitment (cat_combat.gd MOVES): mid attack the feet only creep, no jumping,
+		# leaping, running or scratching until the move is over
+		inp = inp.duplicate()
+		for k in ["jump", "aim", "scratch", "sprint", "canter"]:
+			inp[k] = false
+		inp["move"] = dodge_mv * combat.move_scale()
 	var prev_yaw := yaw
 	var prev_pitch := pitch
 	var lock_in: bool = inp.get("lock_on", false)
@@ -524,6 +596,10 @@ func _physics_process(dt: float) -> void:
 				yaw += clampf(ld, -12.0 * dt, 12.0 * dt)
 			elif absf(ld) > 1.1:
 				yaw += clampf(ld - signf(ld) * 1.1, -6.0 * dt, 6.0 * dt)
+	if combat.committed():
+		# committed: the body tracks a little in the wind up and is frozen while the paw's out
+		var cap := combat.turn_cap() * dt
+		yaw = prev_yaw + clampf(wrapf(yaw - prev_yaw, -PI, PI), -cap, cap)
 	_kick_turn_t = maxf(_kick_turn_t - dt, 0.0)
 	if _kick_turn_t > 0.0 and Vector2(velocity.x, velocity.z).length() > 0.5:
 		# coming off a wall kick the body twists round to where it's flying, however the keys are held
@@ -531,14 +607,15 @@ func _physics_process(dt: float) -> void:
 		yaw += clampf(wrapf(ky - yaw, -PI, PI), -16.0 * dt, 16.0 * dt)
 	rotation.y = yaw
 	last_event_t += dt
+	toast_t += dt
 	# stamina / dodge bookkeeping. bots run with a bottomless bar unless they ask for the real one
 	stamina.infinite = not bot.is_empty() and not bot.get("stamina", false)
 	dash.tick(dt)
 	var dash_in: bool = inp.get("dash", false)
-	if dash_in and not prev_dash:
-		dash.press()
+	if dash_in and not prev_dash and combat.dodge_pressed():
+		dash.press()      # mid attack it waits for the move's cancel point (combat._atk_step)
 	prev_dash = dash_in
-	var raw_mv: Vector2 = inp.get("move", Vector2.ZERO)
+	var raw_mv: Vector2 = dodge_mv
 	var dash_wish := Vector3.ZERO
 	if raw_mv.length() > 0.3:
 		dash_wish = Basis(Vector3.UP, orb_yaw) * Vector3(raw_mv.x, 0, -raw_mv.y)
@@ -565,7 +642,7 @@ func _physics_process(dt: float) -> void:
 	# paws: left mouse = left paw, right mouse = right paw ("swat" = left paw for old bot scripts)
 	var paw_l: bool = inp.get("paw_l", false) or inp.get("swat", false)
 	var paw_r: bool = inp.get("paw_r", false)
-	combat.tick(dt, paw_l, paw_r)
+	combat.tick(dt, paw_l, paw_r, inp.get("grab", false), inp.get("pounce", false))
 	if _swat_hit_t >= 0.0:
 		_swat_hit_t -= dt
 		if _swat_hit_t < 0.0:
@@ -588,7 +665,7 @@ func _physics_process(dt: float) -> void:
 				_auto_last = who
 				_auto_last_t = 0.0
 				_auto_t = 0.55
-				_do_swat()
+				combat.auto_swat()
 	_update_surface()
 	var tv: bool = inp.get("toggle_view", false)
 	if tv and not prev_v:
@@ -610,7 +687,7 @@ func _physics_process(dt: float) -> void:
 			pass
 		elif want_crouch_peek(inp):
 			ground_mv.x = mv.x * 0.45
-		elif side != 0.0 and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12) and not dash.busy() and dash.buffer <= 0.0 and stamina.spend(CatStamina.SIDE_HOP):
+		elif side != 0.0 and not combat.committed() and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12) and not dash.busy() and dash.buffer <= 0.0 and stamina.spend(CatStamina.SIDE_HOP):
 			_side_hop(side, fwd, right)
 	_prev_side = side
 	if is_on_floor():
@@ -690,6 +767,7 @@ func _physics_process(dt: float) -> void:
 
 	# crouch / stand (only stand if there's room)
 	var crouch_target := 1.0 if (want_crouch or charging) else 0.0
+	crouch_target = maxf(crouch_target, space_charge() * 0.5)   # gathering for a bigger hop
 	if crouch_target < crouch_amt and not _can_stand():
 		crouch_target = crouch_amt
 	crouch_amt = move_toward(crouch_amt, crouch_target, dt * 7.0)
@@ -703,12 +781,14 @@ func _physics_process(dt: float) -> void:
 	jump_buffer = maxf(jump_buffer - dt, 0.0)
 	if jump_pressed:
 		jump_buffer = 0.12
+		_hop_charge = inp.get("hop_charge", 0.0)
 	var can_ground_jump := grounded or (air_time < 0.09 and not jumped_this_air)
 
-	if not charging and can_ground_jump and (aim_in or (want_crouch and jump_held)):
+	# hold q / mouse3 = aimed leap (movement). the one pounce lives on both paws (cat_combat.gd)
+	if not charging and can_ground_jump and aim_in:
 		charging = true
 		_aim_ok_age = 99.0
-		charge_src = "aim" if aim_in else "crouch"
+		charge_src = "aim"
 		charge = 0.0
 		jump_buffer = 0.0
 	if charging and not can_ground_jump:
@@ -725,22 +805,16 @@ func _physics_process(dt: float) -> void:
 		if release:
 			if aim_valid or _aim_ok_age < 0.2:
 				_leap()
-			elif charge_src == "crouch":
-				# pounce! cats crouch low then launch way higher than a casual hop
-				if not stamina.spend(CatStamina.POUNCE + CatStamina.POUNCE_CHARGE * charge):
-					charge = minf(charge, 0.25)   # spent: a feeble little pounce
-				var hgt := lerpf(POUNCE_MIN, POUNCE_MAX, charge)
-				velocity.y = sqrt(2.0 * G * hgt)
-				velocity += fwd * lerpf(1.0, 3.2, charge)
-				pounce_air = true
-				_event("pounce %.1fm" % hgt)
 			charging = false
 			jumped_this_air = true
 			grounded = false
 			charge = 0.0
 	elif jump_buffer > 0.0 and can_ground_jump:
 		# a cat always gets off the ground, but spent it's a lower hop
-		var hh := HOP_HEIGHT if stamina.spend(CatStamina.HOP) else HOP_HEIGHT * 0.55
+		var hh := HOP_HEIGHT * lerpf(1.0, HOP_CHARGE_MUL, _hop_charge)
+		if not stamina.spend(CatStamina.HOP * (1.0 + _hop_charge)):
+			hh = HOP_HEIGHT * 0.55
+		_hop_charge = 0.0
 		velocity.y = sqrt(2.0 * G * hh)
 		jumped_this_air = true
 		jump_buffer = 0.0
@@ -942,8 +1016,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	var eye := Vector3(0, lerpf(EYE_STAND, EYE_CROUCH, crouch_amt) + land_dip + bob - charge * 0.03, 0)
 	var inv := global_transform.basis.inverse()
 	eye = eye.lerp(Vector3(0, 0.41, 0) + inv * (-face_n * 0.05), w_scratch)
-	# rearing up for a two paw grab: up on the hind legs, then down over the target
-	eye.y += combat.rear_w * 0.14 - combat.grip_w * 0.05
+	# two paw grab: the head dips down over the target (no rearing up)
+	eye.y -= combat.grip_w * 0.05
 	if clambering:
 		var pull := clampf(clamber_t / 0.55, 0.0, 1.0) if clamber_phase == 2 else 0.0
 		var hang_eye := Vector3(0, HANG + 0.07, 0) + inv * (-ledge_n * 0.07)
@@ -964,7 +1038,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 
 	rig.drive_velocity = velocity
 	rig.on_floor = is_on_floor() or mantling or clambering or climbing or scratching
-	rig.crouch = maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85)
+	rig.crouch = maxf(maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85), combat.gather_w())
 	rig.charge = charge
 	rig.look_pitch = pitch * 0.6 * (1.0 - w_face)
 	# the head turns a little toward where you're looking
@@ -983,7 +1057,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.clamber = w_clamber
 	rig.clamber_pull = clampf(clamber_t / 0.55, 0.0, 1.0) if (clambering and clamber_phase == 2) else (1.0 if not clambering else 0.0)
 	rig.ledge_world = ledge_point
-	rig.rear = maxf(maxf(w_scratch, w_kick * 0.85), combat.rear_w * 0.85)
+	rig.rear = maxf(w_scratch, w_kick * 0.85)
 	rig.scratch = w_scratch
 	if "grip" in rig:
 		rig.grip = combat.grip_w
@@ -1835,7 +1909,6 @@ func _leap() -> void:
 	stamina.spend(CatStamina.LEAP)
 	velocity = aim_vel
 	leap_lock = true
-	pounce_air = true
 	_aim_root.visible = false
 	_event("leap (%s %.1fm)" % [aim_kind, aim_point.y - global_position.y])
 
@@ -1849,6 +1922,7 @@ func _on_land() -> void:
 		land_stick = 0.3
 		velocity.x = 0.0
 		velocity.z = 0.0
+		combat.land_recover()
 	stick_armed = false
 	if pounce_air:
 		pounce_air = false
@@ -2207,6 +2281,8 @@ func _slash_fx(dir: Vector3, sweep: Vector3, prey: Node3D, hits: Array[RigidBody
 	if prey != null:
 		var q := prey.global_position + Vector3.UP * 0.06 * float(prey.get("s") if "s" in prey else 0.5)
 		c = q + (eye - q).normalized() * 0.04
+	if prey == null and hits.is_empty() and view_mode == 0:
+		return     # a whiff in first person: the streak would be drawn right across the lens
 	var a := c - sweep * 0.11 + Vector3.UP * 0.05
 	var b := c + sweep * 0.09 - Vector3.UP * 0.035
 	SlashFx.streak(self, a, b, -dir * 0.03 + Vector3.UP * 0.01, Color(1.0, 0.82, 0.78) if prey != null else Color(1.0, 0.95, 0.85))

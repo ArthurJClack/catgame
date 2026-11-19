@@ -194,19 +194,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			player.global_position = pts[tp_i][1]
 			player.velocity = Vector3.ZERO
 			player.yaw = pts[tp_i][2]
-			player.last_event = pts[tp_i][0]
-			player.last_event_t = 0.0
+			player.toast = pts[tp_i][0]
+			player.toast_t = 0.0
 		KEY_H:
 			help_label.visible = not help_label.visible
 		KEY_M:
 			sound.set_muted(not sound.muted)
-			player.last_event = "sound off" if sound.muted else "sound on"
-			player.last_event_t = 0.0
+			player.toast = "sound off" if sound.muted else "sound on"
+			player.toast_t = 0.0
 		KEY_N:
 			# skip ahead: afternoon -> sunset -> night -> morning
 			atmos.skip = 3.0
-			player.last_event = "time passes..."
-			player.last_event_t = 0.0
+			player.toast = "time passes..."
+			player.toast_t = 0.0
 		KEY_F5:
 			_go_home()
 
@@ -356,9 +356,9 @@ func _process(dt: float) -> void:
 			best = dd
 			near = "%s nearby (%s)" % [cr.kind, cr.state]
 	hud_label.text = "%d fps   %02d:%02d\n%.1f m/s   height %.2f m   kicks %d\n%s" % [Engine.get_frames_per_second(), int(atmos.hour), int(fmod(atmos.hour, 1.0) * 60.0), hs, player.global_position.y - ForestLevel.height(player.global_position.x, player.global_position.z), player.kicks_left, near]
-	if player.last_event_t < 1.2:
-		event_label.text = player.last_event
-		event_label.modulate.a = 1.0 - player.last_event_t / 1.2
+	if player.toast_t < 1.2:
+		event_label.text = player.toast
+		event_label.modulate.a = 1.0 - player.toast_t / 1.2
 	else:
 		event_label.text = ""
 

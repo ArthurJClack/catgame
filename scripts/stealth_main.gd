@@ -171,8 +171,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var i := k - KEY_1
 		if i < pts.size():
 			_teleport(pts[i][1], pts[i][2])
-			player.last_event = pts[i][0]
-			player.last_event_t = 0.0
+			player.toast = pts[i][0]
+			player.toast_t = 0.0
 	match k:
 		KEY_R:
 			_teleport(info.spawn, info.spawn_yaw)
@@ -206,16 +206,16 @@ func _process(dt: float) -> void:
 	if player and player.global_position.y < -0.9:
 		# fell in the harbor
 		_teleport(info.spawn, info.spawn_yaw)
-		player.last_event = "splash. back to the hall"
-		player.last_event_t = 0.0
+		player.toast = "splash. back to the hall"
+		player.toast_t = 0.0
 	if hud_label == null or not hud.visible:
 		return
 	var v := player.velocity
 	var hs := Vector2(v.x, v.z).length()
 	hud_label.text = "%d fps   %s\n%.1f m/s   height %.2f m   kicks %d" % [Engine.get_frames_per_second(), "psx %dp" % int(lines_opts[lines_i]) if psx_on else "psx off", hs, player.global_position.y, player.kicks_left]
-	if player.last_event_t < 1.2:
-		event_label.text = player.last_event
-		event_label.modulate.a = 1.0 - player.last_event_t / 1.2
+	if player.toast_t < 1.2:
+		event_label.text = player.toast
+		event_label.modulate.a = 1.0 - player.toast_t / 1.2
 	else:
 		event_label.text = ""
 

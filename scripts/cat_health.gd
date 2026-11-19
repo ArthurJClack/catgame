@@ -50,6 +50,8 @@ func damage(amount: float, from: Vector3, knock := 2.2) -> bool:
 	if p.charging:
 		p.charging = false
 		p.charge = 0.0
+	if p.get("combat") != null:
+		p.combat.interrupt()     # staggered out of whatever attack it was winding up
 	hurt.emit(amount, from)
 	p._event("ouch! (%.0f)" % value)
 	if value <= 0.0:

@@ -163,7 +163,7 @@ func _build_hud() -> void:
 	help_label.add_theme_font_size_override("font_size", 15)
 	help_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	help_label.add_theme_constant_override("outline_size", 5)
-	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop / wall kick x2 · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\ntab = lock on (rats first, then prey / wildlife): camera holds it, wasd circles it, flick the mouse = next target, tab again = unlock\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb · hold f at a wall = scratch\nstalk (c) up to prey, hold space + release = pounce to catch \nmouse1 / mouse2 = left / right paw swat (hold = rake, or claws: hook stuff) · hold both = rear up + pin it, release both = pounce · e drop\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · f6 forest · f7 stealth · f10 rat pit · h hide help · esc free mouse"
+	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop (hold = higher, hold long = pounce + aim line) / wall kick (1 per jump) · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\ntab = lock on (rats first, then prey / wildlife): camera holds it, wasd circles it, flick the mouse = next target, tab again = unlock\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb · hold f at a wall = scratch\nstalk (c) up to prey, hold space to pounce · mouse1 / mouse2 = left / right paw swat (hold = rake, or claws: hook stuff) · g / mouse5 = grab + pin it · e drop\nattacks are committed (souls style): dodge comes out of the recovery, extra clicks are buffered\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · f6 forest · f7 stealth · f10 rat pit · h hide help · esc free mouse"
 	if OS.has_feature("web"):
 		help_label.text = "click the game to grab the mouse (in a browser use c to crouch, ctrl+w closes the tab!)\n" + help_label.text.replace("ctrl/c", "c")
 		help_label.offset_top = -152
@@ -229,8 +229,8 @@ func _process(_dt: float) -> void:
 	hud_label.text = fps_line + "%.1f m/s  (%.0f km/h)  %s\nheight %.2f m   kicks %d   caught %d   grip: %s%s" % [hs, hs * 3.6, mode, player.global_position.y, player.kicks_left, player.catches, player.surface, "  SLIPPING" if player.slip > 0.3 else ""]
 	if player.hunt_info != "":
 		hud_label.text += "\nstalking: " + player.hunt_info
-	if player.last_event_t < 0.9:
-		event_label.text = player.last_event
-		event_label.modulate.a = 1.0 - player.last_event_t / 0.9
+	if player.toast_t < 0.9:
+		event_label.text = player.toast
+		event_label.modulate.a = 1.0 - player.toast_t / 0.9
 	else:
 		event_label.text = ""

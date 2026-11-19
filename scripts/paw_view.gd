@@ -382,8 +382,13 @@ func _process(dt: float) -> void:
 			elif s < 0.15:
 				var u := (s - 0.07) / 0.08
 				swt = wind.lerp(strike, u * u)
+			elif s < 0.24:
+				# the scratch: claws hooked in, the paw drags down and back toward you
+				var u := smoothstep(0.0, 1.0, (s - 0.15) / 0.09)
+				swt = strike.lerp(strike + Vector3(-side * 0.012, -0.045, 0.06), u)
 			else:
-				swt = strike.lerp(tgt, (s - 0.15) / 0.17)
+				var rk := strike + Vector3(-side * 0.012, -0.045, 0.06)
+				swt = rk.lerp(tgt, smoothstep(0.0, 1.0, (s - 0.24) / 0.08))
 			tgt = swt
 		# --- claw hold (right mouse): paw reaches out and stays hooked on the target ---
 		var clawing := claw_on and i == claw_i and not swatting

@@ -6,15 +6,16 @@ extends Node
 ## cat is winded: no canter or gallop until it's back over WINDED_UNTIL.
 ##
 ## real cats are sprinters, not distance runners: a flat out gallop lasts a few seconds, then
-## they have to stop and pant. so the gallop empties a full bar in ~6 s, a canter in ~25 s.
+## they have to stop and pant. souls style it goes fast: the gallop empties a full bar in ~3.3 s,
+## a canter in ~7 s, and the bar only refills once you ease off (no regen while running).
 ##
 ## the rule for bursts is the souls one: you can start anything as long as the bar isn't empty,
 ## even if it costs more than is left (the bar just goes to 0). a hop never fails (a cat always
 ## gets off the ground), it's just lower when you're spent.
 
 const MAX := 100.0
-const REGEN := 34.0          # per second, once the breather is over
-const REGEN_DELAY := 0.75    # seconds after the last spend before it starts coming back
+const REGEN := 30.0          # per second, once the breather is over (~3.3 s empty to full)
+const REGEN_DELAY := 0.9     # seconds after the last spend before it starts coming back
 const WINDED_UNTIL := 35.0   # run dry and you can't canter / gallop until it's back to this
 
 # costs (one off)
@@ -32,8 +33,8 @@ const GRIP := 10.0           # rear up + two paw grab
 const DASH := 22.0
 const BACKSTEP := 15.0
 # costs (per second, while doing it)
-const GALLOP := 16.0
-const CANTER := 4.0
+const GALLOP := 30.0
+const CANTER := 14.0
 const CLIMB := 6.0
 const CLAW_DRAG := 4.0
 const GRIP_HOLD := 9.0       # holding something down with both paws

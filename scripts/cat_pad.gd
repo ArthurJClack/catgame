@@ -5,13 +5,13 @@ extends RefCounted
 ##   left stick   move. how far you push = how fast: a nudge is a slow walk, half way a walk, full tilt a trot
 ##   right stick  look / camera
 ##   L3 (click)   run: canter. click again while running = full gallop (same as double tapping shift)
-##   A            jump / wall kick           B   dodge (souls style)
-##   X (hold)     scratch                    Y   switch view (first / third / orbit)
-##   LT / RT      left / right paw: tap = swat, hold = rake. both triggers = rear up + two paw hold
+##   A            same as space: tap hop, hold higher hop, hold long = pounce + aim line, wall kick   B   dodge
+##   X (hold)     scratch                    Y (hold)  grab: rear up + pin it with both paws
+##   LT / RT      left / right paw: tap = swat, hold = rake. 
 ##   LB (hold)    aim a leap, let go to leap
-##   RB (hold)    crouch / stalk. RB + A = charged pounce
+##   RB (hold)    crouch / stalk
 ##   R3 (click)   lock on
-##   d-pad down   drop what you're carrying  d-pad up  walk toggle
+##   d-pad down   drop what you're carrying  d-pad up  walk toggle  d-pad left  switch view
 ## deadzones are radial with the range rescaled past them, so the slowest creep is right at the edge
 ## of the deadzone instead of jumping to 20 percent speed.
 
@@ -186,7 +186,8 @@ static func read() -> Dictionary:
 		"jump": btn(JOY_BUTTON_A),
 		"dash": btn(JOY_BUTTON_B),
 		"scratch": btn(JOY_BUTTON_X),
-		"toggle_view": btn(JOY_BUTTON_Y),
+		"grab": btn(JOY_BUTTON_Y),
+		"toggle_view": btn(JOY_BUTTON_DPAD_LEFT),
 		"paw_l": trigger(false),
 		"paw_r": trigger(true),
 		"aim": btn(JOY_BUTTON_LEFT_SHOULDER),
