@@ -1,5 +1,7 @@
 class_name SoulsHud
 extends CanvasLayer
+
+var hidden_by_menu := false   # title screen hides the bars
 ## health (red) over stamina (green), top left, each with a pale trail that holds a moment
 ## then slides down to what you've really got left. the bars are as long as their maximum.
 ## a row of paw marks under them = lives left. hits flash the screen edge red.
@@ -76,7 +78,7 @@ func _process(_dt: float) -> void:
 	if player == null:
 		return
 	# scripted bots (preview videos) don't show it unless they play with the real bars
-	visible = player.bot.is_empty() or player.bot.get("stamina", false)
+	visible = (player.bot.is_empty() or player.bot.get("stamina", false)) and not hidden_by_menu
 	var h: CatHealth = player.health
 	var s: CatStamina = player.stamina
 	_hp_fill.size.x = h.value * PX_PER
