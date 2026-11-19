@@ -203,6 +203,10 @@ func _button(parent: Node, text: String, fn: Callable) -> Button:
 func _page_main() -> void:
 	_title.text = "paused" if _paused_tree else "menu (online, the game keeps going)"
 	var first := _button(_body, "resume", close_menu)
+	if Save.enabled:
+		var ago := (Time.get_ticks_msec() - Save.last_save_ms) / 1000
+		var txt := "save" if Save.last_save_ms == 0 else "save (last saved %s ago)" % _ago(ago)
+		_button(_body, txt, func(): Save.save_now(); show_page("main"))
 	_button(_body, "settings", show_page.bind("settings"))
 	_button(_body, "controls", show_page.bind("controls"))
 	var scene := get_tree().current_scene
@@ -211,6 +215,12 @@ func _page_main() -> void:
 	if not OS.has_feature("web"):
 		_button(_body, "quit to desktop", func(): GameSettings.save_file(); get_tree().quit())
 	first.grab_focus.call_deferred()
+
+
+func _ago(sec: int) -> String:
+	if sec < 60:
+		return "%ds" % sec
+	return "%dm" % (sec / 60)
 
 
 func _go_farm() -> void:
