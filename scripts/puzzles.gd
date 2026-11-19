@@ -15,6 +15,10 @@ extends Node3D
 ##                 claws and drag it a couple of times: the bale drops and bursts (puzzle_rope.gd).
 ##   herd chicks   five chicks loose in the yard keep their distance from the cat. walk them into
 ##                 their pen through the gap; run at them and they scatter (puzzle_herd.gd).
+## pier 9 (stealth.tscn):
+##   quiet paws    the guard's dog sleeps outside the hut, chained, its dinner bowl by its nose. every
+##                 step makes noise (speed x surface, landings, meows): stalk in, eat, get out
+##                 without waking it (puzzle_dog.gd).
 ## rat pit (arena.tscn):
 ##   lanterns      oil lanterns sit on the pillar tops (pillars are rough stone now: climbable).
 ##                 swat one off and it smashes: rats near it take a heavy hit, then the oil burns
@@ -61,6 +65,7 @@ var _carried_prev: Node3D = null
 # pull the string (puzzle_rope.gd)
 var rope: PullString
 var herd: HerdChicks
+var dog: QuietPaws
 # lanterns
 var lanterns: Array[RigidBody3D] = []
 var fires: Array[Dictionary] = []
@@ -86,6 +91,19 @@ static func pit(root: Node3D, p: CatPlayer) -> Puzzles:
 	z.arena = root
 	root.add_child(z)
 	z._build_pit()
+	z._maybe_test()
+	return z
+
+
+static func docks(root: Node3D, p: CatPlayer) -> Puzzles:
+	var z := Puzzles.new()
+	z.name = "Puzzles"
+	z.player = p
+	root.add_child(z)
+	z._sfx_init()
+	# quiet paws: the guard dog asleep outside the hut door (hut x 6.7..9.3, front wall z 11.6),
+	# chained to a post by the wall, its bowl by the wall right in front of its nose
+	z.dog = QuietPaws.build(z, Vector3(8.7, 0, 12.35), Vector3(8.0, 0, 11.75), Vector3(7.35, 0, 11.95), StealthLevel.PUDDLES)
 	z._maybe_test()
 	return z
 
@@ -317,6 +335,10 @@ func _eat_check() -> void:
 			_play("crunch", f.global_position, 0.7, randf_range(0.9, 1.15))
 			f.queue_free()
 			treats.remove_at(i)
+
+
+func _ate(n: int) -> void:
+	treats_eaten += n
 
 
 func _solve(id: String, at: Vector3) -> void:

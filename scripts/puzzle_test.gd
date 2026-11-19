@@ -24,6 +24,8 @@ func _run() -> void:
 	var ok: bool
 	if z.arena:
 		ok = await _pit()
+	elif z.dog:
+		ok = await _docks()
 	else:
 		ok = await _farm()
 	print("PUZZLETEST " + ("PASS" if ok else "FAIL"))
@@ -220,6 +222,85 @@ func _herd() -> bool:
 
 
 const SUN_WAIT := 2.2
+
+
+func _drive(yaw: float, secs: float, keys := {}) -> void:
+	bot.yaw = yaw
+	bot.move = Vector2(0, 1)
+	for k in keys:
+		bot[k] = keys[k]
+	await _secs(secs)
+	bot.move = Vector2.ZERO
+	for k in keys:
+		bot[k] = false
+
+
+## G: quiet paws (pier 9). gallop past the sleeping dog: it wakes, barks, comes for you. get well
+## away and it lies back down. then stalk in, eat from its bowl, stalk out: it sleeps through it
+func _docks() -> bool:
+	var q: QuietPaws = z.dog
+	var ok := true
+	await _secs(1.0)
+	_put(Vector3(3.0, 0.02, 13.6), Vector3(10, 0.2, 13.6))
+	await _ticks(10)
+	await _drive(-PI / 2, 1.6, {"sprint": true})
+	var woke := q.awake
+	print("G loud: galloping past it: awake %s (max alert %.2f, noise %.2f)" % [str(woke), q.max_alert, q.noise])
+	ok = ok and woke
+	# run off and wait it out
+	_put(Vector3(-2.0, 0.02, 18.0), Vector3(-3, 0.2, 18))
+	var tt := 0.0
+	while q.awake and tt < 20.0:
+		await _secs(0.5)
+		tt += 0.5
+	await _secs(3.5)
+	print("G settles: back asleep %s after %.1f s, alert %.2f, dog at %s" % [str(not q.awake), tt, q.alert, str(q.dog.position.snapped(Vector3.ONE * 0.01))])
+	ok = ok and not q.awake
+	# trot (no crouch) straight to the bowl the same way: that's enough to wake it
+	_put(Vector3(5.0, 0.02, 11.95), q.bowl)
+	await _ticks(10)
+	var w1 := q.wakes
+	tt = 0.0
+	bot.move = Vector2(0, 1)
+	while q.wakes == w1 and tt < 3.0:
+		var dd := q.bowl - p.global_position
+		bot.yaw = atan2(-dd.x, -dd.z)
+		bot.move = Vector2(0, 1) if Vector2(dd.x, dd.z).length() > 0.25 else Vector2.ZERO
+		await _ticks(2)
+		tt += 2.0 / Engine.physics_ticks_per_second
+	bot.move = Vector2.ZERO
+	print("G trot: trotting up to the bowl woke it %s (%.1f s in)" % [str(q.wakes > w1), tt])
+	ok = ok and q.wakes > w1
+	_put(Vector3(-2.0, 0.02, 18.0), Vector3(-3, 0.2, 18))
+	tt = 0.0
+	while q.awake and tt < 20.0:
+		await _secs(0.5)
+		tt += 0.5
+	await _secs(3.5)
+	# sneak: stalk in along the hut wall from the west, eat, stalk back out
+	var w0 := q.wakes
+	_put(Vector3(5.6, 0.02, 11.95), q.bowl)
+	await _ticks(10)
+	q.reset_max()
+	bot.crouch = true
+	await _secs(0.6)
+	bot.yaw = -PI / 2
+	bot.move = Vector2(0, 1)
+	tt = 0.0
+	while Vector2(p.global_position.x - q.bowl.x, p.global_position.z - q.bowl.z).length() > 0.2 and tt < 8.0:
+		await _ticks(2)
+		tt += 2.0 / Engine.physics_ticks_per_second
+		var d := q.bowl - p.global_position
+		bot.yaw = atan2(-d.x, -d.z)
+	bot.move = Vector2.ZERO
+	print("   stalked to the bowl in %.1f s, crouch %.2f, alert %.2f" % [tt, p.crouch_amt, q.alert])
+	await _secs(QuietPaws.EAT_T + 0.8)
+	var ate := q.done
+	await _drive(PI / 2, 2.5, {"crouch": true})
+	bot.crouch = false
+	print("G quiet paws: ate the lot %s, woke it %d time(s) sneaking (max alert %.2f), solved %s" % [str(ate), q.wakes - w0, q.max_alert, str(Puzzles.solved.has("quiet_paws"))])
+	ok = ok and ate and q.wakes == w0 and q.max_alert < QuietPaws.WAKE
+	return ok
 
 
 func _pit() -> bool:

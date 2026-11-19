@@ -18,6 +18,7 @@ const LIST := {
 	"lantern": ["oops", "knock a lantern off a pillar in the rat pit", false],
 	"pull_string": ["tug of war", "pull the rope in the barn until something gives", false],
 	"herd": ["sheepdog", "walk all five chicks back into their pen", false],
+	"quiet_paws": ["let sleeping dogs lie", "eat the guard dog's dinner on pier 9 without waking it", false],
 	"treats_10": ["snack time", "eat 10 treats", false],
 	"treats_50": ["round boy", "eat 50 treats", false],
 	"hunter": ["hunter", "catch something", false],
@@ -109,6 +110,7 @@ func check(p: CatPlayer) -> void:
 	if solved.has("lantern"): unlock("lantern")
 	if solved.has("pull_string"): unlock("pull_string")
 	if solved.has("herd"): unlock("herd")
+	if solved.has("quiet_paws"): unlock("quiet_paws")
 	if treats >= 10: unlock("treats_10")
 	if treats >= 50: unlock("treats_50")
 	var c := int(st.get("catches", 0))
