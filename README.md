@@ -42,8 +42,9 @@ boot = **title screen** (`title_screen.gd`) over the live farm while the camera 
   hangs on the forepaws, hind paws scrabble, and it hauls itself up (hold w, or s/c to let go)
 - run or jump into a low ledge (< 0.3 m) and it just hops up; up to 0.85 m it grabs + clambers
 - jump at anything rough holding w (cat tree post, sisal post, curtains): claws in, climb.
-  w up (in bounds), s down, a/d sideways, space leaps off backwards, c lets go.
+  w up (in bounds), s down, a/d sideways, space leaps off backwards (or lunges, see below), c lets go.
   climbing into an overhang (a perch) reaches around the lip and pulls up onto it
+- **free climbing** (`free_climb.gd`, botw style): once the claws are in, w / s = up / down, a / d = sideways, diagonals too. the cat follows round tree trunks and posts, swings round outside corners and turns into inside corners without letting go, and its body turns toward where it's heading (splayed pose and gravity hang unchanged). the camera comes round with you so you keep looking at the bark. space + a direction = climb lunge (a quick hop along the wall, costs stamina), space alone / s / looking away = kick off. climbing drains stamina; run dry and the claws give out (and you can't grab again until you've got your breath back). w at the top hauls up whatever way the camera faces. anything in group "climbable" or with surface bark / fabric / carpet / rug / hay / sisal / rope grips. test: `godot --headless --path . res://climblab.tscn -- --climbtest`, `--show [--fp] [--legacy]` renders it (xvfb)
 - f (hold) facing a wall/couch/post: stand up and scratch. leaves claw marks, fluff flies off soft stuff
 - pounce (hold space): forepaws slam down together and pin whatever is under them.
   there's a wind up toy mouse to hunt: stalk slow (rushing spooks it), aim at it, pounce
