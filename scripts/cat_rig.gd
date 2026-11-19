@@ -94,6 +94,19 @@ var _ear_flick := [0.0, 0.0]
 ## paws are planted in the world and the body is solved from them. turn this off
 ## to get the cheap phase driven legs back (far away npc cats)
 var use_planting := true
+## busy fore paws (swat / claw hold / grip) leave the footfall solver while they work (false = old)
+static var paw_free := true
+## girdles sag toward a planted paw the leg can no longer reach (false = old: the paw leaves its print)
+static var reach_sag := true
+## girdle heights track their paws faster at speed (false = one fixed rate)
+static var follow_fast := true
+## the footfall solver's "ground level" is the body's (smooth), not the capsule's (hops up steps)
+static var smooth_ref := true
+var _hop := 0.0
+var _climb_v := 0.0
+const SAG_MAX := 0.06
+const SAG_RATE := 0.8   # m/s
+var _sag := [0.0, 0.0]
 var gait := CatGait.new()
 ## front paw offsets from their rest spots (rig space) + lift, for the first person paws
 var fp_foot := [Vector3.ZERO, Vector3.ZERO]
@@ -964,6 +977,12 @@ func animate(dt: float) -> void:
 		homes.append(yb * home)
 	var all_free := (not on_floor) or climb > 0.02 or clamber > 0.02 or not use_planting
 	var want_free := [all_free, all_free, all_free, all_free]
+	if paw_free:
+		# a fore paw that is swatting, hooked on something or gripping is off the ground: the gait
+		# hands it to the rig (the other three carry the weight) and plants it again afterwards
+		for i in 2:
+			if (_swat_t >= 0.0 and _swat_i == i) or (claw_on and claw_i == i and climb < 0.5 and clamber < 0.5) or grip > 0.3:
+				want_free[i] = true
 	var gxf := Transform3D(gb, gx.origin)
 	if net_phase >= 0.0:
 		# remote copy: start this frame's step from where the owner's gait clock was, so the
@@ -977,7 +996,14 @@ func animate(dt: float) -> void:
 		net_phase = -1.0
 	gait.remote = remote_life
 	gait.owner_modes = net_pmode if remote_life else -1
-	gait.update(dt, gxf, drive_velocity * nc, _yaw_rate, homes, want_free, lift_amt, on_floor)
+	# the gait works from the ground the body is actually standing over, not the capsule's feet:
+	# the capsule hops up a stair in one tick, the body (and its paws' reach) goes up it smoothly
+	var gait_xf := gxf
+	if smooth_ref and on_floor and climb < 0.02 and clamber < 0.02:
+		gait_xf.origin -= gb.y * _hop
+	else:
+		_hop = 0.0
+	gait.update(dt, gait_xf, drive_velocity * nc, _yaw_rate, homes, want_free, lift_amt, on_floor)
 	if net_pmode >= 0 and net_paws.size() == 4:
 		# remote copy: a paw both copies have on the ground goes where the owner's is. it lands
 		# right on the owner's print, and one that's off (joined mid stride) creeps over unseen
@@ -1024,6 +1050,16 @@ func animate(dt: float) -> void:
 		if not is_nan(_root_y_prev) and on_floor and _prev_floor_g and nc > 0.5 and absf(ry - _root_y_prev) < 0.3:
 			_fgy -= ry - _root_y_prev
 			_hgy -= ry - _root_y_prev
+			# the head's own "where I was" is kept in rig space too
+			_head_f.y -= ry - _root_y_prev
+			_head_slow -= ry - _root_y_prev
+			# a real hop of the capsule (onto / off a step), not a slope: the gait's ground
+			# level takes it in over the next moments instead of at once
+			if absf(ry - _root_y_prev) > 0.03:
+				_hop = clampf(_hop + ry - _root_y_prev, -0.3, 0.3)
+		# how fast the capsule is climbing / dropping overall (stairs, a slope), hops included
+		var cv := (ry - _root_y_prev) / dt if (not is_nan(_root_y_prev) and on_floor and _prev_floor_g and dt > 0.0 and absf(ry - _root_y_prev) < 0.3) else 0.0
+		_climb_v = LowPoly.damp(_climb_v, cv, 7.0, dt)
 		_root_y_prev = ry
 		_prev_floor_g = on_floor
 	var groll_t := [0.0, 0.0]
@@ -1058,10 +1094,11 @@ func animate(dt: float) -> void:
 			# the ground under both paws of the girdle (the swinging one: where it's landing).
 			# the girdle sits nearer the lower paw (the high leg folds, the low one isn't
 			# stretched off its paw: a cat crouches over a dip rather than reaching down into it) and tilts part way with the ground across it
-			var yl := gait.ground_y(h * 2) - gx.origin.y
-			var yr := gait.ground_y(h * 2 + 1) - gx.origin.y
-			var wl := 1.0 if gait.mode[h * 2] == CatGait.PLANTED else (0.5 if gait.mode[h * 2] == CatGait.SWING else 0.0)
-			var wr := 1.0 if gait.mode[h * 2 + 1] == CatGait.PLANTED else (0.5 if gait.mode[h * 2 + 1] == CatGait.SWING else 0.0)
+			var yl := (gait.support_y(h * 2) if smooth_ref else gait.ground_y(h * 2)) - gx.origin.y
+			var yr := (gait.support_y(h * 2 + 1) if smooth_ref else gait.ground_y(h * 2 + 1)) - gx.origin.y
+			var sww := 1.0 if smooth_ref else 0.5
+			var wl := 1.0 if gait.mode[h * 2] == CatGait.PLANTED else (sww if gait.mode[h * 2] == CatGait.SWING else 0.0)
+			var wr := 1.0 if gait.mode[h * 2 + 1] == CatGait.PLANTED else (sww if gait.mode[h * 2 + 1] == CatGait.SWING else 0.0)
 			if wl + wr > 0.0:
 				var mean := (yl * wl + yr * wr) / (wl + wr)
 				var lo := minf(yl, yr) if wl > 0.0 and wr > 0.0 else mean
@@ -1073,10 +1110,17 @@ func animate(dt: float) -> void:
 	_chest_dy = LowPoly.damp(_chest_dy, dy[0], 28.0, dt)
 	_pelvis_dy = LowPoly.damp(_pelvis_dy, dy[1], 28.0, dt)
 	var plantw := (1.0 - _air_w) * nc * (1.0 - clamber)
-	var glo := -0.2 if rough else -0.12
-	var ghi := 0.2 if rough else 0.14
-	_fgy = LowPoly.damp(_fgy, clampf(gy[0], glo, ghi) * plantw, 12.0, dt)
-	_hgy = LowPoly.damp(_hgy, clampf(gy[1], glo, ghi) * plantw, 12.0, dt)
+	var glo := -0.27 if rough else -0.12
+	var ghi := 0.27 if rough else 0.14
+	# the faster it runs the quicker each end has to follow its paws up and down (stairs at a
+	# trot climb 1.3 m/s: at a walking rate the body would trail 10 cm low, through the steps)
+	var grate := 12.0 + (7.0 * speed_s if follow_fast else 0.0)
+	_hop = LowPoly.damp(_hop, 0.0, grate, dt)
+	# following a steady climb at this rate trails it by speed / rate: lead by that much, so
+	# running up stairs the body rides at its real height over the steps instead of in them
+	var glead := clampf(_climb_v / grate, -0.12, 0.12) if (smooth_ref and rough) else 0.0
+	_fgy = LowPoly.damp(_fgy, clampf(float(gy[0]) + glead, glo, ghi) * plantw, grate, dt)
+	_hgy = LowPoly.damp(_hgy, clampf(float(gy[1]) + glead, glo, ghi) * plantw, grate, dt)
 	for h in 2:
 		if groll_ok[h] or not rough:
 			_groll[h] = LowPoly.damp(_groll[h], float(groll_t[h]) * plantw, 10.0, dt)
@@ -1161,6 +1205,8 @@ func animate(dt: float) -> void:
 	chest.rotation.z += (float(_cg_hold[0]) - float(_cg_hold[1])) * 0.14 * climb * climb_splay + _hang_roll * climb
 	pelvis.rotation.z += (float(_cg_hold[2]) - float(_cg_hold[3])) * 0.18 * climb * climb_splay - _hang_roll * 0.6 * climb
 
+	if reach_sag and use_planting:
+		_reach_sag(dt, fl)
 	_solve_spine()
 
 	# ---------- head: held still in space while the body works under it ----------
@@ -1520,6 +1566,39 @@ func animate(dt: float) -> void:
 	loaf = in_pose[1]
 	groom = in_pose[2]
 	stretch = in_pose[3]
+
+
+## a planted leg has a fixed length. where the body ended up further from a loaded paw than the
+## leg is long (braking pitches the hips up, a hard start leaves a paw behind, the far end of a
+## long stance) the girdle over that paw comes down to it: the hip / shoulder sags toward the
+## paw instead of the paw being pulled off its print. drops in at once, eases back out
+func _reach_sag(dt: float, fl: Array) -> void:
+	for h in 2:
+		var need := 0.0
+		var girdle: Node3D = chest if h == 0 else pelvis
+		var maxlen: float = (F_UP + F_LO + 0.022) if h == 0 else (H_TH + H_SH + 0.012)
+		for k in 2:
+			var i := h * 2 + k
+			if gait.mode[i] != CatGait.PLANTED or float(gait.free_w[i]) > 0.3:
+				continue
+			var side := -1.0 if k == 0 else 1.0
+			var joint: Vector3
+			var tip: Vector3 = fl[i]
+			if h == 0:
+				joint = to_local(chest.to_global(Vector3(FRONT_SHOULDER.x * side, FRONT_SHOULDER.y, FRONT_SHOULDER.z)))
+				tip += Vector3(0, 0.04, 0.012)
+			else:
+				joint = to_local(pelvis.to_global(Vector3(HIND_HIP.x * side, HIND_HIP.y, HIND_HIP.z)))
+				tip += Vector3(0, 0.064, 0.033)
+			joint.y += float(_sag[h])   # where it would be without last frame's sag
+			var d := joint - tip
+			var flat2 := d.x * d.x + d.z * d.z
+			var can := sqrt(maxf(maxlen * maxlen - flat2, 0.0004))
+			need = maxf(need, d.y - can)
+		need = clampf(need, 0.0, SAG_MAX)
+		# down fast but not in one frame (that would be a pop of its own), back up slowly
+		_sag[h] = minf(need, float(_sag[h]) + SAG_RATE * dt) if need > float(_sag[h]) else LowPoly.damp(float(_sag[h]), need, 9.0, dt)
+		girdle.position.y -= float(_sag[h])
 
 
 ## strings the loin blocks along a curve from the back of the rib cage to the front of the

@@ -32,6 +32,15 @@ const GALLOP_DOWN := 3.4
 ## rough ground footwork (longer reach rays, foothold picking, swing clearance, girdles
 ## tilting with the ground). false = the old flat ground behaviour (before / after renders)
 static var rough := true
+## a planted paw lifts as soon as its leg runs out of reach, instead of being dragged (false =
+## the old behaviour, for before / after)
+static var reach_lift := true
+## ground rays know when they start inside something solid, and paws aim for where the body will
+## be (stairs, kerbs). false = old
+static var solid_rays := true
+var _ref_y := NAN
+var _ref_vy := 0.0
+const REACH_LIFT := 1.03
 
 var rig: Node3D
 var phase := 0.0
@@ -82,8 +91,9 @@ var _aim: Array[int] = [0, 0, 0, 0]
 ## 0 on flat floors, cm-ish on rough ground (biggest recent paw height vs the root, m)
 var uneven := 0.0
 var _clr_t: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _grd: Array[float] = [0.0, 0.0, 0.0, 0.0]
 ## how far below the root a paw may reach / how high above it it may step (rough ground)
-const REACH_DOWN := 0.2
+const REACH_DOWN := 0.26
 const REACH_UP := 0.24
 # foothold candidates around the planned spot (sideways, forward) in m, nearest first
 const HOLDS := [Vector2(0, 0), Vector2(0, 0.028), Vector2(0, -0.028), Vector2(0.02, 0), Vector2(-0.02, 0), Vector2(0, 0.055), Vector2(0, -0.05), Vector2(0.02, 0.03), Vector2(-0.02, 0.03)]
@@ -146,16 +156,22 @@ func _ground(p: Vector3, root_y: float, i: int) -> Vector3:
 
 ## first ground hit (static, facing up-ish) going down the vertical line at x,z between
 ## y0 and y1. returns [y, normal] or [] when there's nothing in reach
-func _ray(x: float, z: float, y0: float, y1: float) -> Array:
+func _ray(x: float, z: float, y0: float, y1: float, solid := false) -> Array:
 	var space := rig.get_world_3d().direct_space_state
 	var ex := exclude.duplicate()
 	for _k in 3:
 		var q := PhysicsRayQueryParameters3D.create(Vector3(x, y0, z), Vector3(x, y1, z))
 		q.exclude = ex
+		q.hit_from_inside = solid
 		var hit := space.intersect_ray(q)
 		if hit.is_empty():
 			return []
 		if hit.collider is StaticBody3D or hit.collider is CSGShape3D or hit.collider is GridMap:
+			if solid and (hit.normal as Vector3) == Vector3.ZERO:
+				# the line starts inside something (a stair two steps up, a kerb taller than the
+				# reach): the ground here is at least this high. without this the ray went on
+				# down through the block and found the floor underneath it
+				return [y0, Vector3.UP, true]
 			return [(hit.position as Vector3).y, hit.normal]
 		ex.append(hit.rid)
 	return []
@@ -171,6 +187,13 @@ func _top(x: float, z: float, root_y: float) -> float:
 	q.exclude = exclude
 	var hit := space.intersect_ray(q)
 	if not hit.is_empty() and (hit.normal as Vector3).y < -0.3:
+		if solid_rays:
+			# the underside of something low and thin whose top is in stepping reach (the foot
+			# of a ramp, a plank, a low platform) is not a ceiling: the cat is about to walk
+			# onto it, not under it
+			var h := _ray(x, z, root_y + REACH_UP + 0.3, (hit.position as Vector3).y)
+			if not h.is_empty() and (h[1] as Vector3).y > 0.5 and float(h[0]) < root_y + REACH_UP + 0.12:
+				return maxf(root_y + REACH_UP, float(h[0]) + 0.02)
 		return maxf((hit.position as Vector3).y - 0.01, root_y + 0.03)
 	return root_y + REACH_UP
 
@@ -183,7 +206,7 @@ func _ground_rough(p: Vector3, root_y: float, i: int) -> Vector3:
 	nrm[i] = Vector3.UP
 	if not _can_ray():
 		return Vector3(p.x, root_y, p.z)
-	var h := _ray(p.x, p.z, _top(p.x, p.z, root_y), root_y - REACH_DOWN - 0.06)
+	var h := _ray(p.x, p.z, _top(p.x, p.z, root_y), root_y - REACH_DOWN - 0.06, solid_rays)
 	if h.is_empty():
 		return Vector3(p.x, root_y, p.z)
 	var n: Vector3 = h[1]
@@ -209,7 +232,7 @@ func _foothold(p: Vector3, root_y: float, i: int, fwd: Vector3) -> Vector3:
 	for c in HOLDS:
 		var cv: Vector2 = c
 		var q: Vector3 = p + side * cv.x + fwd * cv.y
-		var h := _ray(q.x, q.z, top, bot)
+		var h := _ray(q.x, q.z, top, bot, solid_rays)
 		if h.is_empty():
 			continue
 		var y: float = h[0]
@@ -244,7 +267,7 @@ func _clearance(a: Vector3, b: Vector3, root_y: float) -> float:
 	var worst := -1.0
 	for u in [0.25, 0.5, 0.75]:
 		var q := a.lerp(b, u)
-		var h := _ray(q.x, q.z, root_y + REACH_UP, root_y - 0.1)
+		var h := _ray(q.x, q.z, root_y + REACH_UP, root_y - 0.1, solid_rays)
 		if not h.is_empty():
 			# the swing arc rises toward hi in the middle, less near the ends
 			var arc := lerpf(lerpf(a.y, b.y, u), hi, sin(PI * u))
@@ -295,6 +318,12 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 	if far > 0.75:
 		reset(xf, homes)
 	phase = fposmod(phase + spd * dt / maxf(stride, 0.05), 1.0)
+	# how fast the ground under the cat is rising / falling (stairs, ramps), smoothed
+	if not is_nan(_ref_y) and absf(xf.origin.y - _ref_y) < 0.2 and dt > 0.0:
+		_ref_vy = lerpf(_ref_vy, (xf.origin.y - _ref_y) / dt, 1.0 - exp(-6.0 * dt))
+	else:
+		_ref_vy = 0.0
+	_ref_y = xf.origin.y
 	# how uneven the ground has been lately (planted paws above / below the root), decays in ~0.5 s
 	var dev := 0.0
 	for i in 4:
@@ -359,6 +388,12 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				# left behind or over stretched (sharp turn, sudden stop): step early
 				elif (e > stance_len * 0.5 + 0.09 or stretch[i] > 0.998) and _st_t[i] > minf(0.06, duty / maxf(freq, 0.01)) and (mode[i ^ 1] == PLANTED or gallop > 0.5 or e > 0.3 or (rough and stretch[i] > 1.03 and uneven > 0.01)):
 					lift = true
+				# the leg is out of length (hard start, stop or turn, the gait clock re-timed by a gait
+				# change): no leg holds a paw down past its reach, it lets go whatever the other paws do
+				elif reach_lift and _st_t[i] > 0.03 and (stretch[i] > REACH_LIFT or (spd > 0.001 and stretch[i] + 0.4 * maxf(-err.dot(hv / spd), 0.0) * spd * dt / (stretch[i] * 0.04) > REACH_LIFT)):
+					# (second test: it's behind its hip and the first half of this frame's travel
+					# already takes it out of reach. at a run the body covers 10-18 cm a frame)
+					lift = true
 			else:
 				st_s[i] = 0.5
 				# standing: settle paws that ended up away from their spot, one at a time
@@ -397,7 +432,9 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				var fw := xf.basis * (ldir if spd > 0.05 else Vector3(0, 0, -1))
 				var ahead := hv * maxf(0.0, 1.0 - sw_t[i]) * _dur[i]
 				var aimp: Vector3 = xf * tl + ahead
-				var fh := _foothold(aimp, xf.origin.y, i, Vector3(fw.x, 0, fw.z).normalized())
+				# (going up / down stairs or a slope the body will be higher / lower by then)
+				var ry_then := xf.origin.y + clampf(_ref_vy * maxf(0.0, 1.0 - sw_t[i]) * _dur[i], -0.3, 0.3)
+				var fh := _foothold(aimp, ry_then if solid_rays else xf.origin.y, i, Vector3(fw.x, 0, fw.z).normalized())
 				var adj := xf.basis.inverse() * (fh - aimp)
 				_adj[i] = Vector3(adj.x, 0.0, adj.z)
 				_gyw[i] = fh.y
@@ -410,7 +447,7 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				# so check the height right where the paw is now going to land
 				_aim[i] = 3
 				var lp: Vector3 = xf * (tl + _adj[i]) + hv * maxf(0.0, 1.0 - sw_t[i]) * _dur[i]
-				var h := _ray(lp.x, lp.z, _top(lp.x, lp.z, xf.origin.y), xf.origin.y - REACH_DOWN - 0.06)
+				var h := _ray(lp.x, lp.z, _top(lp.x, lp.z, xf.origin.y), xf.origin.y - REACH_DOWN - 0.06, solid_rays)
 				if not h.is_empty():
 					_gyw[i] = maxf(float(h[0]), xf.origin.y - REACH_DOWN)
 			if not rough and not _ray2[i] and sw_t[i] > 0.45:
@@ -447,12 +484,20 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				var gmax := -INF
 				for o in [Vector3.ZERO, fw2 * 0.025]:
 					var ov: Vector3 = o
-					var h := _ray(wp.x + ov.x, wp.z + ov.z, xf.origin.y + REACH_UP, wp.y - 0.08)
+					var h := _ray(wp.x + ov.x, wp.z + ov.z, maxf(xf.origin.y + REACH_UP, wp.y + 0.05), wp.y - 0.08, solid_rays)
 					if not h.is_empty():
 						gmax = maxf(gmax, float(h[0]))
-				var under := gmax + 0.014 - wp.y
-				if under > 0.0:
+				var under := maxf(gmax + 0.014 - wp.y, 0.0)
+				if solid_rays:
+					# eased in over a couple of frames and out slowly: the paw rides over the
+					# edge instead of jumping to it for one frame
+					_grd[i] = LowPoly.damp(_grd[i], under, 45.0 if under > _grd[i] else 12.0, dt)
+					p.y += _grd[i]
+				else:
 					p.y += under
+			elif solid_rays:
+				_grd[i] = LowPoly.damp(_grd[i], 0.0, 12.0, dt)
+				p.y += _grd[i] * (1.0 - smoothstep(0.92, 1.0, s))
 			pos[i] = xf * p
 			if sw_t[i] >= 1.0:
 				pos[i] = xf * tl
@@ -490,6 +535,15 @@ func ground_y(i: int) -> float:
 	return _gyw[i] if mode[i] == SWING else pos[i].y
 
 
+## the height a paw is carrying the body at: where it stands, or (swinging) easing from where
+## it left to where it lands. no jump at lift off or touch down, so the body can follow it
+func support_y(i: int) -> float:
+	if mode[i] != SWING:
+		return pos[i].y
+	var s := clampf(sw_t[i], 0.0, 1.0)
+	return lerpf(_fyw[i], _gyw[i], s * s * (3.0 - 2.0 * s))
+
+
 ## a lift the owner made (multiplayer copy only)
 func queue_lift(i: int, dur: float, lift: float) -> void:
 	_queued.append([clampi(i, 0, 3), dur, lift, 0.0])
@@ -511,6 +565,7 @@ func _begin_swing(i: int, dur: float, lift: float, home_w: Vector3, xf: Transfor
 	_adj[i] = Vector3.ZERO
 	_clr[i] = 0.0
 	_clr_t[i] = 0.0
+	_grd[i] = 0.0
 	_aim[i] = 0
 	sw_amp[i] = clampf((home_w - pos[i]).length() / 0.1, 0.3, 1.0) if moving < 0.5 else 1.0
 
