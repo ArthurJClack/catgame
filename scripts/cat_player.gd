@@ -100,6 +100,10 @@ var auto_step := true         # glide up roots / lips underfoot (run_assist.gd).
 ## steps, kerbs and stairs up to chest height are walked up and down in stride and the rig's body
 ## rides over them behind its paws (run_assist.gd). false = the old stop + scripted hop / little falls
 static var smooth_steps := true
+## speed changes and turns are pushed through the paws that are down (see the ground accel)
+static var paw_drive := true
+const DRIVE_MAX := 6.5
+var _drive := 1.0
 ## where the visible cat (rig + camera) is relative to the capsule, world space. the capsule
 ## still moves in jumps where it has to (onto a step); the cat seen on screen walks across
 var _soft_off := Vector3.ZERO
@@ -894,6 +898,17 @@ func _physics_process(dt: float) -> void:
 			accel = GAIT_DOWN_DECEL + GAIT_DOWN_DRAG * cur
 		else:
 			accel = minf(PUSH_ACCEL, PUSH_POWER / maxf(cur, 0.5))
+		var lat_ask := TURN_ASK
+		if paw_drive and not lock_face and rig and rig.gait:
+			# the body only speeds up, slows down or turns through paws that are on the ground:
+			# with one paw down it gets half the shove of two, with none it just coasts. and
+			# a cat's legs start it at about 0.65 g, not 0.9
+			var down := 0.0
+			for pi in 4:
+				down += rig.gait.push(pi)
+			_drive = lerpf(_drive, clampf(down * 0.5, 0.15, 1.0), 1.0 - exp(-14.0 * dt))
+			accel = minf(accel, DRIVE_MAX) * _drive
+			lat_ask *= _drive
 		if lock_face and wish_len > 0.01:
 			accel = maxf(accel, LOCK_ACCEL)
 		if cur > target_speed + 0.1 and ground_time < 0.1:
@@ -913,7 +928,7 @@ func _physics_process(dt: float) -> void:
 			if rundir == Vector3.ZERO:
 				lon = dv
 				lat = Vector3.ZERO
-			hv += lon.limit_length(accel * dt) + lat.limit_length(TURN_ASK * lerpf(0.4, 1.0, clampf(cur / SPRINT_SPEED * 1.6, 0.0, 1.0)) * dt)
+			hv += lon.limit_length(accel * dt) + lat.limit_length(lat_ask * lerpf(0.4, 1.0, clampf(cur / SPRINT_SPEED * 1.6, 0.0, 1.0)) * dt)
 	elif not leap_lock:
 		# quake/cpm style air accel: tiny wish cap so strafing + turning builds speed
 		if wish_len > 0.01:

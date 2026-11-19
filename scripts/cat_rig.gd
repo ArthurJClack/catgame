@@ -112,6 +112,7 @@ static var leg_limits := true
 static var phys := true
 const K_REL := 12.0
 const ZETA := 0.8
+const LEG_PUSH_G := 3.5
 const LEG_MIN := 0.40    # shortest hip -> paw distance, share of the straight leg
 const LEG_MAX := 0.95
 const LEG_STAND := 0.68  # hip height over the paw standing, share of the straight leg
@@ -1639,12 +1640,18 @@ func _girdle_phys(h: int, y: float, yt: float, fl: Array, homes: Array, glo: flo
 		var ss := s_st / s_w if s_w > 0.0 else 0.5
 		# on one leg the end rides lower than on two (the leg gives under the whole load)
 		var yref := clampf(yt, glo, ghi) - (h0 / K_REL) * (1.0 / clampf(sup, 0.5, 2.0) - 0.5) - dip * sin(PI * ss)
-		var vref := -v0 * cos(PI * ss)
+		# (on stairs / a slope all of this rides on how fast the ground itself is climbing)
+		var vref := -v0 * cos(PI * ss) + _climb_v
 		var aff := dip * (PI / tst) * (PI / tst) * sin(PI * ss)
-		var a := -9.81 * (1.0 - S) + S * (aff + ww * (yref - y) + 2.0 * ZETA * sqrt(ww) * (vref - v))
+		# legs only push (the body never comes down faster than it falls), and no harder than
+		# about three body weights
+		# (and they stop pushing once the body is rising as fast as the stride needs: a leg
+		# that kept shoving would throw the cat into the air)
+		var ease := 1.0 - smoothstep(v0 + 0.05, v0 + 0.35, v - maxf(_climb_v, 0.0))
+		var a := -9.81 + S * ease * clampf(9.81 + aff + ww * (yref - y) + 2.0 * ZETA * sqrt(ww) * (vref - v), 0.0, 9.81 * LEG_PUSH_G)
 		if y < ymin:
 			# the leg is folded as far as it goes: it holds the body up off the paw
-			a += 9.0 * w1 * (ymin - y) - 6.0 * sqrt(w1) * minf(v, 0.0)
+			a += ease * clampf(4.0 * w1 * (ymin - y) - 4.0 * sqrt(w1) * v, 0.0, 9.81 * 5.0)
 		v += a * sdt
 		y += v * sdt
 		if y < glo:
@@ -2001,6 +2008,13 @@ func _gait_foot(g: int, i: int, home: Vector3, lift: float) -> Array:
 	return [home + _dir * along + Vector3(0, y, 0), prot, heel, load]
 
 
+## lowest a swinging paw may be put (rig space): just over the ground it is passing
+func _swing_floor(i: int) -> float:
+	if gait.mode[i] != CatGait.SWING or gait.floor_y[i] == -INF:
+		return -INF
+	return gait.floor_y[i] - global_position.y + 0.012
+
+
 func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, load: float) -> void:
 	var leg: Dictionary = legs[i]
 	var rel := global_transform.basis.orthonormalized().inverse()
@@ -2023,7 +2037,7 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 		var pa := 0.2 + load * 0.3
 		if leg_limits and climb < 0.3 and clamber < 0.3 and rear < 0.3 and gait.mode[i] != CatGait.PLANTED and float(gait.free_w[i]) < 0.5:
 			var sh_y := to_local(chest.to_global(Vector3(FRONT_SHOULDER.x * side, FRONT_SHOULDER.y, FRONT_SHOULDER.z))).y
-			foot.y = minf(foot.y, sh_y - 0.30 * (F_UP + F_LO + F_PA))
+			foot.y = minf(foot.y, maxf(sh_y - 0.30 * (F_UP + F_LO + F_PA), _swing_floor(i)))
 		var knuckle := foot + R * Vector3(0, 0.013, 0.004)
 		var wrist_t := knuckle + R * Vector3(0, F_PA * cos(pa), F_PA * sin(pa))
 		var reach := (cb.inverse() * (wrist_t - top))
@@ -2070,7 +2084,7 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 		theta = clampf(theta, 0.05, 1.65)
 		var lim_on: bool = leg_limits and climb < 0.3 and clamber < 0.3 and rear < 0.3 and _sit_h < 0.1 and float(gait.free_w[i]) < 0.5
 		if lim_on and gait.mode[i] != CatGait.PLANTED:
-			foot.y = minf(foot.y, hip.y - 0.30 * (H_TH + H_SH + H_MT))
+			foot.y = minf(foot.y, maxf(hip.y - 0.30 * (H_TH + H_SH + H_MT), _swing_floor(i)))
 		var hock_t := foot + Basis(Vector3.UP, float(_paw_yaw[i]) * 0.5) * Vector3(0, H_MT * sin(theta), H_MT * cos(theta))
 		if lim_on:
 			# the thigh swings forward to about level, no further (the knee stays beside the
@@ -2083,8 +2097,8 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 					break
 				if theta > 0.3:
 					theta = maxf(theta - 0.25, 0.3)
-				elif gait.mode[i] != CatGait.PLANTED:
-					foot.y -= up_k * 1.3
+				elif gait.mode[i] != CatGait.PLANTED and foot.y > _swing_floor(i) + 0.001:
+					foot.y = maxf(foot.y - up_k * 1.3, _swing_floor(i))
 				else:
 					break
 				hock_t = foot + Basis(Vector3.UP, float(_paw_yaw[i]) * 0.5) * Vector3(0, H_MT * sin(theta), H_MT * cos(theta))

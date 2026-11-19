@@ -94,6 +94,7 @@ var _aim: Array[int] = [0, 0, 0, 0]
 var uneven := 0.0
 var _clr_t: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _grd: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var floor_y: Array[float] = [-INF, -INF, -INF, -INF]   # ground under each swinging paw (world), -INF unknown
 var st_time := 1.0
 var gap_time := 0.0
 ## how far below the root a paw may reach / how high above it it may step (rough ground)
@@ -504,6 +505,7 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 					var h := _ray(wp.x + ov.x, wp.z + ov.z, maxf(xf.origin.y + REACH_UP, wp.y + 0.05), wp.y - 0.08, solid_rays)
 					if not h.is_empty():
 						gmax = maxf(gmax, float(h[0]))
+				floor_y[i] = gmax
 				var under := maxf(gmax + 0.014 - wp.y, 0.0)
 				if solid_rays:
 					# eased in over a couple of frames and out slowly: the paw rides over the
@@ -513,6 +515,7 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				else:
 					p.y += under
 			elif solid_rays:
+				floor_y[i] = _gyw[i] if s >= 0.92 else _fyw[i]
 				_grd[i] = LowPoly.damp(_grd[i], 0.0, 12.0, dt)
 				p.y += _grd[i] * (1.0 - smoothstep(0.92, 1.0, s))
 			pos[i] = xf * p

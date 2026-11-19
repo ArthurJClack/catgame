@@ -51,7 +51,7 @@ func _ready() -> void:
 		ps.set("real_move", args[k + 1] != "0")
 	if "--legacy" in args:
 		# every switch this overhaul added, off: the cat as it was before (before / after runs)
-		for sw in [["cat_gait.gd", "reach_lift"], ["cat_rig.gd", "paw_free"], ["cat_rig.gd", "reach_sag"], ["cat_rig.gd", "follow_fast"], ["cat_rig.gd", "smooth_ref"], ["cat_gait.gd", "solid_rays"], ["cat_player.gd", "smooth_steps"], ["cat_player.gd", "real_move"], ["cat_rig.gd", "phys"], ["cat_rig.gd", "leg_limits"], ["cat_gait.gd", "pendulum"], ["cat_rig.gd", "load_shift"], ["cat_gait.gd", "support_rule"]]:
+		for sw in [["cat_gait.gd", "reach_lift"], ["cat_rig.gd", "paw_free"], ["cat_rig.gd", "reach_sag"], ["cat_rig.gd", "follow_fast"], ["cat_rig.gd", "smooth_ref"], ["cat_gait.gd", "solid_rays"], ["cat_player.gd", "smooth_steps"], ["cat_player.gd", "real_move"], ["cat_rig.gd", "phys"], ["cat_rig.gd", "leg_limits"], ["cat_gait.gd", "pendulum"], ["cat_rig.gd", "load_shift"], ["cat_gait.gd", "support_rule"], ["cat_player.gd", "paw_drive"]]:
 			var sc: Script = load("res://scripts/" + sw[0])
 			if sc.get(sw[1]) != null:
 				sc.set(sw[1], false)
