@@ -117,6 +117,7 @@ const LEG_HANG := 0.32
 const LEG_MIN := 0.40    # shortest hip -> paw distance, share of the straight leg
 const LEG_MAX := 0.95
 const LEG_STAND := 0.68  # hip height over the paw standing, share of the straight leg
+var _phys_ry := NAN
 var _gv := [0.0, 0.0]    # vertical speed of the fore / hind end (m/s, world)
 var _sup := [2.0, 2.0]   # how many legs' worth of support each end has right now
 var _hop := 0.0
@@ -896,7 +897,7 @@ func animate(dt: float) -> void:
 	if on_floor:
 		if not _prev_floor:
 			_abs_imp = clampf(-_vy_prev, 0.0, 8.0)
-			_land_fv += _abs_imp * 0.5
+			_land_fv += _abs_imp * (0.2 if phys else 0.5)
 			_abs_delay = 0.07
 			for j in TAIL_N:
 				_tpv[j] -= _abs_imp * 0.9 * float(j) / TAIL_N
@@ -916,7 +917,7 @@ func animate(dt: float) -> void:
 	if _abs_delay >= 0.0:
 		_abs_delay -= dt
 		if _abs_delay < 0.0:
-			_land_v += _abs_imp * 0.42
+			_land_v += _abs_imp * (0.17 if phys else 0.42)
 	_launch = move_toward(_launch, 0.0, dt * 5.5)
 	var air_target := 1.0 if _air_timer > 0.03 else 0.0
 	_air_w = move_toward(_air_w, air_target, dt * (9.0 if air_target > _air_w else 14.0))
@@ -1136,16 +1137,53 @@ func animate(dt: float) -> void:
 	# following a steady climb at this rate trails it by speed / rate: lead by that much, so
 	# running up stairs the body rides at its real height over the steps instead of in them
 	var glead := clampf(_climb_v / grate, -0.12, 0.12) if (smooth_ref and rough) else 0.0
-	if phys and use_planting and plantw > 0.5:
+	if phys and use_planting and plantw > 0.5 and on_floor:
 		var ys := [_fgy, _hgy]
 		for h in 2:
 			ys[h] = _girdle_phys(h, float(ys[h]), float(gy[h]), fl, homes, glo, ghi, dt)
 		_fgy = ys[0]
 		_hgy = ys[1]
+	elif phys and use_planting and climb < 0.3 and clamber < 0.3:
+		# off the ground (or just touching down): the body still has its own speed. a jump
+		# starts with the legs shoving it after the take off over a few hundredths of a
+		# second (no harder than they can push), in the air it settles over its legs, and
+		# at a landing it carries on down until the legs have stopped it
+		var ys2 := [_fgy, _hgy]
+		# (the root as drawn this frame, not the physics velocity: the two differ by a frame)
+		var droot := gx.origin.y - _phys_ry if not is_nan(_phys_ry) and absf(gx.origin.y - _phys_ry) < 0.4 else 0.0
+		var rvy := droot / dt if dt > 0.0 else 0.0
+		for h in 2:
+			var full: float = (F_UP + F_LO + F_PA) if h == 0 else (H_TH + H_SH + H_MT)
+			var y: float = ys2[h]
+			var v: float = _gv[h]
+			var n := clampi(int(ceil(dt / 0.004)), 1, 10)
+			var sdt := dt / n
+			# (a take off shove is the hardest thing the legs do: up to 12 body weights for a
+			# few hundredths of a second, until the controller grows a real crouch and push)
+			var push_up := 9.81 * (12.0 if (not on_floor and _air_timer < 0.09) else (LEG_PUSH_G if on_floor else 2.0))
+			var lo := -full * (LEG_STAND - LEG_HANG)
+			for _k in n:
+				var a := -9.81 * (0.0 if on_floor else 1.0) + clampf(900.0 * (0.0 - y) + 2.0 * ZETA * 30.0 * (rvy - v), -9.81 * 2.0, push_up)
+				if y < lo:
+					# the legs are as long (take off) or as short (landing) as they go
+					a += clampf(6000.0 * (lo - y) + 120.0 * (rvy - v), 0.0, 400.0)
+				v += a * sdt
+				y += (v - rvy) * sdt
+				if y > 0.06:
+					y = 0.06
+					v = minf(v, rvy)
+				elif on_floor and y < lo - 0.025:
+					y = lo - 0.025   # belly nearly on the ground: that's as far as a landing goes
+					v = maxf(v, rvy)
+			_gv[h] = v
+			ys2[h] = y
+		_fgy = ys2[0]
+		_hgy = ys2[1]
 	else:
 		_gv = [0.0, 0.0]
 		_fgy = LowPoly.damp(_fgy, clampf(float(gy[0]) + glead, glo, ghi) * plantw, grate, dt)
 		_hgy = LowPoly.damp(_hgy, clampf(float(gy[1]) + glead, glo, ghi) * plantw, grate, dt)
+	_phys_ry = gx.origin.y
 	for h in 2:
 		if groll_ok[h] or not rough:
 			_groll[h] = LowPoly.damp(_groll[h], float(groll_t[h]) * plantw, 10.0, dt)
