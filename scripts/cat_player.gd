@@ -82,6 +82,30 @@ var mouse_sens := 0.0022
 var invert_y := false        # settings (game_settings.gd)
 var calm_cam := false        # settings: head bob off, the fp camera glides instead of riding every step
 var _calm_y := 0.0
+## stairs / step ups / curbs: the body pops up (step_up glide, floor snap) or hops up (quick mantle)
+## a step at a time, the camera's height glides along a spring instead (every view). false = old
+var step_cam := true
+const STEP_CAM_W := 18.0       # spring rate (rad/s): a 17 cm step settles in ~0.2 s
+const STEP_CAM_SOFT := 0.09    # lag (m) past which the spring stiffens up
+const STEP_CAM_V_TAU := 0.09   # climb rate low pass (s): averages a flight of steps into one slope
+var step_cam_off := 0.0        # camera height minus body height (m), this physics tick
+var _sc_off_prev := 0.0
+var _sc_y := 0.0
+var _sc_v := 0.0
+var _sc_tv := 0.0
+var _sc_body_y := 0.0
+var _sc_ok := false
+var _sc_stairs := false
+var _hs := Vector4.ZERO   # head cam stair spring: y, v, target v, last raw y
+var _hs_ok := false
+var _hs_floor := -INF
+var _hs_hv := Vector3.ZERO
+var _hs_last := Vector3.INF
+var _sc_air := 0.0
+var _sc_jumped := false
+var _sc_act := 0.0
+var _sc_ground_t := 0.0
+var _sc_last := Vector3.ZERO
 var third_person := false
 var view_mode := 0            # 0 first person, 1 third person (behind), 2 orbit
 var orb_yaw := 0.0            # where you're looking (all views). the body (yaw) turns to run where you steer
@@ -525,6 +549,7 @@ func _event(name: String) -> void:
 
 func _physics_process(dt: float) -> void:
 	_phys_prev = global_position
+	_sc_off_prev = step_cam_off
 	var inp := _read_input()
 	if combat.locks_move():
 		# both fore paws are holding something: a cat can't walk, hop or dodge on its hind legs alone
@@ -1050,11 +1075,15 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	eye = eye.lerp(Vector3(0, 0.27, 0) + inv * (face_n * 0.03), w_climb)
 	# step smoothing: floor snapping pops the body up/down small steps; the eye glides instead
 	var ty := global_position.y
-	if is_on_floor() and not (mantling or clambering or climbing) and absf(_smooth_y - ty) < 0.2:
-		_smooth_y = LowPoly.damp(_smooth_y + velocity.y * dt, ty, 18.0, dt)
+	if step_cam:
+		_step_cam(dt)
+		eye.y += step_cam_off
 	else:
-		_smooth_y = ty
-	eye.y += _smooth_y - ty
+		if is_on_floor() and not (mantling or clambering or climbing) and absf(_smooth_y - ty) < 0.2:
+			_smooth_y = LowPoly.damp(_smooth_y + velocity.y * dt, ty, 18.0, dt)
+		else:
+			_smooth_y = ty
+		eye.y += _smooth_y - ty
 	eye_local = _safe_eye(eye)
 	var strafe := global_transform.basis.x.dot(velocity)
 	cam_roll = LowPoly.damp(cam_roll, clampf(-strafe * 0.004, -0.02, 0.02), 6.0, dt)
@@ -1148,7 +1177,9 @@ func _process(_dt: float) -> void:
 		p = global_position   # teleport / respawn: don't smear
 	var off := global_transform.basis.inverse() * (p - global_position)
 	if not _head_cam_on():
-		cam_pivot.position = eye_local + off
+		# eye_local carries this tick's stair glide; swap it for the glide in between ticks, like the body
+		var sc := Vector3(0, step_cam_frame() - step_cam_off, 0) if step_cam else Vector3.ZERO
+		cam_pivot.position = eye_local + off + sc
 	# (head cam: the pivot keeps last frame's head spot until _place_head_cam moves it, so the
 	# lock aims from where the camera really is)
 	lock.frame_steer(_dt)
@@ -1366,6 +1397,36 @@ func _place_head_cam(dt: float) -> void:
 	head_cam_blocked = f < 1.0
 	if head_cam_blocked:
 		to = from.lerp(to, f)   # head in a wall / under a shelf: the eye stays on this side of it
+	if step_cam:
+		# stairs: the head glides up/down the steps, not pop by pop. the glide only goes as far as
+		# open space allows (lagging low it would sink into the next riser), and then gives way
+		var glide := Vector3(to.x, _head_step_y(to.y, dt), to.z)
+		if dt > 0.0 and _hs_last != Vector3.INF and _hs_last.distance_to(to) < 0.5:
+			_hs_hv = _hs_hv.lerp(Vector3(to.x - _hs_last.x, 0.0, to.z - _hs_last.z) / dt, 1.0 - exp(-dt / 0.05))
+		_hs_last = to
+		if glide.y < to.y - 0.005:
+			# gliding up behind the head: look at the steps just ahead of the eye and lift the
+			# glide before it reaches a riser, so it eases over the nosing instead of bumping it
+			var hv := _hs_hv   # how the eye is really moving (velocity is zero during a quick mantle)
+			var fl := _cam_floor(to, to.y)
+			for ahead in [0.08, 0.16, 0.24]:
+				fl = maxf(fl, _cam_floor(to + hv * ahead, to.y))
+			fl = minf(fl + 0.035, to.y)
+			if _hs_floor == -INF:
+				_hs_floor = minf(fl, glide.y)   # starts under the glide, then eases up
+			_hs_floor = fl if fl < _hs_floor else LowPoly.damp(_hs_floor, fl, 50.0, dt)
+			if glide.y < _hs_floor:
+				glide.y = _hs_floor
+				_hs.x = glide.y
+				_hs.y = maxf(_hs.y, _hs.z)
+		else:
+			_hs_floor = -INF
+		var g := _sweep(to, glide, 0.03) if absf(glide.y - to.y) > 0.001 else 1.0
+		if g < 1.0:
+			glide = to.lerp(glide, maxf(g - 0.05, 0.0))
+			_hs.x = glide.y
+			_hs.y = _hs.z
+		to = glide
 	if calm_cam:
 		# comfort setting: the eye glides over the head's step bob and never rolls
 		_calm_y = LowPoly.damp(_calm_y, to.y, 7.0, dt) if absf(_calm_y - to.y) < 0.25 else to.y
@@ -2195,6 +2256,129 @@ func _sweep(a: Vector3, b: Vector3, r: float) -> float:
 	return res[0]
 
 
+## stair camera: the camera's height (_sc_y) chases the body's height on a critically damped
+## spring whose target speed is the body's climb rate low passed over a few steps. a flight of
+## steps (each one a pop or a quick hop) becomes one even slope, a single curb a soft glide,
+## a ramp is tracked with no lag. in the air, climbing, clambering or rearing the spring lets go
+## fast (no lag on jumps), and big moves (teleport, respawn) snap.
+func _step_cam(dt: float) -> void:
+	var ty := global_position.y
+	var moved := global_position.distance_to(_sc_last)
+	_sc_last = global_position
+	if not _sc_ok or absf(ty - _sc_y) > 0.6 or dt <= 0.0 or moved > 0.4:
+		_hs_ok = false   # teleport / respawn / lab reset: the head cam snaps too
+		_sc_act = 0.0
+		_sc_ok = true
+		_sc_y = ty
+		_sc_v = 0.0
+		_sc_tv = 0.0
+		_sc_body_y = ty
+		step_cam_off = 0.0
+		return
+	var v := (ty - _sc_body_y) / dt
+	var prev_off := _sc_y - _sc_body_y
+	_sc_body_y = ty
+	# running down steps the cat drops off each one (a short fall, not a jump): keep gliding through that
+	if is_on_floor() or mantling:
+		_sc_air = 0.0
+		_sc_jumped = false
+	else:
+		if _sc_air == 0.0 and velocity.y > 0.6:
+			_sc_jumped = true
+		_sc_air += dt
+	var drop := _sc_air > 0.0 and _sc_air < 0.4 and not _sc_jumped
+	# only while the ground under the paws is actually going up or down (steps, curbs, ramps): on
+	# flat ground the camera rides the head exactly like before (pounce crouch, swats, dodges, kicks)
+	var grounded := is_on_floor() or (mantling and mantle_quick > 0.0)
+	# (moving up or down more than its own velocity explains: a step pop, a floor snap, a quick
+	# mantle, a ramp. a jump or a hop moves it by its velocity and doesn't count)
+	# (a landing doesn't count either: it has to have been on the ground a moment already, so the
+	# floor snap settling a pounce landing isn't taken for a step)
+	if grounded and _sc_ground_t > 0.06 and absf(v - velocity.y) > 0.25:
+		_sc_act = 0.6
+	else:
+		_sc_act = maxf(0.0, _sc_act - dt)
+	_sc_ground_t = _sc_ground_t + dt if grounded else 0.0
+	var stairs := _sc_act > 0.0 and (grounded or drop) and not (clambering or climbing or scratching) and w_kick < 0.05
+	_sc_stairs = stairs
+	if stairs:
+		_sc_tv = lerpf(_sc_tv, clampf(v, -6.0, 6.0), 1.0 - exp(-dt / _sc_tau()))
+		var r := _stair_spring(_sc_y, _sc_v, _sc_tv, ty, dt, Vector2(velocity.x, velocity.z).length())
+		_sc_y = r.x
+		_sc_v = r.y
+	else:
+		# off the stairs: hand the camera straight back to the body, just without a snap
+		_sc_tv = 0.0   # (a landing hands over with no climb rate)
+		_sc_y = ty + prev_off * exp(-14.0 * dt)   # the offset fades, the camera moves with the body
+		_sc_v = clampf(v, -3.0, 3.0)
+	# never sink the eye through the step it's on or float far over it
+	_sc_y = clampf(_sc_y, ty - 0.3, ty + 0.2)
+	step_cam_off = _sc_y - ty
+
+
+## climb rate low pass time, shorter on a faster run (same stretch of stairs)
+func _sc_tau() -> float:
+	return STEP_CAM_V_TAU / maxf(1.0, Vector2(velocity.x, velocity.z).length() / 3.2)
+
+
+## height of whatever the eye would sit over at p (sphere cast down from a bit above `top`),
+## -INF when there's nothing within reach
+func _cam_floor(p: Vector3, top: float) -> float:
+	var a := Vector3(p.x, top + 0.12, p.z)
+	var f := _sweep(a, a + Vector3.DOWN * 0.5, 0.03)
+	if f >= 1.0:
+		return -INF
+	if f <= 0.0:
+		return a.y   # starts inside something: it's at least that high there
+	return a.y - 0.5 * f - 0.03
+
+
+## one exact critically damped spring step (no overshoot, stable at any tick rate) of a camera
+## height y (speed yv) toward a target now at `to` moving at tv. falling far behind (a gallop up
+## tall steps) stiffens it smoothly instead of hitting a hard limit. returns (y, yv)
+## faster runs (hspd m/s) tighten it too, so it smooths over about the same stretch of stairs
+static func _stair_spring(y: float, yv: float, tv: float, to: float, dt: float, hspd: float) -> Vector2:
+	var x := y - (to - tv * dt)   # the target moved along at tv during this step
+	var w := STEP_CAM_W * maxf(1.0, hspd / 3.2) * maxf(1.0, absf(x) / STEP_CAM_SOFT)
+	var u := yv - tv
+	var e := exp(-w * dt)
+	var j := u + w * x
+	return Vector2(to + (x + j * dt) * e, tv + (u - w * j * dt) * e)
+
+
+## head cam version of the stair spring, per rendered frame on the head's world height. it rides
+## out the body's step pops and the rig's own step-up pose (the head ducks and rises on every quick
+## mantle) in one go. same rules as _step_cam: off the stairs it hands straight back to the head
+func _head_step_y(raw: float, dt: float) -> float:
+	if not _hs_ok or absf(raw - _hs.x) > 0.6 or dt <= 0.0:
+		_hs_ok = true
+		_hs = Vector4(raw, 0.0, 0.0, raw)
+		return raw
+	var v := (raw - _hs.w) / dt
+	var y := _hs.x
+	var yv := _hs.y
+	var tv := _hs.z
+	if _sc_stairs:
+		tv = lerpf(tv, clampf(v, -6.0, 6.0), 1.0 - exp(-dt / _sc_tau()))
+		var r := _stair_spring(y, yv, tv, raw, dt, Vector2(velocity.x, velocity.z).length())
+		y = r.x
+		yv = r.y
+	else:
+		tv = 0.0
+		y = raw + (_hs.x - _hs.w) * exp(-14.0 * dt)   # the offset fades, the camera moves with the head
+		yv = clampf(v, -3.0, 3.0)
+	y = clampf(y, raw - 0.3, raw + 0.2)
+	_hs = Vector4(y, yv, tv, raw)
+	return y
+
+
+## render rate step camera offset (between the last two physics ticks, like the body)
+func step_cam_frame() -> float:
+	if not step_cam:
+		return 0.0
+	return lerpf(_sc_off_prev, step_cam_off, Engine.get_physics_interpolation_fraction())
+
+
 ## keeps the first person eye inside open space: swept from the middle of the body
 ## so it never pokes through a wall, ceiling, shelf underside or the climbed surface
 func _safe_eye(eye_local: Vector3) -> Vector3:
@@ -2208,7 +2392,7 @@ func _safe_eye(eye_local: Vector3) -> Vector3:
 
 ## orbit camera: pivot above the cat, boom pulled in instantly on contact, eased back out
 func _third_person_cam(dt: float) -> void:
-	var piv := _safe_eye(Vector3(0, 0.45, 0))
+	var piv := _safe_eye(Vector3(0, 0.45 + (step_cam_off if step_cam else 0.0), 0))
 	eye_local = piv
 	var a := global_transform * piv
 	var want := 1.25
@@ -2221,7 +2405,7 @@ func _third_person_cam(dt: float) -> void:
 
 ## free orbit around the cat: mouse orbits, scroll zooms, boom pulls in on contact
 func _orbit_cam(dt: float) -> void:
-	var piv := _safe_eye(Vector3(0, 0.2, 0))
+	var piv := _safe_eye(Vector3(0, 0.2 + (step_cam_off if step_cam else 0.0), 0))
 	eye_local = piv
 	var a := global_transform * piv
 	var b := a + Basis(Vector3.UP, orb_yaw) * Basis(Vector3.RIGHT, orb_pitch) * Vector3(0, 0, orb_dist)
