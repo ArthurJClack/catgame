@@ -1696,6 +1696,9 @@ func _girdle_phys(h: int, y: float, yt: float, fl: Array, homes: Array, glo: flo
 			a += ease * clampf(4.0 * w1 * (ymin - y) - 4.0 * sqrt(w1) * v, 0.0, 9.81 * 5.0)
 		v += a * sdt
 		y += v * sdt
+		if y < ymin - 0.03:
+			y = ymin - 0.03   # bottomed out (a hard landing): belly nearly on the paws
+			v = maxf(v, 0.0)
 		if y < glo:
 			y = glo
 			v = maxf(v, 0.0)
