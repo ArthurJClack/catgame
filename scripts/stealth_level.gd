@@ -32,6 +32,10 @@ static var sweepers: Array[Node3D] = []
 
 
 # ------------------------------------------------------------------ helpers
+## the dark puddles on the pier (xz rects): splashy underfoot
+const PUDDLES := [Rect2(-3.8, 8.45, 1.6, 1.1), Rect2(3.7, 11.95, 1.6, 1.1), Rect2(-12.8, 15.45, 1.6, 1.1), Rect2(13.2, 8.95, 1.6, 1.1)]
+
+
 static func box(center: Vector3, size: Vector3, kind: String, tint := Color.WHITE, collide := true, density := 1.0, rot_y := 0.0, groups: Array = [], emission := 0.0, parent: Node = null) -> Node3D:
 	var node: Node3D
 	if collide:
@@ -41,6 +45,7 @@ static func box(center: Vector3, size: Vector3, kind: String, tint := Color.WHIT
 		bs.size = size
 		cs.shape = bs
 		sb.add_child(cs)
+		sb.set_meta("surface", kind)     # what the cat walks on: steps + how loud it is (puzzle_dog.gd)
 		node = sb
 	else:
 		node = Node3D.new()
@@ -573,7 +578,9 @@ static func _dock() -> void:
 	for k in 8:
 		box(Vector3(-18.0 + k * 5.0, 0.003, 7.5), Vector3(2.5, 0.006, 0.15), "paint", T_YEL, false)
 	# puddles (dark glossy patches)
-	for p in [Vector3(-3, 0, 9), Vector3(4.5, 0, 12.5), Vector3(-12, 0, 16), Vector3(14, 0, 9.5)]:
+	for r in PUDDLES:
+		var rc: Vector2 = (r as Rect2).get_center()
+		var p := Vector3(rc.x, 0, rc.y)
 		box(p + Vector3(0, 0.004, 0), Vector3(1.6, 0.008, 1.1), "water", Color(0.4, 0.5, 0.6), false, 1.0, 0.3, [], 0.2)
 	# sea
 	var sea := MeshInstance3D.new()

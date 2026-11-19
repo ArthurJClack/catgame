@@ -63,6 +63,8 @@ func _ready() -> void:
 		still_cam.current = true
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if si < 0 and not tour:
+		Puzzles.docks(self, player)   # quiet paws: the sleeping guard dog (puzzle_dog.gd)
 
 
 func _setup_env() -> void:

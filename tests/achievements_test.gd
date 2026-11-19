@@ -67,7 +67,7 @@ func _run() -> void:
 		root.get_texture().get_image().save_png(shots + "/achievement_card.png")
 	save.data.stats.rats = 12
 	Puzzles.solved["knock_it_off"] = 1
-	await _wait(2.0, func(): return ach.has("ratter") and ach.has("knock_it_off"))
+	await _wait(5.0, func(): return ach.has("ratter") and ach.has("knock_it_off"))   # wall clock: xvfb fps is low on the busier farm
 	_ok(ach.has("ratter") and ach.has("knock_it_off"), "rats + puzzle unlock theirs")
 	_ok(not ach.has("treats_50") and not ach.has("exterminator"), "but not the bigger ones")
 	await _wait(1.5)
