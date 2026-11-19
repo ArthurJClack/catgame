@@ -113,6 +113,7 @@ static var phys := true
 const K_REL := 12.0
 const ZETA := 0.8
 const LEG_PUSH_G := 6.0
+const LEG_HANG := 0.32
 const LEG_MIN := 0.40    # shortest hip -> paw distance, share of the straight leg
 const LEG_MAX := 0.95
 const LEG_STAND := 0.68  # hip height over the paw standing, share of the straight leg
@@ -1633,7 +1634,10 @@ func _girdle_phys(h: int, y: float, yt: float, fl: Array, homes: Array, glo: flo
 				sup += w
 				s_st += w * float(gait.st_s[i])
 				s_w += w
-			ymin = maxf(ymin, py - h0 + sqrt(maxf(lmin * lmin - d2, 0.0)))
+			# room for the folded leg: at least its shortest length, and the paw at least 0.3
+			# of a leg under the joint however far forward it reaches (onto a step the cat
+			# lifts that end of its body, it doesn't put a paw up beside its shoulder)
+			ymin = maxf(ymin, py - h0 + maxf(sqrt(maxf(lmin * lmin - d2, 0.0)), full * LEG_HANG))
 		_sup[h] = sup
 		var S := clampf(sup, 0.0, 1.0)
 		var ww := w1 * clampf(sup, 0.5, 2.0)

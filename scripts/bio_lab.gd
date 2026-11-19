@@ -454,8 +454,12 @@ func _process(dt: float) -> void:
 		if cur.has("c%d" % i):
 			# 2.5 cm in from the pad (toward the body): a paw resting on a face is not in it
 			var cp: Vector3 = cur["c%d" % i]
-			var d := _inside(cp + Vector3.UP * 0.02 + (player.global_position + Vector3.UP * 0.1 - cp).normalized() * 0.02) if not on_wall else 0.0
+			# (a planted paw is probed straight up: toes may stand right against a riser)
+			var probe: Vector3 = cp + Vector3.UP * 0.03 if g.mode[i] == CatGait.PLANTED else cp + Vector3.UP * 0.02 + (player.global_position + Vector3.UP * 0.1 - cp).normalized() * 0.02
+			var d := _inside(probe) if not on_wall else 0.0
 			if d > 0.01:
+				if dbg == "clip":
+					print("  clip %s mode %s sw %.2f t=%.2f paw rel y %.3f gpos rel y %.3f floor %.3f" % [LEG[i], "PSF"[g.mode[i]], g.sw_t[i], t, cp.y - rig.global_position.y, (g.pos[i] as Vector3).y - rig.global_position.y, g.floor_y[i] - rig.global_position.y])
 				m.clip += 1
 				if d > m.clip_max:
 					m.clip_max = d
