@@ -39,7 +39,7 @@ func _ready() -> void:
 	process_priority = 10
 	var args := OS.get_cmdline_user_args()
 	test_mode = "--arenatest" in args or "--combattest" in args or "--locktest" in args
-	show_mode = "--arenashow" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--lockshow" in args
+	show_mode = "--arenashow" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--lockshow" in args or "--landshow" in args
 	_setup_env()
 	_build_pit()
 	player = CatPlayer.new()
@@ -55,7 +55,7 @@ func _ready() -> void:
 	if test_mode or show_mode:
 		help_label.visible = false
 		player.bot = {"move": Vector2.ZERO, "stamina": true}
-		var t: ArenaTest = CombatTest.new() if ("--combattest" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args) else ArenaTest.new()
+		var t: ArenaTest = CombatTest.new() if ("--combattest" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--landshow" in args) else ArenaTest.new()
 		if "--locktest" in args or "--lockshow" in args:
 			t = LockTest.new()
 		t.arena = self

@@ -47,9 +47,11 @@ const HOP_HEIGHT := 1.0
 const HOP_TAP := 0.12          # let go before this = plain hop
 const POUNCE_HOLD := 0.45      # held this long on the ground = pounce mode
 const HOP_CHARGE_MUL := 1.6    # a hop let go just before pounce mode goes this much higher (1.6 m)
+const HOP_TAP_MUL := 0.14      # a plain tap of space (no hold) is a tiny hop (~14 cm), holding builds it up
 var _sp_state := 0             # 0 up, 1 held on the ground, 2 held in the air, 3 pounce mode
 var _sp_t := 0.0
 var _hop_charge := 0.0
+var _hop_mul := 1.0
 const POUNCE_MIN := 0.6
 const POUNCE_MAX := 1.8
 const CHARGE_TIME := 0.45
@@ -156,6 +158,10 @@ var leap_lock := false        # aimed leap in flight: no air steering, it's alre
 var stick_armed := false      # paw pounce in flight: stick the landing (no slide, no steps)
 var land_stick := 0.0         # planted after a stuck landing
 var pounce_air := false       # launched as a pounce/leap: pin on landing
+var pounce_land := Vector3.INF # where the pounce's capsule trace says the feet come down
+var pounce_yaw := 0.0          # the body faces the flight the whole way (paw spots are laid out on it)
+var pounce_prey: Node = null   # what it's pouncing on: no collision with it till the paws are down
+var _spots_t := 0.0            # paw spots stay put this long after touch down (pin pose + gait)
 var clambering := false
 var clamber_phase := 0        # 0 grab, 1 hang, 2 pull
 var clamber_t := 0.0
@@ -268,6 +274,7 @@ var lock_target: Node3D:
 var _aim_root: Node3D
 var _aim_ring: MeshInstance3D
 var _aim_dots: Array[MeshInstance3D] = []
+var _paw_rings: Array[MeshInstance3D] = []   # pounce aim: where each paw comes down (LF RF LH RH)
 var _marks: Array[Node3D] = []
 
 
@@ -359,7 +366,7 @@ func _build_aim_marker() -> void:
 	_aim_ring.material_override = m.duplicate()
 	_aim_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_aim_root.add_child(_aim_ring)
-	for k in 32:     # dense enough to read as a line: the exact path the pounce / leap flies
+	for k in 48:     # dense enough to read as a line: the exact path the pounce / leap flies
 		var d := MeshInstance3D.new()
 		d.mesh = LowPoly.box(0.0)
 		d.material_override = m
@@ -367,6 +374,19 @@ func _build_aim_marker() -> void:
 		d.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_aim_root.add_child(d)
 		_aim_dots.append(d)
+	var tor := TorusMesh.new()
+	tor.inner_radius = 0.017
+	tor.outer_radius = 0.026
+	tor.rings = 16
+	tor.ring_segments = 4
+	for k in 4:
+		var r := MeshInstance3D.new()
+		r.mesh = tor
+		r.material_override = m.duplicate()
+		r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		r.visible = false
+		_aim_root.add_child(r)
+		_paw_rings.append(r)
 	_aim_root.visible = false
 
 
@@ -464,6 +484,7 @@ func _read_input() -> Dictionary:
 	d.jump = sp.jump
 	d.pounce = sp.pounce
 	d.hop_charge = sp.hop_charge
+	d.hop_mul = sp.hop_mul
 	return d
 
 
@@ -471,7 +492,7 @@ func _read_input() -> Dictionary:
 ## POUNCE_HOLD = pounce mode. off the ground a press is a jump right away (wall kicks, climbing
 ## leap offs, scramble holds), and walking off an edge mid hold hops right then (coyote)
 func _space_filter(held: bool, on_ground: bool, dt: float) -> Dictionary:
-	var out := {"jump": false, "pounce": false, "hop_charge": 0.0}
+	var out := {"jump": false, "pounce": false, "hop_charge": 0.0, "hop_mul": HOP_TAP_MUL}
 	match _sp_state:
 		0:
 			if held:
@@ -486,6 +507,7 @@ func _space_filter(held: bool, on_ground: bool, dt: float) -> Dictionary:
 				_sp_state = 2 if held else 0
 				out.jump = true
 				out.hop_charge = clampf((_sp_t - HOP_TAP) / (POUNCE_HOLD - HOP_TAP), 0.0, 1.0)
+				out.hop_mul = lerpf(HOP_TAP_MUL, HOP_CHARGE_MUL, out.hop_charge)
 			elif held:
 				_sp_t += dt
 				if _sp_t >= POUNCE_HOLD:
@@ -495,6 +517,7 @@ func _space_filter(held: bool, on_ground: bool, dt: float) -> Dictionary:
 				_sp_state = 0
 				out.jump = true
 				out.hop_charge = clampf((_sp_t - HOP_TAP) / (POUNCE_HOLD - HOP_TAP), 0.0, 1.0)
+				out.hop_mul = lerpf(HOP_TAP_MUL, HOP_CHARGE_MUL, out.hop_charge)
 		2:
 			if held:
 				out.jump = true
@@ -630,6 +653,9 @@ func _physics_process(dt: float) -> void:
 		# coming off a wall kick the body twists round to where it's flying, however the keys are held
 		var ky := atan2(-velocity.x, -velocity.z)
 		yaw += clampf(wrapf(ky - yaw, -PI, PI), -16.0 * dt, 16.0 * dt)
+	if pounce_air and leap_lock and not is_on_floor():
+		# a pounce flies straight: the body squares to the flight (fast) and stays on it
+		yaw += clampf(wrapf(pounce_yaw - yaw, -PI, PI), -18.0 * dt, 18.0 * dt)
 	rotation.y = yaw
 	last_event_t += dt
 	toast_t += dt
@@ -807,6 +833,8 @@ func _physics_process(dt: float) -> void:
 	if jump_pressed:
 		jump_buffer = 0.12
 		_hop_charge = inp.get("hop_charge", 0.0)
+		# humans: the space filter says how big (a tap is tiny). bots: plain hop scaled by charge
+		_hop_mul = inp.get("hop_mul", lerpf(1.0, HOP_CHARGE_MUL, _hop_charge))
 	var can_ground_jump := grounded or (air_time < 0.09 and not jumped_this_air)
 
 	# hold q / mouse3 = aimed leap (movement). the one pounce lives on both paws (cat_combat.gd)
@@ -836,7 +864,7 @@ func _physics_process(dt: float) -> void:
 			charge = 0.0
 	elif jump_buffer > 0.0 and can_ground_jump:
 		# a cat always gets off the ground, but spent it's a lower hop
-		var hh := HOP_HEIGHT * lerpf(1.0, HOP_CHARGE_MUL, _hop_charge)
+		var hh := HOP_HEIGHT * _hop_mul
 		if not stamina.spend(CatStamina.HOP * (1.0 + _hop_charge)):
 			hh = HOP_HEIGHT * 0.55
 		_hop_charge = 0.0
@@ -960,6 +988,10 @@ func _physics_process(dt: float) -> void:
 			wall_sliding = false
 	velocity.x = hv.x
 	velocity.z = hv.z
+	if _spots_t > 0.0:
+		_spots_t -= dt
+		if _spots_t <= 0.0 or not grounded:
+			_clear_spots()
 	if land_stick > 0.0:
 		# stuck the pounce landing: all four paws planted where it came down
 		land_stick -= dt
@@ -1983,6 +2015,8 @@ func _update_aim() -> void:
 	(_aim_ring.material_override as StandardMaterial3D).albedo_color = col
 	var ring_at := p if kind == "land" else ledge_point - ledge_n * 0.04
 	_aim_ring.global_transform = Transform3D(Basis().scaled(Vector3(0.16, 0.004, 0.16)), ring_at + Vector3.UP * 0.006)
+	for r in _paw_rings:
+		r.visible = false
 	var start := feet + Vector3.UP * 0.12
 	for k in _aim_dots.size():
 		var tt := t_total * float(k + 1) / (_aim_dots.size() + 1)
@@ -2015,12 +2049,47 @@ func _on_land() -> void:
 		velocity.x = 0.0
 		velocity.z = 0.0
 		combat.land_recover()
+		var off := Vector2(global_position.x - pounce_land.x, global_position.z - pounce_land.z).length() if pounce_land != Vector3.INF else 99.0
+		if off < 0.12 and absf(global_position.y - pounce_land.y) < 0.1:
+			# right where the circle said: settle onto the exact spot (the last physics step can
+			# slide a couple of cm along the floor) and plant the paws on their circles
+			var tp := Vector3(pounce_land.x, global_position.y, pounce_land.z)
+			if _fits(tp):
+				global_position = tp
+				_phys_curr = tp
+			yaw = pounce_yaw
+			rotation.y = yaw
+			_spots_t = 1.4
+		else:
+			_clear_spots()   # it hit something else on the way: the paws find their own footing
+	elif _spots_t <= 0.0:
+		_clear_spots()
+	_end_pounce_prey()
 	stick_armed = false
 	if pounce_air:
 		pounce_air = false
 		rig.pin = 1.0
 		paws.pin()
 		_pin_check()
+
+
+## the four spots a pounce's paws come down on (the same ones the aim circles show)
+func set_spots(spots: Array) -> void:
+	rig.pounce_spots = spots
+	rig.gait.land_spots = spots
+	_spots_t = 0.0
+
+
+func _clear_spots() -> void:
+	rig.pounce_spots = []
+	rig.gait.land_spots = []
+	_spots_t = 0.0
+
+
+func _end_pounce_prey() -> void:
+	if pounce_prey != null and is_instance_valid(pounce_prey) and pounce_prey is PhysicsBody3D:
+		remove_collision_exception_with(pounce_prey)
+	pounce_prey = null
 
 
 ## forepaws come down together: anything small under them gets pinned
