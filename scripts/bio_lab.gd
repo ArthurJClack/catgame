@@ -490,7 +490,7 @@ func _process(dt: float) -> void:
 			ln += " %s %s y%+.3f z%+.3f gy%+.3f |" % [LEG[i], "PSF"[g.mode[i]], (g.pos[i] as Vector3).y - rg2.y, (g.pos[i] as Vector3).z - rg2.z, g.ground_y(i) - rg2.y]
 		print(ln)
 	if dbg == "phys":
-		var ln2 := "  t=%.3f v %.2f fgy %+.3f hgy %+.3f gv %+.2f %+.2f sup %.2f %.2f |" % [t, player.velocity.length(), rig._fgy, rig._hgy, rig._gv[0], rig._gv[1], rig._sup[0], rig._sup[1]]
+		var ln2 := "  t=%.3f v %.2f fgy %+.3f hgy %+.3f gv %+.2f %+.2f sup %.2f %.2f str %.2f du %.2f st_t %.3f gap %.3f |" % [t, player.velocity.length(), rig._fgy, rig._hgy, rig._gv[0], rig._gv[1], rig._sup[0], rig._sup[1], g.stride, g.duty, g.st_time, g.gap_time]
 		for i in 4:
 			ln2 += " %s %s ld %.1f st %.2f |" % [LEG[i], "PSF"[g.mode[i]], g.load[i], g.stretch[i]]
 		print(ln2)

@@ -95,6 +95,7 @@ var uneven := 0.0
 var _clr_t: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _grd: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var floor_y: Array[float] = [-INF, -INF, -INF, -INF]   # ground under each swinging paw (world), -INF unknown
+var _hur: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var st_time := 1.0
 var gap_time := 0.0
 ## how far below the root a paw may reach / how high above it it may step (rough ground)
@@ -291,7 +292,12 @@ func plan(speed: float, dt: float) -> void:
 	duty = _curve(DUTY_V, DUTY_D, speed)
 	var ms := lerpf(max_stance, max_stance_gallop, gallop)
 	if duty * stride > ms:
-		duty = ms / stride
+		if support_rule:
+			# these legs can't cover the stance a real cat's do at this stride: take quicker,
+			# shorter strides and keep the paws' share of time on the ground, instead of long
+			# strides spent mostly in the air (a gallop is the gait that flies)
+			stride = lerpf(minf(stride, ms / duty * 1.15), stride, gallop)
+		duty = minf(duty, ms / stride)
 	freq = speed / stride
 	# walk: fore follows the hind on its side by a quarter stride. trot: by half (diagonals in step)
 	lag = lerpf(0.25, 0.5, smoothstep(0.85, 1.35, speed))
@@ -438,6 +444,10 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				# or the paw would still be in the air when its turn on the ground is over
 				_dur[i] = minf(_dur[i], maxf(clampf((1.0 - duty) / maxf(freq, 0.01), 0.085, 0.36), 0.6 * _dur[i]))
 			sw_t[i] += dt / _dur[i]
+			var hurry: bool = support_rule and moving > 0.5 and not remote and mode[i ^ 1] != PLANTED and gallop < 0.5 and (mode[i ^ 1] != SWING or sw_t[i] >= sw_t[i ^ 1])
+			# neither paw of this pair is down: the one nearer the ground hurries to it
+			_hur[i] = move_toward(_hur[i], 1.4 * (1.0 - gallop * 2.0) if hurry else 0.0, dt * 14.0)
+			sw_t[i] += _hur[i] * dt / _dur[i]
 			# the swing is planned in body space: from where the paw left the ground (as the body
 			# saw it then) to its rest spot plus half a stance ahead. at touch down the hip is
 			# exactly half a stance behind the paw, whatever the body did in between
@@ -591,6 +601,7 @@ func _begin_swing(i: int, dur: float, lift: float, home_w: Vector3, xf: Transfor
 	_clr[i] = 0.0
 	_clr_t[i] = 0.0
 	_grd[i] = 0.0
+	_hur[i] = 0.0
 	_aim[i] = 0
 	sw_amp[i] = clampf((home_w - pos[i]).length() / 0.1, 0.3, 1.0) if moving < 0.5 else 1.0
 
