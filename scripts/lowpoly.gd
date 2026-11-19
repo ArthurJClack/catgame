@@ -114,6 +114,17 @@ static func sphere(segs: int = 8, rings: int = 5) -> ArrayMesh:
 
 
 ## unit height cylinder along +Y, centered. top_r is the radius at +Y
+## convex collider that is exactly the drawn (scaled) low poly mesh. a round CylinderShape3D
+## bulges above the flat faces of a 5-7 sided log by centimetres, so cats walk on it floating
+static func hull(mesh: Mesh, scl := Vector3.ONE) -> ConvexPolygonShape3D:
+	var sh := ConvexPolygonShape3D.new()
+	var pts := PackedVector3Array()
+	for v in mesh.get_faces():
+		pts.append(v * scl)
+	sh.points = pts
+	return sh
+
+
 static func cyl(top_r: float, bot_r: float, segs: int = 7) -> ArrayMesh:
 	var key := "c%.4f_%.4f_%d" % [top_r, bot_r, segs]
 	if not _mesh_cache.has(key):

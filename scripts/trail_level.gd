@@ -520,15 +520,14 @@ static func root(from: Vector3, dir: Vector3, len: float, r0: float, rng: Random
 		var z := x.cross(y).normalized()
 		var sb := StaticBody3D.new()
 		var cs := CollisionShape3D.new()
-		var sh := CylinderShape3D.new()
-		sh.radius = r
-		sh.height = l + r
-		cs.shape = sh
+		var rm := LowPoly.cyl(0.42, 0.5, 6)
+		var rs := Vector3(r * 2.0, l + r * 1.2, r * 2.0)
+		cs.shape = LowPoly.hull(rm, rs)   # the drawn root itself, so paws don't float over it
 		sb.add_child(cs)
 		sb.transform = Transform3D(Basis(x, y, z), mid)
 		sb.set_meta("surface", "wood")
 		lv.add_child(sb)
-		LowPoly.part(sb, LowPoly.cyl(0.42, 0.5, 6), C_ROOT.lightened(rng.randf() * 0.08), Vector3.ZERO, Vector3(r * 2.0, l + r * 1.2, r * 2.0))
+		LowPoly.part(sb, rm, C_ROOT.lightened(rng.randf() * 0.08), Vector3.ZERO, rs)
 		p = q
 		# side rootlets (visual)
 		if rng.randf() < 0.45:
@@ -557,15 +556,14 @@ static func branch(p: Vector3, yaw: float, len: float, r: float, rng: RandomNumb
 	var z := x.cross(y).normalized()
 	var sb := StaticBody3D.new()
 	var cs := CollisionShape3D.new()
-	var sh := CylinderShape3D.new()
-	sh.radius = r
-	sh.height = l
-	cs.shape = sh
+	var bm := LowPoly.cyl(0.6, 0.5, 5)
+	var bs := Vector3(r * 2.0, l, r * 2.0)
+	cs.shape = LowPoly.hull(bm, bs)   # the drawn branch itself, so paws don't float over it
 	sb.add_child(cs)
 	sb.transform = Transform3D(Basis(x, y, z), (a + b) * 0.5)
 	sb.set_meta("surface", "wood")
 	lv.add_child(sb)
-	LowPoly.part(sb, LowPoly.cyl(0.6, 0.5, 5), Color(0.42, 0.33, 0.24).lightened(rng.randf() * 0.1), Vector3.ZERO, Vector3(r * 2.0, l, r * 2.0))
+	LowPoly.part(sb, bm, Color(0.42, 0.33, 0.24).lightened(rng.randf() * 0.1), Vector3.ZERO, bs)
 	# twiggy offshoots
 	for k in rng.randi_range(1, 3):
 		var t := rng.randf_range(0.2, 0.8)

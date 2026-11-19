@@ -56,10 +56,15 @@ static func _ground(lv: Node3D) -> void:
 	Level.box(lv, Vector3(5, -0.25, 11), Vector3(50, 0.5, 46), C_GRASS, true, 0.0, false).set_meta("surface", "grass")
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 5
+	# the drawn grass top sits flush with the collider top (y 0), or paws hover over it. the
+	# house's own plank floor is also drawn at y 0, so the tiles are cut around its footprint
+	var house := Rect2(-5.2, -4.2, 10.4, 8.4)
 	for ix in range(-20, 30, 2):
 		for iz in range(-12, 34, 2):
 			var t := rng.randf_range(-0.04, 0.04)
-			B(lv, Vector3(ix + 1, -0.025, iz + 1), Vector3(2, 0.03, 2), Color(C_GRASS.r + t, C_GRASS.g + t * 1.2, C_GRASS.b + t * 0.6), false)
+			var col := Color(C_GRASS.r + t, C_GRASS.g + t * 1.2, C_GRASS.b + t * 0.6)
+			for r in _cut(Rect2(ix, iz, 2, 2), house):
+				B(lv, Vector3(r.get_center().x, -0.015, r.get_center().y), Vector3(r.size.x, 0.03, r.size.y), col, false)
 	# farmland beyond the fence + a ring of distant trees so the horizon isn't a void
 	B(lv, Vector3(5, -0.08, 11), Vector3(500, 0.1, 500), Color(0.5, 0.6, 0.34), false)
 	for k in 46:
@@ -82,6 +87,23 @@ static func _ground(lv: Node3D) -> void:
 
 
 # ---------------------------------------------------------------- bedroom wing + attic
+
+## the parts of rect a (x/z) that lie outside rect b: a itself, nothing, or up to 4 strips
+static func _cut(a: Rect2, b: Rect2) -> Array[Rect2]:
+	if not a.intersects(b):
+		return [a]
+	var out: Array[Rect2] = []
+	var i := a.intersection(b)
+	if i.position.x > a.position.x:
+		out.append(Rect2(a.position.x, a.position.y, i.position.x - a.position.x, a.size.y))
+	if i.end.x < a.end.x:
+		out.append(Rect2(i.end.x, a.position.y, a.end.x - i.end.x, a.size.y))
+	if i.position.y > a.position.y:
+		out.append(Rect2(i.position.x, a.position.y, i.size.x, i.position.y - a.position.y))
+	if i.end.y < a.end.y:
+		out.append(Rect2(i.position.x, i.end.y, i.size.x, a.end.y - i.end.y))
+	return out
+
 
 static func _wing(lv: Node3D) -> void:
 	var x0 := WING_X0

@@ -118,7 +118,9 @@ static func _terrain() -> void:
 					var p10 := Vector3(x0 + 1, hs[iz * (n + 1) + ix + 1], z0)
 					var p01 := Vector3(x0, hs[(iz + 1) * (n + 1) + ix], z0 + 1)
 					var p11 := Vector3(x0 + 1, hs[(iz + 1) * (n + 1) + ix + 1], z0 + 1)
-					for tri in [[p00, p10, p11], [p00, p11, p01]]:
+					# split each square along the same diagonal (p10-p01) as godot's HeightMapShape3D,
+					# or the collider bulges above / dips below the drawn ground and paws float or sink
+					for tri in [[p00, p10, p01], [p10, p11, p01]]:
 						var a: Vector3 = tri[0]
 						var b: Vector3 = tri[1]
 						var c: Vector3 = tri[2]
@@ -213,20 +215,20 @@ static func _climb(n: Node, scratch := true) -> void:
 
 static func _cyl_body(center: Vector3, basis: Basis, r: float, h: float, col: Color, segs := 7, collide := true, taper := 1.0) -> Node3D:
 	var node: Node3D
+	var mesh := LowPoly.cyl(0.5 * taper, 0.5, segs)
+	var scl := Vector3(r * 2.0, h, r * 2.0)
 	if collide:
 		var sb := StaticBody3D.new()
 		var cs := CollisionShape3D.new()
-		var sh := CylinderShape3D.new()
-		sh.radius = r
-		sh.height = h
-		cs.shape = sh
+		# the collider is the drawn faceted prism itself (a round one floats the cat over the flats)
+		cs.shape = LowPoly.hull(mesh, scl)
 		sb.add_child(cs)
 		node = sb
 	else:
 		node = Node3D.new()
 	node.transform = Transform3D(basis, center)
 	lv.add_child(node)
-	LowPoly.part(node, LowPoly.cyl(0.5 * taper, 0.5, segs), col, Vector3.ZERO, Vector3(r * 2.0, h, r * 2.0))
+	LowPoly.part(node, mesh, col, Vector3.ZERO, scl)
 	return node
 
 
