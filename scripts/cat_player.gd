@@ -79,6 +79,9 @@ var style := "block_black"
 var yaw := 0.0
 var pitch := 0.0
 var mouse_sens := 0.0022
+var invert_y := false        # settings (game_settings.gd)
+var calm_cam := false        # settings: head bob off, the fp camera glides instead of riding every step
+var _calm_y := 0.0
 var third_person := false
 var view_mode := 0            # 0 first person, 1 third person (behind), 2 orbit
 var orb_yaw := 0.0            # where you're looking (all views). the body (yaw) turns to run where you steer
@@ -269,6 +272,7 @@ var _marks: Array[Node3D] = []
 
 func _ready() -> void:
 	add_to_group("player")
+	GameSettings.apply_player.call_deferred(self)   # sens / fov / invert / head bob (no-op for bots)
 	floor_snap_length = 0.06
 	floor_max_angle = deg_to_rad(50)
 	safe_margin = 0.002
@@ -376,6 +380,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			lock.mouse(rel.x)    # locked: the camera stays on the target, a flick switches targets
 			return
 		orb_yaw -= rel.x * mouse_sens
+		if invert_y:
+			rel.y = -rel.y
 		if view_mode == 2:
 			orb_pitch = clampf(orb_pitch - rel.y * mouse_sens, -1.4, 0.6)
 		else:
@@ -402,7 +408,7 @@ func _read_input() -> Dictionary:
 	if not bot.is_empty():
 		return bot
 	# hold shift = canter. double tap shift (and keep holding) = full gallop
-	var shift := Input.is_physical_key_pressed(KEY_SHIFT)
+	var shift := CatKeys.down("run")
 	var now := Time.get_ticks_msec() / 1000.0
 	if shift and not _shift_prev:
 		_galloping = now - _shift_last_tap < DOUBLE_TAP
@@ -411,43 +417,47 @@ func _read_input() -> Dictionary:
 		_galloping = false
 	_shift_prev = shift
 	var mv := Vector2.ZERO
-	if Input.is_physical_key_pressed(KEY_W): mv.y += 1
-	if Input.is_physical_key_pressed(KEY_S): mv.y -= 1
-	if Input.is_physical_key_pressed(KEY_A): mv.x -= 1
-	if Input.is_physical_key_pressed(KEY_D): mv.x += 1
+	if CatKeys.down("forward"): mv.y += 1
+	if CatKeys.down("back"): mv.y -= 1
+	if CatKeys.down("left"): mv.x -= 1
+	if CatKeys.down("right"): mv.x += 1
 	mv = mv.limit_length(1.0)
 	# walk: hold x (or tap caps lock to keep walking). the keys then ask for a half pushed stick,
 	# which the speed curve turns into a real cat walk (~1 m/s) instead of the trot
-	var caps := Input.is_physical_key_pressed(KEY_CAPSLOCK)
+	var caps := CatKeys.down("walk_toggle")
 	if caps and not _caps_prev:
 		walk_lock = not walk_lock
 	_caps_prev = caps
 	if mv != Vector2.ZERO:
 		CatPad.last_used_pad = false
-	var walking := Input.is_physical_key_pressed(KEY_X) or walk_lock
+	var walking := CatKeys.down("walk") or walk_lock
 	if walking and not shift:
 		mv *= WALK_TILT
 	var kb := {
 		"move": mv,
 		"canter": shift and not _galloping,
 		"sprint": shift and _galloping,
-		"crouch": Input.is_physical_key_pressed(KEY_CTRL) or Input.is_physical_key_pressed(KEY_C),
-		"jump": Input.is_physical_key_pressed(KEY_SPACE),
-		"paw_l": Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT),
-		"paw_r": Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT),
-		"grab": Input.is_physical_key_pressed(KEY_G) or Input.is_mouse_button_pressed(MOUSE_BUTTON_XBUTTON2),
-		"aim": Input.is_physical_key_pressed(KEY_Q) or Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE),
-		"scratch": Input.is_physical_key_pressed(KEY_F),
-		"toggle_view": Input.is_physical_key_pressed(KEY_V),
-		"drop": Input.is_physical_key_pressed(KEY_E),
-		"dash": Input.is_physical_key_pressed(KEY_ALT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_XBUTTON1),
-		"lock_on": Input.is_physical_key_pressed(KEY_TAB),   # press = lock / unlock (cat_lock_on.gd)
+		"crouch": CatKeys.down("crouch"),
+		"jump": CatKeys.down("jump"),
+		"paw_l": CatKeys.down("paw_l"),
+		"paw_r": CatKeys.down("paw_r"),
+		"grab": CatKeys.down("grab"),
+		"aim": CatKeys.down("aim"),
+		"scratch": CatKeys.down("scratch"),
+		"toggle_view": CatKeys.down("toggle_view"),
+		"drop": CatKeys.down("drop"),
+		"dash": CatKeys.down("dash"),
+		"lock_on": CatKeys.down("lock_on"),   # press = lock / unlock (cat_lock_on.gd)
 	}
 	# gamepad (cat_pad.gd): every action has a button, the left stick's tilt picks the speed
 	var pad := CatPad.read()
 	if not pad.is_empty() and CatPad.walk_toggle and not (pad.canter or pad.sprint):
 		pad.move *= WALK_TILT
 	var d := CatPad.merge(kb, pad)
+	if CatKeys.blocked:
+		# pause menu open (online the game keeps running): the cat stands still
+		for k in d:
+			d[k] = Vector2.ZERO if d[k] is Vector2 else (0.0 if d[k] is float else false)
 	var sp := _space_filter(d.get("jump", false), is_on_floor(), get_physics_process_delta_time())
 	d.jump = sp.jump
 	d.pounce = sp.pounce
@@ -1118,9 +1128,11 @@ func _post(dt: float, _inp: Dictionary) -> void:
 
 
 func _process(_dt: float) -> void:
-	if bot.is_empty():
+	if bot.is_empty() and not CatKeys.blocked:
 		# right stick look lands every frame like the mouse
 		var ld := CatPad.look_delta(_dt)
+		if invert_y:
+			ld.y = -ld.y
 		if ld != Vector2.ZERO:
 			orb_yaw += ld.x
 			if view_mode == 2:
@@ -1352,11 +1364,15 @@ func _place_head_cam(dt: float) -> void:
 	head_cam_blocked = f < 1.0
 	if head_cam_blocked:
 		to = from.lerp(to, f)   # head in a wall / under a shelf: the eye stays on this side of it
+	if calm_cam:
+		# comfort setting: the eye glides over the head's step bob and never rolls
+		_calm_y = LowPoly.damp(_calm_y, to.y, 7.0, dt) if absf(_calm_y - to.y) < 0.25 else to.y
+		to.y = _calm_y
 	cam_pivot.global_position = to
 	var hx: Vector3 = rig.head.global_transform.basis.x.normalized()
 	var r := clampf(asin(clampf(hx.y, -1.0, 1.0)), -0.12, 0.12)   # head's right side up = +roll
-	head_roll = LowPoly.damp(head_roll, r * 0.5, 12.0, dt)
-	cam.rotation.z = cam_roll + head_roll
+	head_roll = LowPoly.damp(head_roll, 0.0 if calm_cam else r * 0.5, 12.0, dt)
+	cam.rotation.z = (0.0 if calm_cam else cam_roll) + head_roll
 
 
 class HeadFollow extends Node:
