@@ -356,6 +356,17 @@ func _page_settings() -> void:
 		caps.append("no cap" if c == 0 else "%d" % c)
 	_option("max fps", "max_fps", caps, GameSettings.FPS_CAPS)
 	_check("show fps", "show_fps")
+	_section("help")
+	_check("tutorial hints", "hints")
+	var rt := _row("")
+	var rb := Button.new()
+	rb.text = "restart the tutorial"
+	rb.custom_minimum_size = Vector2(220, 32)
+	rb.pressed.connect(func():
+		GameSettings.s("hints", true)
+		close_menu()
+		Tutorial.restart())
+	rt.add_child(rb)
 	_section("graphics")
 	_option("quality", "quality", GameSettings.QUALITY_NAMES, [0, 1, 2])
 	_slider("render scale", "render_scale", 0.5, 1.0, 0.05, _pct)
