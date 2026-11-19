@@ -222,6 +222,13 @@ var _phys_curr := Vector3.ZERO
 var _rig_base := Transform3D.IDENTITY
 var _interp_ok := false
 var paw_anchor: Node3D
+## first person = a real camera in the cat's head: it rides the rig's head bone (gait, crouch,
+## rearing, climbing, pounces all move it) and you see the cat's actual chest, shoulders and
+## forelegs below you. false = the old floating viewmodel paws (paw_view.gd)
+var head_cam := true
+var head_roll := 0.0           # roll picked up from the head bone this frame (rad)
+var head_cam_blocked := false  # the head is pushed into something: the camera is held short of it
+var _head_follow: Node
 # hunting
 var carried: Node3D = null      # prey held in the mouth
 var catches := 0
@@ -324,6 +331,11 @@ func _ready() -> void:
 	cam_pivot.add_child(paw_anchor)
 	paw_anchor.add_child(paws)
 	cam.current = true
+	# runs after the rig has posed this frame, so the camera is where the head really is
+	_head_follow = HeadFollow.new()
+	_head_follow.player = self
+	add_child(_head_follow)
+	_apply_rig_view()
 	_build_aim_marker()
 
 
@@ -1042,6 +1054,9 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.crouch = maxf(maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85), combat.gather_w())
 	rig.charge = charge
 	rig.look_pitch = pitch * 0.6 * (1.0 - w_face)
+	# head camera: looking down past ~15 deg the cat curls its neck to look at its own paws
+	var tuck := smoothstep(-0.25, -1.25, pitch) if (head_cam and view_mode == 0) else 0.0
+	rig.head_tuck = LowPoly.damp(rig.head_tuck, tuck, 8.0, dt)
 	# the head turns a little toward where you're looking
 	var lyaw := clampf(wrapf(orb_yaw - yaw, -PI, PI), -1.2, 1.2) * 0.7 * (1.0 - w_face)
 	rig.look_yaw = LowPoly.damp(rig.look_yaw, lyaw, 10.0, dt)
@@ -1118,7 +1133,10 @@ func _process(_dt: float) -> void:
 	if p.distance_to(global_position) > 0.6:
 		p = global_position   # teleport / respawn: don't smear
 	var off := global_transform.basis.inverse() * (p - global_position)
-	cam_pivot.position = eye_local + off
+	if not _head_cam_on():
+		cam_pivot.position = eye_local + off
+	# (head cam: the pivot keeps last frame's head spot until _place_head_cam moves it, so the
+	# lock aims from where the camera really is)
 	lock.frame_steer(_dt)
 	# mouse look lands every frame, not every physics tick
 	cam_pivot.rotation = Vector3(orb_pitch if view_mode == 2 else pitch, wrapf(orb_yaw - rotation.y, -PI, PI), 0)
@@ -1234,6 +1252,7 @@ func set_style(st: String) -> void:
 	paws.sock_col = rig.belly
 	paws.pad = rig.pad_color
 	paws.visible = op.visible
+	_apply_rig_view()
 	paws.rig = rig
 	op.get_parent().add_child(paws)
 	op.queue_free()
@@ -1268,11 +1287,20 @@ func is_invulnerable() -> bool:
 	return dash.iframes > 0.0
 
 
-## eye for paw reach / aiming: the cat's head, even when the camera is behind it
+## where paw reach is measured from: the body's eye point (above the shoulders), even when
+## the camera is behind it or out in the head (the head bob / neck curl doesn't change reach)
 func _eye_pos() -> Vector3:
 	if view_mode == 0:
-		return cam.global_position
+		return global_transform * eye_local
 	return global_transform * Vector3(0, EYE_STAND, 0)
+
+
+## where crosshair rays start: the camera itself in first person (it rides the head, so a ray
+## from the body would land off the crosshair when looking down), the body's eye otherwise
+func _aim_pos() -> Vector3:
+	if view_mode == 0:
+		return cam.global_position
+	return _eye_pos()
 
 
 func _look_dir() -> Vector3:
@@ -1288,12 +1316,55 @@ func set_view(m: int) -> void:
 	_event(["first person", "third person", "orbit cam (scroll = zoom)"][m])
 
 
-## first person: the body only casts a shadow, the paws you see are the viewmodel
-## (which tracks the real planted paws and sits in body space, see paw_anchor)
+## first person with head_cam: the whole body is drawn except the head + neck (the camera is
+## inside them), no viewmodel. old style (head_cam off): the body only casts a shadow and the
+## paws you see are the viewmodel (tracks the real planted paws, sits in body space, see paw_anchor)
 func _apply_rig_view() -> void:
-	rig.set_shadow_only(not third_person)
+	var real := third_person or head_cam
+	rig.set_shadow_only(not real)
+	rig.set_head_hidden(not third_person and head_cam)
 	if paws:
-		paws.visible = not third_person
+		paws.visible = not real
+
+
+func set_head_cam(v: bool) -> void:
+	head_cam = v
+	_apply_rig_view()
+	if not v:
+		head_roll = 0.0
+		cam.rotation.z = cam_roll
+
+
+## first person head camera, once per rendered frame after the rig has animated: the pivot
+## (which carries mouse look) moves to the head bone's eye point, kept out of walls by a
+## sweep from the middle of the body. look direction stays on the mouse (no lag), only a bit
+## of the head's roll comes through so turns and side hops feel like they're on a body
+func _head_cam_on() -> bool:
+	return view_mode == 0 and not third_person and head_cam and rig != null and rig.head != null and _interp_ok
+
+
+func _place_head_cam(dt: float) -> void:
+	if not _head_cam_on():
+		return
+	var to: Vector3 = rig.head_cam_world()
+	var from := rig.global_transform * Vector3(0, minf(capsule.height * 0.5, 0.12), 0)
+	var f := _sweep(from, to, 0.03)
+	head_cam_blocked = f < 1.0
+	if head_cam_blocked:
+		to = from.lerp(to, f)   # head in a wall / under a shelf: the eye stays on this side of it
+	cam_pivot.global_position = to
+	var hx: Vector3 = rig.head.global_transform.basis.x.normalized()
+	var r := clampf(asin(clampf(hx.y, -1.0, 1.0)), -0.12, 0.12)   # head's right side up = +roll
+	head_roll = LowPoly.damp(head_roll, r * 0.5, 12.0, dt)
+	cam.rotation.z = cam_roll + head_roll
+
+
+class HeadFollow extends Node:
+	var player: Node
+	func _ready() -> void:
+		process_priority = 20   # after the rig (0) and the paw copies (10)
+	func _process(dt: float) -> void:
+		player._place_head_cam(dt)
 
 
 func set_third_person(v: bool) -> void:
@@ -1794,7 +1865,7 @@ func _add_marks(col: Object, paw_pos: Vector3, wall_pt: Vector3, n: Vector3) -> 
 func _update_aim() -> void:
 	aim_valid = false
 	_aim_ok_age += get_physics_process_delta_time()
-	var from := _eye_pos()
+	var from := _aim_pos()
 	var dir := _look_dir()
 	var hit := _ray(from, from + dir * (LEAP_RANGE + 1.2))
 	if hit.is_empty():

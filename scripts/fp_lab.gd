@@ -1,14 +1,20 @@
 extends Node3D
-## first person paws lab: the real CatPlayer on a flat test floor, rendered three ways at once
-##   left  = the old standalone viewmodel (its own fake animation)
-##   right = the new viewmodel (copies of the rig's real forelegs)
+## first person lab: the real CatPlayer on a flat test floor, rendered three ways at once
+##   left  = the old viewmodel (copies of the rig's forelegs shifted into view, paw_view.gd)
+##   right = the head camera (first person now: the camera rides the head bone and you see
+##           the cat's real body below you, head + neck hidden)
 ##   inset = the full body cat from outside, so you can check they match
 ## run:  godot --path . res://fplab.tscn -- [--fptest] [--slow 0.5] [--style block]
 ##   --fptest no video, just measures and prints FPLAB lines + FPLAB PASS/FAIL
+##   --legacy  run the game with the old viewmodel (player.head_cam = false), checks those paws instead
+##   --sweep   the look glides from straight ahead down to the paws and back per section
+## the honest before/after clip is two renders: `--sweep --legacy` (left half) and `--sweep`
+## (right half) hstacked, since the left panel only matches the old game with head_cam off
 
 const VM_OLD := 1 << 1   # render layer 2
 const VM_NEW := 1 << 2   # render layer 3
 const BODY := 1 << 3     # render layer 4
+const HEAD := 1 << 4     # render layer 5: head + neck, only the outside view draws them
 
 var player: CatPlayer
 var old_vm: PawView
@@ -17,6 +23,11 @@ var side_cam: Camera3D
 var caption: Label
 var test := false
 var slow := 1.0
+var look_pitch := -0.15   # --pitch: where the bot looks (rad, down is negative)
+var legacy := false
+var sweep := false        # --sweep: the look glides per section (forward, then down at the paws)
+const SWEEP := {"standing": -1.4, "walk": -1.3, "trot": -1.0, "gallop": -0.6, "stop": -1.4, "swats": -0.75, "crouch + pounce": -0.9, "dodges": -0.7, "wall kick": -0.3}
+var _pitch_now := -0.15
 var bot := {}
 var wall_x := 0.0
 var errors: Array[String] = []
@@ -29,15 +40,22 @@ func _ready() -> void:
 	var si := args.find("--slow")
 	if si >= 0:
 		slow = float(args[si + 1])
+	sweep = "--sweep" in args
+	legacy = "--legacy" in args
+	var pi_ := args.find("--pitch")
+	if pi_ >= 0:
+		look_pitch = float(args[pi_ + 1])
 	_env()
 	player = CatPlayer.new()
 	player.position = Vector3(0, 0.02, 0)
 	player.yaw = 0.0
-	player.bot = {"move": Vector2.ZERO, "yaw": 0.0, "pitch": -0.15}
+	player.bot = {"move": Vector2.ZERO, "yaw": 0.0, "pitch": look_pitch}
 	player.log_events = test
 	add_child(player)
 	var vs := args.find("--style")
 	player.set_style(args[vs + 1] if vs >= 0 else "block")
+	if legacy:
+		player.set_head_cam(false)
 	await get_tree().process_frame
 	_setup_views()
 	_run()
@@ -129,7 +147,8 @@ func _layer(root: Node, bits: int) -> void:
 
 
 func _setup_views() -> void:
-	# old viewmodel: a plain PawView (no rig) on the same anchor, fed the same inputs
+	# the "before" viewmodel is the rig mirror (player.paws, hidden by the head cam: show it on
+	# its own layer). old_vm is the even older procedural one, kept fed for the fptest only
 	old_vm = PawView.new()
 	old_vm.fur = player.rig.fur
 	old_vm.fur_dark = player.rig.fur_dark
@@ -141,9 +160,29 @@ func _setup_views() -> void:
 	await get_tree().process_frame
 	_layer(old_vm, VM_OLD)
 	_layer(player.paws, VM_NEW)
-	# the body: visible (not shadow only) but on its own layer
+	# what the game itself does in first person: head + neck shadow only, the rest of the body
+	# drawn, no floating viewmodel
+	var SO := GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	if legacy:
+		if not player.paws.visible:
+			errors.append("legacy first person: viewmodel paws hidden")
+	elif player.paws.visible:
+		errors.append("first person: the old viewmodel paws are still showing")
+	for c in ([] if legacy else player.rig.head_parts()):
+		if c.cast_shadow != SO:
+			errors.append("first person: head part %s is drawn (camera is inside it) cs=%d" % [player.rig.get_path_to(c), c.cast_shadow])
+			break
+	for c in player.rig.chest.get_children():
+		if not legacy and c is MeshInstance3D and c.get_meta("tag", "") == "chest" and c.cast_shadow == SO:
+			errors.append("first person: the body is hidden")
+	player.paws.visible = true
+	# the body: visible (not shadow only) but on its own layer, the head + neck on another so
+	# the head camera view leaves them out like the game does and the outside view has them
+	player.rig.set_head_hidden(false)
 	player.rig.set_shadow_only(false)
 	_layer(player.rig, BODY)
+	for c in player.rig.head_parts():
+		c.layers = HEAD
 	player.cam.current = false
 	if test:
 		return
@@ -164,12 +203,12 @@ func _setup_views() -> void:
 		var c := Camera3D.new()
 		c.near = 0.01
 		c.fov = player.cam.fov
-		c.cull_mask = 1 | (VM_OLD if i == 0 else VM_NEW)
+		c.cull_mask = 1 | (VM_NEW if i == 0 else BODY)
 		sv.add_child(c)
 		c.current = true
 		cams.append(c)
 		var lab := Label.new()
-		lab.text = ["before: separate fake paw animation", "after: the body's real forelegs"][i]
+		lab.text = ["before: floating paw copies", "after: camera in the head"][i]
 		lab.position = Vector2(i * W + 20, 14)
 		lab.add_theme_font_size_override("font_size", 30)
 		lab.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
@@ -188,7 +227,7 @@ func _setup_views() -> void:
 	side_cam = Camera3D.new()
 	side_cam.fov = 40
 	side_cam.near = 0.02
-	side_cam.cull_mask = 1 | BODY
+	side_cam.cull_mask = 1 | BODY | HEAD
 	sv2.add_child(side_cam)
 	side_cam.current = true
 	var lab2 := Label.new()
@@ -235,6 +274,12 @@ func _say(t: String) -> void:
 
 
 func _frame() -> float:
+	if sweep:
+		var want: float = SWEEP.get(_section, look_pitch)
+		if _section == "standing" and _t < 1.0:
+			want = -0.15   # start looking ahead: nothing of the body in view, like a real cat
+		_pitch_now = move_toward(_pitch_now, want, get_physics_process_delta_time() * 1.6)
+		bot.pitch = _pitch_now
 	player.bot = bot.duplicate()
 	await get_tree().physics_frame
 	var dt := get_physics_process_delta_time()
@@ -255,10 +300,25 @@ func _measure() -> void:
 	if not pv._mirror_on() or pv._mir.is_empty():
 		errors.append("%s: mirror not running" % _section)
 		return
-	var st: Dictionary = _stats.get(_section, {"n": 0, "on": 0, "raise": 0.0, "bad": 0})
+	var st: Dictionary = _stats.get(_section, {"n": 0, "on": 0, "raise": 0.0, "bad": 0, "real_on": 0, "cam_err": 0.0})
 	st.n += 1
 	var cam := player.cam
 	var vp := get_viewport().get_visible_rect().size
+	# head camera: sits on the head bone, and the body's real forepaws are what you see
+	var ce := cam.global_position.distance_to(player.rig.head_cam_world())
+	if ce > 0.01 and OS.get_cmdline_user_args().has("--verbose"):
+		print("FPLAB cam off %.3f at %s head %s body %s" % [ce, cam.global_position, player.rig.head_cam_world(), player.global_position])
+	if not player.head_cam_blocked:
+		st.cam_err = maxf(st.cam_err, ce)
+	var real_on := false
+	for i in 2:
+		var rp: Vector3 = (player.rig.legs[i].paw as Node3D).global_position
+		if not cam.is_position_behind(rp):
+			var rs := cam.unproject_position(rp)
+			if rs.x >= 0 and rs.y >= 0 and rs.x <= vp.x and rs.y <= vp.y:
+				real_on = true
+	if real_on:
+		st.real_on += 1
 	var any_on := false
 	var legs: Array = player.rig.legs
 	for i in 2:
@@ -315,7 +375,7 @@ func _place(pos: Vector3, yaw: float) -> void:
 	player.orb_yaw = yaw
 	player._phys_prev = pos
 	player._phys_curr = pos
-	bot = {"move": Vector2.ZERO, "yaw": yaw, "pitch": -0.15}
+	bot = {"move": Vector2.ZERO, "yaw": yaw, "pitch": look_pitch}
 
 
 func _speed(ts: float) -> void:
@@ -326,7 +386,12 @@ func _run() -> void:
 	_speed(1.0)
 	_place(Vector3(0, 0.02, 0), 0.0)
 	_say("standing")
-	await _hold(1.4)
+	await _hold(2.8 if sweep else 1.4)
+	if not sweep:
+		_say("look down at the paws")
+		bot.pitch = -1.4
+		await _hold(1.2)
+		bot.pitch = look_pitch
 	_say("walk")
 	bot.move = Vector2(0, 0.3)
 	await _hold(2.4)
@@ -401,14 +466,20 @@ func _report() -> void:
 	for k in _stats:
 		var st: Dictionary = _stats[k]
 		var on := float(st.on) / maxf(st.n, 1)
-		print("FPLAB %s: paws on screen %d%%, max raise %.2f, pose mismatches %d" % [k, int(on * 100.0), st.raise, st.bad])
+		var ron := float(st.real_on) / maxf(st.n, 1)
+		print("FPLAB %s: paws on screen %d%%, max raise %.2f, pose mismatches %d | head cam: real paws on screen %d%%, off the head bone %.3f m" % [k, int(on * 100.0), st.raise, st.bad, int(ron * 100.0), st.cam_err])
+		# the camera rides the head (except when the head is in a wall: then it's held out of it)
+		if not legacy and st.cam_err > 0.01:
+			errors.append("%s: head camera is %.3f m off the head bone" % [k, st.cam_err])
+		if not legacy and k == "look down at the paws" and ron < 0.9:
+			errors.append("look down: the body's real forepaws aren't in view (%d%%)" % int(ron * 100.0))
 		if st.bad > 0:
 			errors.append("%s: copied legs don't match the rig" % k)
 		# a gallop really does throw both forepaws back under the chest for part of each stride
 		var need := 0.75 if k == "gallop" else 0.9
-		if k in ["standing", "walk", "trot", "gallop", "swats"] and on < need:
+		if legacy and k in ["standing", "walk", "trot", "gallop", "swats"] and on < need:
 			errors.append("%s: paws off screen too often (%d%%)" % [k, int(on * 100.0)])
-	if not _stats.get("swats", {}).is_empty() and _stats.swats.raise < 0.4:
+	if legacy and not _stats.get("swats", {}).is_empty() and _stats.swats.raise < 0.4:
 		errors.append("swats: the swatting paw never registered as raised")
 	if errors.is_empty():
 		print("FPLAB PASS")

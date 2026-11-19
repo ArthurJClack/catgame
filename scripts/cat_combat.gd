@@ -649,7 +649,7 @@ func _solve(c := -1.0) -> Dictionary:
 		kind = "lock"
 	if tgt == Vector3.INF:
 		var best := MAGNET_R + 0.12 * Vector2(tr.point.x - feet.x, tr.point.z - feet.z).length()
-		var eye: Vector3 = p._eye_pos()
+		var eye: Vector3 = p._aim_pos()
 		for n in p.get_tree().get_nodes_in_group("prey"):
 			if not n is Node3D or n == p.carried or (n.has_method("alive") and not n.alive()):
 				continue

@@ -31,6 +31,9 @@ var charge := 0.0   # 0..1 winding up a pounce
 var scramble := 0.0 # 0..1 front paws clawing up a wall
 var look_yaw := 0.0
 var look_pitch := 0.0
+## 0..1 looking down at its own paws: the neck curls, the chin pulls back toward the chest
+## and the head drops over the forelegs (the first person head camera rides along)
+var head_tuck := 0.0
 # behaviours + parkour (all 0..1 blends set by the owner)
 var rear := 0.0          # up on the hind legs (scratching, peeking)
 var kick_paws := [Vector3.ZERO, Vector3.ZERO] # wall kick: where the hind paws press on the wall (world)
@@ -538,6 +541,7 @@ func _body_part(parent: Node3D, region: String, pos: Vector3, scl: Vector3, rot:
 	var sx: Array = _part_src()
 	var mesh := LowPoly.painted(sx[0], painter, key, 0.035, sx[1])
 	var mi := LowPoly.part(parent, mesh, Color.WHITE, pos, scl, rot)
+	mi.set_meta("tag", tag)
 	_style_mat(mi)
 	if S_.fur == "shells" and tag != "shoulder" and tag != "hip" and tag != "bib":
 		# two chunky cutout layers = clumpy stepped fluff
@@ -699,12 +703,44 @@ func _build_head() -> void:
 func set_shadow_only(v: bool) -> void:
 	for c in find_children("*", "MeshInstance3D", true, false):
 		(c as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if v else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	if not v and _head_hidden:
+		set_head_hidden(true)
+
+
+var _head_hidden := false
+var _head_kids := 0
+
+## head camera: the camera sits in the skull, so the head, neck + bib only cast their shadow and
+## everything else (chest, shoulders, forelegs, the rest of the body) is drawn as normal
+func set_head_hidden(v: bool) -> void:
+	_head_hidden = v
+	_head_kids = head.get_child_count()
+	for c in head_parts():
+		c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if v else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+## head, neck and the bib under the chin: what a camera in the skull hides
+func head_parts() -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	for c in neck.find_children("*", "MeshInstance3D", true, false):
+		out.append(c)
+	for c in chest.find_children("*", "MeshInstance3D", true, false):
+		if c.get_meta("tag", "") == "bib" or (c.get_parent() is MeshInstance3D and c.get_parent().get_meta("tag", "") == "bib"):
+			out.append(c)
+	return out
+
+
+## where a camera mounted in the head goes (world): between the eyes, a touch inside the skull
+func head_cam_world() -> Vector3:
+	return head.to_global(Vector3(0, 0.006, -0.03))
 
 
 func _process(dt: float) -> void:
 	if not _built or dt <= 0.0:
 		return
 	animate(minf(dt, 0.05))
+	if _head_hidden and head.get_child_count() != _head_kids:
+		set_head_hidden(true)   # something was hung on the head later (soma's mouth): hide it too
 
 
 ## one quick swat with a fore paw (0 = left, 1 = right) at a world space point within reach:
@@ -1127,7 +1163,9 @@ func animate(dt: float) -> void:
 	var lk_pitch := look_pitch + _glance.y
 	if not _head_f_init:
 		_neck_rest = neck.position
-	neck.position = _neck_rest
+	var tk := smoothstep(0.0, 1.0, head_tuck) * (1.0 - _air_w) * (1.0 - climb) * (1.0 - clamber)
+	var tuck_off := Vector3(0, -0.04, 0.04) * tk
+	neck.position = _neck_rest + tuck_off
 	neck.rotation.x = -body_pitch * 0.55 + lk_pitch * 0.35 - crouch * 0.34 - wg * 0.25 + stretch * 0.3 - pin * 0.35 + scratch * 0.15 - g_lick * 0.42 - g_wipe * 0.15 - loaf * 0.15 + climb * lerpf(0.1, -0.22, climb_splay)
 	head.rotation.x = -body_pitch * 0.45 + lk_pitch * 0.65 + crouch * 0.2 + wg * 0.12 + stretch * 0.25 - g_lick * 0.38 + lick_bob - g_wipe * 0.2
 	neck.rotation.y = -body_yaw * 0.5 + lk_yaw * 0.4 + turn_lead + g_lick * 0.25
@@ -1154,7 +1192,7 @@ func animate(dt: float) -> void:
 	var h2 := rinv * head.global_position
 	var hr := cbq.inverse() * (_head_f - h2)
 	hr = Vector3(clampf(hr.x, -0.012, 0.012), clampf(hr.y, -0.016, 0.016), 0.0)
-	neck.position = _neck_rest + hr
+	neck.position = _neck_rest + tuck_off + hr
 	var head_y := h2.y + (cbq * hr).y
 	_head_slow = LowPoly.damp(_head_slow, head_y, 1.2, dt)
 	head_bob = clampf(head_y - _head_slow, -0.02, 0.02) * hold
