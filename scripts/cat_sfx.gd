@@ -204,6 +204,9 @@ func _process(dt: float) -> void:
 
 func meow() -> void:
 	_meow_cool = 0.45
+	var sv := get_node_or_null("/root/Save")
+	if sv:
+		sv.add_stat("meows")
 	_one(_variant("meow"), 0.9, rng.randf_range(0.94, 1.08))
 
 
@@ -261,7 +264,7 @@ static func ui(clip: String) -> void:
 	if clips.has("ui_" + clip):
 		_log("ui_" + clip)
 		_ui_player.stream = clips["ui_" + clip]
-		_ui_player.volume_db = -8.0 if clip == "hover" else -4.0
+		_ui_player.volume_db = -8.0 if clip == "hover" else (-2.0 if clip == "unlock" else -4.0)
 		_ui_player.play()
 
 
@@ -365,6 +368,11 @@ static func bake() -> void:
 	var uh := _buf(0.03)
 	_tone(uh, 0.0, 0.025, 1320.0, 1320.0, 0.14)
 	clips["ui_hover"] = _wav(uh)
+	var un := _buf(0.7)                      # achievement: two note chime
+	_tone(un, 0.0, 0.35, 784.0, 784.0, 0.3)
+	_tone(un, 0.12, 0.55, 1175.0, 1175.0, 0.28)
+	_tone(un, 0.12, 0.55, 2350.0, 2350.0, 0.06)
+	clips["ui_unlock"] = _wav(un)
 
 
 static func _buf(sec: float) -> PackedFloat32Array:

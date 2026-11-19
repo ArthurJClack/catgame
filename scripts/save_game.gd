@@ -32,6 +32,7 @@ var _last_scene := ""
 var _scene_save_t := -1.0
 var _scene_ms := 0
 var last_save_ms := 0
+var achievements: Achievements
 
 
 func _ready() -> void:
@@ -42,6 +43,10 @@ func _ready() -> void:
 	data = fresh()
 	get_tree().node_added.connect(_on_node_added)
 	_build_badge()
+	achievements = Achievements.new()
+	achievements.name = "Achievements"
+	achievements.save = self
+	add_child(achievements)
 	if not enabled:
 		return
 	slot = _last_slot()

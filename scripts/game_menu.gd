@@ -202,6 +202,7 @@ func show_page(p: String) -> void:
 		"main": _page_main()
 		"settings": _page_settings()
 		"controls": _page_controls()
+		"achievements": _page_achievements()
 
 
 func _button(parent: Node, text: String, fn: Callable) -> Button:
@@ -223,6 +224,9 @@ func _page_main() -> void:
 		_button(_body, txt, func(): Save.save_now(); show_page("main"))
 	_button(_body, "settings", show_page.bind("settings"))
 	_button(_body, "controls", show_page.bind("controls"))
+	var ach = Save.achievements
+	if ach:
+		_button(_body, "achievements (%d / %d)" % [ach.count(), Achievements.LIST.size()], show_page.bind("achievements"))
 	var scene := get_tree().current_scene
 	if scene and scene.scene_file_path != "" and scene.scene_file_path != "res://main.tscn":
 		_button(_body, "back to the farm", _go_farm)
@@ -428,6 +432,38 @@ func _page_controls() -> void:
 	var r := _button(h2, "reset keys", func(): CatKeys.reset(); GameSettings.save_file(); show_page("controls"))
 	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	back.grab_focus.call_deferred()
+
+
+func _page_achievements() -> void:
+	var ach = Save.achievements
+	_title.text = "achievements  %d / %d" % [ach.count() if ach else 0, Achievements.LIST.size()]
+	_scroll()
+	for id in Achievements.LIST:
+		var a: Array = Achievements.LIST[id]
+		var got: bool = ach != null and ach.has(id)
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 12)
+		var mark := Achievements.PawIcon.new()
+		mark.lit = got
+		mark.custom_minimum_size = Vector2(26, 26)
+		mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(mark)
+		var v := VBoxContainer.new()
+		var t := Label.new()
+		t.text = a[0] if (got or not a[2]) else "???"
+		t.add_theme_font_size_override("font_size", 17)
+		t.add_theme_color_override("font_color", Color(0.95, 0.78, 0.2) if got else Color(0.75, 0.75, 0.78))
+		v.add_child(t)
+		var d := Label.new()
+		d.text = (a[1] + ("  ·  " + str(ach.data()[id]) if got else "")) if (got or not a[2]) else "a secret"
+		d.add_theme_font_size_override("font_size", 12)
+		d.add_theme_color_override("font_color", Color(0.6, 0.6, 0.64))
+		v.add_child(d)
+		h.add_child(v)
+		_scroll_box.add_child(h)
+	_scroll_box = null
+	var b := _button(_body, "back", show_page.bind("main"))
+	b.grab_focus.call_deferred()
 
 
 func _start_rebind(action: String, slot: int, b: Button) -> void:

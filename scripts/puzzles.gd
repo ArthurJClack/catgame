@@ -378,6 +378,7 @@ func _lantern_tick() -> void:
 
 func _smash(at: Vector3) -> void:
 	_play("crash", at, 1.0, 0.8)
+	solved["lantern"] = int(solved.get("lantern", 0)) + 1   # counted, no chime (achievements.gd)
 	var floor_pt := Vector3(at.x, 0.0, at.z)
 	for r in get_tree().get_nodes_in_group("enemy"):
 		if r is Node3D and r.has_method("take_hit") and (r as Node3D).global_position.distance_to(floor_pt) < LANTERN_R:
