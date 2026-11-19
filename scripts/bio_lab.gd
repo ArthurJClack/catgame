@@ -223,7 +223,7 @@ func _scenarios() -> void:
 		"trot_circle": [0, -10, 6.0, func(tt): return _fwd({"orb": tt * 1.3})],
 		"canter_circle": [0, -14, 6.0, func(tt): return _fwd({"canter": true, "orb": tt * 0.8})],
 		"trot_reverse": [0, 0, 5.0, func(tt): return _fwd({"orb": PI if tt > 2.0 else 0.0})],
-		"gallop_reverse": [0, 2, 7.0, func(tt): return _fwd({"sprint": true, "orb": PI if tt > 3.0 else 0.0})],
+		"gallop_reverse": [-11, 2, 7.0, func(tt): return _fwd({"sprint": true, "orb": PI if tt > 3.0 else 0.0})],
 		"trot_zigzag": [0, 0, 6.0, func(tt): return _fwd({"orb": 0.9 * signf(sin(tt * 2.6))})],
 		"side_hop": [0, 0, 4.0, func(tt): return {"move": Vector2(1.0 if fmod(tt, 1.0) < 0.2 else 0.0, 0), "pitch": -0.1, "body": 0.0}],
 		"dodge": [0, 0, 4.0, func(tt): return {"move": Vector2(0, 1), "pitch": -0.1, "dash": fmod(tt, 1.5) > 1.0 and fmod(tt, 1.5) < 1.1}],
@@ -396,7 +396,7 @@ func _process(dt: float) -> void:
 		# fold: a leg tucked up into / over the body. the paw has to hang well under its hip /
 		# shoulder (a cat's leg can't fold shorter than about a third of its length), and
 		# the knee / elbow stays under the back line
-		if not on_wall and player.is_on_floor() and rig.sit < 0.03 and rig.loaf < 0.03 and rig.rear < 0.2 and float(g.free_w[i]) < 0.3:
+		if not on_wall and player.is_on_floor() and rig.sit < 0.03 and rig._sit_h < 0.03 and rig.loaf < 0.03 and rig.rear < 0.2 and float(g.free_w[i]) < 0.3:
 			var sd := -1.0 if i % 2 == 0 else 1.0
 			var girdle: Node3D = rig.chest if i < 2 else rig.pelvis
 			var jl: Vector3 = Vector3(rig.FRONT_SHOULDER.x * sd, rig.FRONT_SHOULDER.y, rig.FRONT_SHOULDER.z) if i < 2 else Vector3(rig.HIND_HIP.x * sd, rig.HIND_HIP.y, rig.HIND_HIP.z)
