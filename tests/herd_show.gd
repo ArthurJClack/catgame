@@ -54,8 +54,11 @@ func _run() -> void:
 	current_scene.add_child(cam)
 	cam.fov = 58
 	cam.current = true
-	cam.global_position = Vector3(15.0, 5.2, 5.0)
-	cam.look_at(Vector3(19.6, 0, 11.6))
+	cam.global_position = Vector3(15.2, 3.4, 12.6)
+	cam.look_at(Vector3(20.2, 0, 11.4))
+	var hl = current_scene.get("help_label")
+	if hl is Control:
+		(hl as Control).visible = false
 	p.global_position = Vector3(13.8, 0.02, 9.4)
 	p.velocity = Vector3.ZERO
 	await _ticks(60)

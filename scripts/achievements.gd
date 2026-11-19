@@ -108,6 +108,7 @@ func check(p: CatPlayer) -> void:
 	if solved.has("gift"): unlock("gift")
 	if solved.has("lantern"): unlock("lantern")
 	if solved.has("pull_string"): unlock("pull_string")
+	if solved.has("herd"): unlock("herd")
 	if treats >= 10: unlock("treats_10")
 	if treats >= 50: unlock("treats_50")
 	var c := int(st.get("catches", 0))
