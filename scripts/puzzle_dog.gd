@@ -138,7 +138,7 @@ func _pose(dt: float) -> void:
 	body.scale = Vector3(1.0 + breathe * 2.0, 1.0, 1.0)
 	body.rotation.z = lerpf(0.35, 0.0, _up)
 	# head: on its paws asleep, lifts when it stirs, up when awake
-	neck.rotation.x = lerpf(0.55, -0.35, maxf(stir * 0.7, _up))
+	neck.rotation.x = lerpf(-0.6, 0.35, maxf(stir * 0.7, _up))
 	head.rotation.x = lerpf(0.0, 0.2, _up)
 	for s in [-1, 1]:
 		var ear: Node3D = _parts["ear%d" % s]
@@ -153,7 +153,7 @@ func _pose(dt: float) -> void:
 		if awake and dog.get_meta("moving", false):
 			leg.rotation.x += sin(t * 14.0 + (PI if i in [0, 3] else 0.0)) * 0.5
 	var tail: Node3D = _parts.tail
-	tail.rotation.x = lerpf(-0.9, 0.5, _up)
+	tail.rotation.x = lerpf(0.15, -0.6, _up)
 	tail.rotation.y = sin(t * 9.0) * 0.3 * _up
 	# chain from the post to the collar, sagging
 	var collar: Vector3 = neck.global_position
