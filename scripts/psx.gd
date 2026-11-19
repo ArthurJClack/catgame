@@ -30,6 +30,10 @@ uniform float wave = 0.0;
 uniform vec2 scroll = vec2(0.0);
 global uniform float psx_snap;
 global uniform float psx_affine;
+// affine warp only for verts at least this far (m) from the camera. closer verts lean back to
+// perspective correct uvs. real psx games subdivided near polys for the same reason: a vert
+// right next to (or behind) the lens makes screen space uvs collapse, so textures shrink and smear
+uniform float affine_near = 1.5;
 varying vec3 aff;
 
 void vertex() {
@@ -46,7 +50,9 @@ void vertex() {
 	}
 	POSITION = clip;
 	vec2 uv = UV + scroll * TIME;
-	aff = vec3(uv * clip.w, clip.w);
+	// weight W / w per vert: W = w gives pure affine, W = const gives perspective correct
+	float W = max(clip.w, affine_near);
+	aff = vec3(uv * W, W);
 }
 
 void fragment() {
