@@ -7,6 +7,7 @@ extends SceneTree
 var p: CatPlayer
 var bot := {"move": Vector2.ZERO, "yaw": 0.0, "pitch": 0.0}
 var cam: Camera3D
+var HZ := Engine.physics_ticks_per_second
 
 
 func _initialize() -> void:
@@ -61,22 +62,22 @@ func _run() -> void:
 		(hl as Control).visible = false
 	p.global_position = Vector3(13.8, 0.02, 9.4)
 	p.velocity = Vector3.ZERO
-	await _ticks(60)
+	await _ticks(HZ)
 	await _shot("herd_0_loose")
 	# gallop straight through them: they scatter
 	bot.yaw = atan2(-(17.4 - 13.8), -(9.4 - 9.4))
 	bot.move = Vector2(0, 1)
 	bot.sprint = true
-	await _ticks(25)
+	await _ticks(int(HZ * 0.6))
 	await _shot("herd_1_scatter")
-	await _ticks(25)
+	await _ticks(int(HZ * 0.9))
 	bot.sprint = false
 	bot.move = Vector2.ZERO
-	await _ticks(70)
+	await _ticks(int(HZ * 1.5))
 	var gap := Vector3(HerdChicks.PEN.position.x - 0.9, 0, (HerdChicks.GAP_Z.x + HerdChicks.GAP_Z.y) * 0.5)
 	var t := 0
 	var shot_mid := false
-	while not h.done and t < 30 * 300:
+	while not h.done and t < HZ * 300:
 		var best: CharacterBody3D = null
 		var bd := 1e9
 		for c in h.chicks:
@@ -114,8 +115,8 @@ func _run() -> void:
 			shot_mid = true
 			await _shot("herd_2_three_in")
 	bot.move = Vector2.ZERO
-	print("herd_show: done %s after %.0f s, %d in" % [str(h.done), t / 30.0, h.inside()])
-	await _ticks(50)
+	print("herd_show: done %s after %.0f s, %d in" % [str(h.done), float(t) / HZ, h.inside()])
+	await _ticks(HZ * 2)
 	await _shot("herd_3_gate_shut")
-	await _ticks(60)
+	await _ticks(HZ * 2)
 	quit()
