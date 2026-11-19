@@ -46,7 +46,11 @@ open the folder in godot 4.3+ and hit play (f5).
 - pounce (hold space): forepaws slam down together and pin whatever is under them.
   there's a wind up toy mouse to hunt: stalk slow (rushing spooks it), aim at it, pounce
 - first person is a real camera in the cat's head: it rides the head bone (gait, crouch, rearing, pounces, climbing all move it), the head + neck are hidden and you see the cat's actual chest and forelegs. look ahead and the body is out of view like it would be for a real cat, look down and it curls its neck to watch its own paws. `player.head_cam = false` brings back the old floating paw viewmodel. test: `godot --path . res://fplab.tscn -- --fptest` (+ `--legacy` for the old paws)
-- v: third person (see the whole cat), esc: free the mouse
+- v: third person (see the whole cat)
+- **esc (pad start) = pause menu** (`game_menu.gd`, autoload `GameMenu`): resume, settings, controls, back to the farm, quit. single player pauses, online the world keeps going but your cat stands still while it's open
+  - settings (`game_settings.gd`, saved to `user://settings.cfg`): master / world ambience / cat + effects volume (audio buses `Ambience` + `SFX`, new players get routed automatically), mouse sensitivity, invert y, fov, head bob off (comfort: the fp eye glides instead of riding each step), fullscreen, vsync, max fps, show fps, quality low / medium / high (low: no ssao / ssil / fog / glow / msaa, shorter shadows) and render scale. defaults = exactly how the game was before
+  - controls: every keyboard / mouse action can be rebound, two binds each (`cat_keys.gd`, `CatKeys.down("jump")`), binding a key takes it off whatever had it, esc / f-keys / m / r are reserved. gamepad map is listed but fixed
+  - test: `xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/menu_test.gd`, `tests/menu_shots.gd -- out/menu` saves screenshots of the pages
 
 ## numbers (real cat scale, meters)
 - body 0.46 m, shoulder 0.25 m, eye height 0.25 m

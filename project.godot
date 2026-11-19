@@ -13,6 +13,7 @@ config/features=PackedStringArray("4.3", "Forward Plus")
 
 Updater="*res://scripts/updater.gd"
 Net="*res://scripts/net/net.gd"
+GameMenu="*res://scripts/game_menu.gd"
 
 [display]
 
