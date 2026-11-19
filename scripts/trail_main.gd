@@ -46,6 +46,7 @@ func _ready() -> void:
 	if Engine.has_meta("cat_style"):
 		player.set_style.call_deferred(Engine.get_meta("cat_style"))
 	_build_hud()
+	_build_farm_exit()
 	var args := OS.get_cmdline_user_args()
 	var si := args.find("--still")
 	run_bot = "--run" in args or "--runtest" in args
@@ -207,8 +208,20 @@ func _place(s: float) -> void:
 
 
 func _go_home() -> void:
-	Engine.set_meta("cat_style", player.style)
-	get_tree().change_scene_to_file.call_deferred("res://main.tscn")
+	Hub.go_home(self, "trail")
+
+
+## farm gate just off the start line (hub.gd): two posts + sign, walk between them to go back
+func _build_farm_exit() -> void:
+	var f := TrailLevel.frame(0.3, 2.6)
+	var left: Vector3 = f[2]
+	var fwd: Vector3 = f[1]
+	var c: Vector3 = f[0]
+	for s in [-1.0, 1.0]:
+		var post := Level.box(self, c + fwd * s * 0.55 + Vector3(0, 0.75, 0), Vector3(0.12, 1.5, 0.12), Hub.C_POST)
+		post.name = "FarmGatePost"
+	Level.rbox(self, c + Vector3(0, 1.55, 0), Vector3(1.22, 0.1, 0.12), Vector3(0, atan2(-fwd.z, fwd.x), 0), Hub.C_POST, false)
+	Hub.exit(self, c - left * 0.1, -left, "trail", Vector2.ZERO, "farm")
 
 
 func _physics_process(dt: float) -> void:

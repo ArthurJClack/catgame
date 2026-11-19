@@ -26,11 +26,12 @@ func _ready() -> void:
 	player = CatPlayer.new()
 	player.position = info.spawn
 	player.yaw = -0.6
-	# coming back from the forest: start at the yard gate instead of the living room
-	if Engine.get_meta("cat_spawn", "") == "forest_gate":
-		player.position = info.forest_gate
-		player.yaw = -PI / 2.0
-		Engine.set_meta("cat_spawn", "")
+	# coming back from another level: start at the hub gate that leads there (hub.gd)
+	var back: String = Engine.get_meta("cat_spawn", "")
+	if info.hub_spawns.has(back):
+		player.position = info.hub_spawns[back][0]
+		player.yaw = info.hub_spawns[back][1]
+	Engine.set_meta("cat_spawn", "")
 	add_child(player)
 	if Engine.get_meta("cat_style", "") != "":
 		player.set_style.call_deferred(Engine.get_meta("cat_style"))
@@ -163,7 +164,7 @@ func _build_hud() -> void:
 	help_label.add_theme_font_size_override("font_size", 15)
 	help_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	help_label.add_theme_constant_override("outline_size", 5)
-	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop (hold = higher, hold long = pounce + aim line) / wall kick (1 per jump) · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\ntab = lock on (rats first, then prey / wildlife): camera holds it, wasd circles it, flick the mouse = next target, tab again = unlock\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb · hold f at a wall = scratch\nstalk (c) up to prey, hold space to pounce · mouse1 / mouse2 = left / right paw swat (hold = rake, or claws: hook stuff) · g / mouse5 = grab + pin it · e drop\nattacks are committed (souls style): dodge comes out of the recovery, extra clicks are buffered\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · f6 forest · f7 stealth · f10 rat pit · h hide help · esc free mouse"
+	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop (hold = higher, hold long = pounce + aim line) / wall kick (1 per jump) · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\ntab = lock on (rats first, then prey / wildlife): camera holds it, wasd circles it, flick the mouse = next target, tab again = unlock\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb · hold f at a wall = scratch\nstalk (c) up to prey, hold space to pounce · mouse1 / mouse2 = left / right paw swat (hold = rake, or claws: hook stuff) · g / mouse5 = grab + pin it · e drop\nattacks are committed (souls style): dodge comes out of the recovery, extra clicks are buffered\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · walk out the yard gates to travel: west = forest, east = pier 9, north = trail, cellar by the barn = rat pit (f6 / f7 / f8 / f10 shortcuts) · h hide help · esc free mouse"
 	if OS.has_feature("web"):
 		help_label.text = "click the game to grab the mouse (in a browser use c to crouch, ctrl+w closes the tab!)\n" + help_label.text.replace("ctrl/c", "c")
 		help_label.offset_top = -152
@@ -200,13 +201,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			go_scene("res://arena.tscn")
 
 
-## level hop. keeps the chosen cat style across scenes via Engine meta "cat_style"
+## level hop (debug keys, lobby "go to them", server map). keeps the cat style via Engine
+## meta "cat_style"; the in-world gates go through Hub.travel too.
 func go_scene(path: String) -> void:
 	if not ResourceLoader.exists(path):
 		_flash("that level isn't in this build yet")
 		return
-	Engine.set_meta("cat_style", player.style)
-	get_tree().change_scene_to_file.call_deferred(path)
+	Hub.travel(get_tree(), path, "", player.style)
 
 
 func _flash(t: String) -> void:
