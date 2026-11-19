@@ -40,6 +40,7 @@ var _dash_prev := -1
 var _catches := 0
 var _still_t := 0.0
 var _climb_click := 0.0
+var _slide_catches := 0
 var _skid_t := 0.0
 var _meow_prev := false
 var _meow_cool := 0.0
@@ -162,11 +163,20 @@ func _process(dt: float) -> void:
 	_catches = player.catches
 	# ---- scratching (loop) + climbing claws + skids
 	var scr := player.scratching
-	if scr and not scratch_loop.playing:
-		scratch_loop.volume_db = -4.0
+	# sliding down something it can't climb: the same rasp, pitched up with the speed
+	var sliding: bool = player.get("sliding") == true and player.rig.slide > 0.5
+	if sliding:
+		scratch_loop.pitch_scale = 0.9 + absf(player.velocity.y) * 0.18
+	elif scr:
+		scratch_loop.pitch_scale = 1.0
+	if (scr or sliding) and not scratch_loop.playing:
+		scratch_loop.volume_db = -4.0 if scr else -9.0
 		scratch_loop.play()
-	elif not scr and scratch_loop.playing:
+	elif not (scr or sliding) and scratch_loop.playing:
 		scratch_loop.stop()
+	if sliding and player.rig.slide_fx.catches != _slide_catches:
+		_one(_variant("claw"), 0.45, rng.randf_range(1.0, 1.3))   # a fore claw snaps back in
+	_slide_catches = player.rig.slide_fx.catches
 	if player.climbing:
 		_climb_click -= dt * (1.0 + absf(player.velocity.y) * 3.0)
 		if _climb_click <= 0.0:

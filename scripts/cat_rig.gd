@@ -42,6 +42,8 @@ var kick_w := 0.0        # 0..1 in the wall kick pose (tail tucked down the spin
 var scratch := 0.0       # raking claws down a vertical surface in front
 var scratch_dist := 0.16 # distance from the rig root (-z) to the scratched surface
 var climb := 0.0         # claws in, going up a vertical surface. owner rotates the rig onto the wall
+var slide := 0.0         # 0..1 sliding down something it can't climb, fore claws dragging (cat_slide.gd). owner rotates the rig onto it
+var slide_fx := CatSlide.new()
 var clamber := 0.0       # hanging off a ledge by the forepaws
 var clamber_pull := 0.0  # 0..1 progress of hauling up over it
 var ledge_world := Vector3.ZERO # top of the ledge edge (world)
@@ -962,7 +964,7 @@ func animate(dt: float) -> void:
 			home.z = lerpf(home.z, 0.07 * pelvis_z / 0.095, loaf_h)
 			home.z += rear * 0.02
 		homes.append(yb * home)
-	var all_free := (not on_floor) or climb > 0.02 or clamber > 0.02 or not use_planting
+	var all_free := (not on_floor) or climb > 0.02 or clamber > 0.02 or slide > 0.02 or not use_planting
 	var want_free := [all_free, all_free, all_free, all_free]
 	var gxf := Transform3D(gb, gx.origin)
 	if net_phase >= 0.0:
@@ -1002,6 +1004,10 @@ func animate(dt: float) -> void:
 		_hang_cv = Vector3.ZERO
 		_hang_pv = Vector3.ZERO
 		_hang_roll = 0.0
+	if slide > 0.0:
+		slide_fx.update(self, dt, gxf, gxf.basis.orthonormalized().inverse() * drive_velocity)
+	else:
+		slide_fx.reset()
 	var p2 := phase * TAU
 	var fl := []
 	for i in 4:
@@ -1021,7 +1027,7 @@ func animate(dt: float) -> void:
 	if rough:
 		# the capsule hopped up / down a bump: the planted paws didn't, so neither does the body
 		var ry := gx.origin.y
-		if not is_nan(_root_y_prev) and on_floor and _prev_floor_g and nc > 0.5 and absf(ry - _root_y_prev) < 0.3:
+		if not is_nan(_root_y_prev) and on_floor and _prev_floor_g and nc > 0.5 and slide < 0.02 and absf(ry - _root_y_prev) < 0.3:
 			_fgy -= ry - _root_y_prev
 			_hgy -= ry - _root_y_prev
 		_root_y_prev = ry
@@ -1072,7 +1078,7 @@ func animate(dt: float) -> void:
 				groll_ok[h] = true
 	_chest_dy = LowPoly.damp(_chest_dy, dy[0], 28.0, dt)
 	_pelvis_dy = LowPoly.damp(_pelvis_dy, dy[1], 28.0, dt)
-	var plantw := (1.0 - _air_w) * nc * (1.0 - clamber)
+	var plantw := (1.0 - _air_w) * nc * (1.0 - clamber) * (1.0 - slide)
 	var glo := -0.2 if rough else -0.12
 	var ghi := 0.2 if rough else 0.14
 	_fgy = LowPoly.damp(_fgy, clampf(gy[0], glo, ghi) * plantw, 12.0, dt)
@@ -1113,7 +1119,7 @@ func animate(dt: float) -> void:
 	var pull_e := smoothstep(0.3, 1.0, clamber_pull)
 	var ra := rear * 1.02 + clamber * lerpf(1.3, 0.0, pull_e)
 	var hz := pelvis_z
-	var base_y := BODY_H - crouch * 0.085 - charge * 0.03 - sit_h * 0.075 + gal_bob * (1.0 - _air_w) - stretch * 0.02 - climb * lerpf(0.07, 0.145, climb_splay)
+	var base_y := BODY_H - crouch * 0.085 - charge * 0.03 - sit_h * 0.075 + gal_bob * (1.0 - _air_w) - stretch * 0.02 - climb * lerpf(0.07, 0.145, climb_splay) - slide * (1.0 - climb) * 0.13
 	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y + soma.dip
 	base_y = lerpf(base_y, BODY_H * 0.4 + (_fgy + _hgy) * 0.5, (loaf_h + loaf_f) * 0.5)
 	pivot.position.y = base_y + hz * sin(ra)
@@ -1278,7 +1284,7 @@ func animate(dt: float) -> void:
 	pivot.rotation.z -= lat * 0.11 * _hop_w * _air_w
 	var hs := clampf(spd / 2.5, 0.0, 1.0)
 	var lp := to_local(ledge_world) if clamber > 0.0 else Vector3.ZERO
-	var claws := maxf(maxf(maxf(scramble, slip_claws), scratch), maxf(climb, clamber))
+	var claws := maxf(maxf(maxf(scramble, slip_claws), scratch), maxf(maxf(climb, clamber), slide))
 	claws = maxf(claws, maxf(pin, _air_w * hs * clampf(rise + 0.8, 0.0, 1.0)))
 	claws_out = LowPoly.damp(claws_out, claws, 14.0, dt)
 	var land_l := rinv * land_point
@@ -1313,6 +1319,11 @@ func animate(dt: float) -> void:
 				ff = home.lerp(_cg_foot[i], climb)
 				fprot = float(_cg_prot[i]) * climb
 				fheel = (0.0 if front else 0.22 * float(_cg_hold[i])) * climb * climb_splay
+			if slide > 0.0:
+				# sliding off it: fore claws dragging out ahead, hind feet trailing (cat_slide.gd)
+				ff = ff.lerp(slide_fx.foot[i], slide)
+				fprot = lerpf(fprot, float(slide_fx.prot[i]), slide)
+				fheel = lerpf(fheel, 0.0, slide)
 			foot = foot.lerp(ff, fw)
 			prot = lerpf(prot, fprot, fw)
 			heel = lerpf(heel, fheel, fw)
@@ -2030,7 +2041,7 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 		if tail_floor and np.y < floor_y:
 			np.y = floor_y
 			np = p + (np - p).normalized() * TAIL_SEG
-		elif climb > 0.5 and np.y < 0.014:
+		elif (climb > 0.5 or slide > 0.5) and np.y < 0.014:
 			# nor through the wall it's climbing (rig y = 0 is the wall face)
 			np.y = 0.014
 			np = p + (np - p).normalized() * TAIL_SEG

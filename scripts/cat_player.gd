@@ -137,7 +137,23 @@ var prev_swat := false
 var prev_v := false
 var fov_base := 82.0
 var max_height := 0.0
-var wall_sliding := false
+var wall_sliding := false       # = sliding (kept for old tests / scripts)
+# sliding down something it can't grip (smooth wall, slope too steep to stand on): fore claws drag
+# out ahead, body + hind legs trail (rig side: cat_slide.gd). steering into a wall or just lying
+# on a too steep slope keeps it going
+var sliding := false
+var slide_n := Vector3.ZERO     # surface normal (full 3d: walls and steep slopes)
+var slide_head_up := true       # facing the surface / up the slope (false = going down head first)
+var w_slide := 0.0
+var _slide_col: Object
+var _slide_seen := 10.0         # time since last touching a too steep surface
+var _slide_marks: Array[Node3D] = []
+var _slide_mark_last := [Vector3.INF, Vector3.INF]
+var _slide_mat: StandardMaterial3D
+# steady slide speed (m/s down a vertical face) by surface: slick tile goes fastest, claws
+# bite into soft stuff more
+const SLIDE_SPEED := {"tile": 2.1, "wood": 1.6, "dirt": 1.3, "grass": 1.2, "hay": 1.0, "carpet": 0.8, "rug": 0.8, "default": 1.5}
+const SLIDE_STEEP_Y := 0.64     # normals below this are too steep to stand on (floor_max_angle 50 deg)
 var last_event := ""            # what the cat last did (logs / tests only: nothing on screen)
 var last_event_t := 0.0
 var toast := ""                 # the only on screen text: level / system messages set by the mains
@@ -952,12 +968,11 @@ func _physics_process(dt: float) -> void:
 		wall_sliding = false
 	if not grounded:
 		velocity.y -= G * dt
-		# claws out: pushing into a wall while falling drags you down slowly
-		if wall_time < 0.05 and wish_dir.dot(-wall_normal) > 0.5 and velocity.y < -1.0:
-			velocity.y = move_toward(velocity.y, -1.0, 30.0 * dt)
-			wall_sliding = true
-		else:
-			wall_sliding = false
+		# claws out: steering into a wall it can't climb (or lying on a slope too steep to stand
+		# on) it slides down it, fore claws dragging. see _slide_step
+		_slide_step(dt, wish_dir)
+	else:
+		_end_slide()
 	velocity.x = hv.x
 	velocity.z = hv.z
 	if land_stick > 0.0:
@@ -977,6 +992,7 @@ func _physics_process(dt: float) -> void:
 		RunAssist.step_up(self, hv, dt)   # roots, branches, stone lips: glide up, paws step
 	move_and_slide()
 	_track_walls()
+	_slide_contact()
 	_push_props()
 
 	if wall_time < 0.03:
@@ -1065,17 +1081,22 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.on_floor = is_on_floor() or mantling or clambering or climbing or scratching
 	rig.crouch = maxf(maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85), combat.gather_w())
 	rig.charge = charge
-	rig.look_pitch = pitch * 0.6 * (1.0 - w_face)
+	rig.look_pitch = pitch * 0.6 * (1.0 - maxf(w_face, w_slide))
 	# head camera: looking down past ~15 deg the cat curls its neck to look at its own paws
 	var tuck := smoothstep(-0.25, -1.25, pitch) if (head_cam and view_mode == 0) else 0.0
 	rig.head_tuck = LowPoly.damp(rig.head_tuck, tuck, 8.0, dt)
 	# the head turns a little toward where you're looking
-	var lyaw := clampf(wrapf(orb_yaw - yaw, -PI, PI), -1.2, 1.2) * 0.7 * (1.0 - w_face)
+	var lyaw := clampf(wrapf(orb_yaw - yaw, -PI, PI), -1.2, 1.2) * 0.7 * (1.0 - maxf(w_face, w_slide))
 	rig.look_yaw = LowPoly.damp(rig.look_yaw, lyaw, 10.0, dt)
 	# wall scramble pose only. ground slip used to feed this too, which threw the front paws up into
 	# the wall-claw pose whenever grip ran out on the floor (hard starts / turns on wood or tile).
 	# slipping now just shows the claws and the paws stay on the ground.
-	rig.scramble = LowPoly.damp(rig.scramble, 1.0 if scramble_t > 0.0 else (0.6 if wall_sliding else 0.0), 14.0, dt)
+	rig.scramble = LowPoly.damp(rig.scramble, 1.0 if scramble_t > 0.0 else 0.0, 14.0, dt)
+	w_slide = LowPoly.damp(w_slide, 1.0 if sliding else 0.0, 14.0 if sliding else 9.0, dt)
+	rig.slide = w_slide * (1.0 - w_face)
+	if sliding:
+		rig.on_floor = true    # paws are on the surface, not in an air pose
+		_slide_fx()
 	rig.slip_claws = minf(slip * 1.3, 1.0) if is_on_floor() else 0.0
 	if stamina and stamina.winded:
 		rig.soma.exertion = maxf(rig.soma.exertion, 0.9)   # ran the bar dry: the cat is visibly blown
@@ -1101,7 +1122,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	paws.vy = velocity.y
 	paws.crouch = crouch_amt
 	paws.charge = charge
-	paws.scramble = rig.scramble
+	paws.scramble = maxf(rig.scramble, rig.slide * 0.6)
 	paws.climb = w_climb
 	paws.hang = w_clamber
 	paws.hang_pull = rig.clamber_pull if clambering else 0.0
@@ -1168,6 +1189,9 @@ func lock_point() -> Vector3:
 ## and when climbing it rotates 90 degrees so its feet are on the wall
 func _orient_rig() -> void:
 	_clip_guard()
+	if w_slide > 0.002 and w_face < 0.002 and w_kick < 0.002:
+		_orient_slide()
+		return
 	if w_kick > 0.002 and w_face < 0.002:
 		_orient_kick()
 		return
@@ -1184,6 +1208,22 @@ func _orient_rig() -> void:
 	q = q.slerp(climb_b.get_rotation_quaternion(), clampf(wc, 0.0, 1.0))
 	var pos := global_position.lerp(global_position + up * 0.05 - n * (RADIUS + 0.012), wc)
 	pos += global_transform.basis.z * _clip_off * (1.0 - clampf(w_face, 0.0, 1.0))
+	rig.global_transform = Transform3D(Basis(q), pos)
+
+
+## sliding: the rig lies on the surface (rig y = its normal), head up it, or down it going head first
+func _orient_slide() -> void:
+	var n := slide_n
+	var down := (Vector3.DOWN - n * Vector3.DOWN.dot(n))
+	if down.length() < 0.05:
+		down = -global_transform.basis.z
+	down = down.normalized()
+	var z := down if slide_head_up else -down
+	var sb := Basis(n.cross(z).normalized(), n, z)
+	var w := clampf(w_slide, 0.0, 1.0)
+	var q := global_transform.basis.get_rotation_quaternion().slerp(sb.get_rotation_quaternion(), w)
+	var pos := global_position.lerp(global_position - n * (RADIUS + 0.008), w)
+	pos += global_transform.basis.z * _clip_off * (1.0 - w)
 	rig.global_transform = Transform3D(Basis(q), pos)
 
 
@@ -1428,6 +1468,117 @@ func _bump_dir() -> Vector3:
 		if n.y < 0.72 and n.y > -0.4 and Vector2(n.x, n.z).length() > 0.1:
 			return -Vector3(n.x, 0, n.z).normalized()
 	return Vector3.ZERO
+
+
+## any contact this tick with something too steep to stand on (a wall, or a slope past 50 deg)
+func _slide_contact() -> void:
+	_slide_seen += get_physics_process_delta_time()
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		var n := c.get_normal()
+		if n.y < SLIDE_STEEP_Y and n.y > -0.15:
+			slide_n = n
+			_slide_col = c.get_collider()
+			_slide_seen = 0.0
+
+
+## falling against something it can't climb: claws out, slide down it. on a vertical face it needs
+## steering into it (let go = drop off); a too steep slope keeps it sliding just by lying on it
+func _slide_step(dt: float, wish_dir: Vector3) -> void:
+	var nh := Vector3(slide_n.x, 0.0, slide_n.z)
+	nh = nh.normalized() if nh.length() > 0.01 else -global_transform.basis.z
+	var into := wish_dir.dot(-nh)
+	var slope := slide_n.y > 0.2
+	var ok := _slide_seen < 0.1 and not _is_climbable(_slide_col) and scramble_t <= 0.0
+	ok = ok and not (climbing or clambering or mantling or scratching) and velocity.y < 0.3
+	ok = ok and (slope or into > (0.25 if sliding else 0.5))
+	if not ok:
+		_end_slide()
+		return
+	if not sliding:
+		start_wall_slide(slide_n)
+	# claws drag it down to a steady speed (slower on a gentler slope, faster on slick stuff)
+	var steep := sqrt(maxf(1.0 - slide_n.y * slide_n.y, 0.0))
+	var v_t := float(SLIDE_SPEED.get(_slide_surface(), SLIDE_SPEED.default)) * steep * steep
+	if velocity.y < -v_t:
+		velocity.y = move_toward(velocity.y, -v_t, 30.0 * dt)
+
+
+## starts the claw drag slide on a surface with normal n (also called when climbing loses its grip)
+func start_wall_slide(n: Vector3) -> void:
+	if is_on_floor():
+		return
+	if n.y >= SLIDE_STEEP_Y or n.y <= -0.15:
+		n = Vector3(n.x, 0.0, n.z).normalized()
+	if n == Vector3.ZERO:
+		return
+	slide_n = n
+	_slide_seen = 0.0
+	if sliding:
+		return
+	sliding = true
+	wall_sliding = true
+	# which way round: facing into it / up it = head up, facing down the slope = head first
+	var down := Vector3.DOWN - n * Vector3.DOWN.dot(n)
+	var fwd := -global_transform.basis.z
+	fwd = fwd - n * fwd.dot(n)
+	slide_head_up = down.length() < 0.05 or fwd.length() < 0.05 or fwd.normalized().dot(down.normalized()) < 0.3
+	_slide_mark_last = [Vector3.INF, Vector3.INF]
+	_event("sliding down, claws dragging")
+
+
+func _end_slide() -> void:
+	sliding = false
+	wall_sliding = false
+
+
+func _slide_surface() -> String:
+	if _slide_col is Node:
+		var nd := _slide_col as Node
+		if nd.has_meta("surface"):
+			return nd.get_meta("surface")
+	return "default"
+
+
+## claw marks: three thin scrapes behind each fore claw while it drags
+func _slide_fx() -> void:
+	var sf: CatSlide = rig.slide_fx
+	if w_slide < 0.5 or get_tree().current_scene == null:
+		return
+	for i in 2:
+		var c: Vector3 = sf.contact[i]
+		if not sf.planted[i]:
+			_slide_mark_last[i] = Vector3.INF
+			continue
+		var last: Vector3 = _slide_mark_last[i]
+		if last == Vector3.INF:
+			_slide_mark_last[i] = c
+			continue
+		var d := c - last
+		if d.length() < 0.025:
+			continue
+		_slide_mark_last[i] = c
+		var along := d.normalized()
+		var side := along.cross(slide_n).normalized()
+		var tint := Color(0.92, 0.88, 0.8, 0.6) if _slide_surface() == "wood" else Color(0.22, 0.2, 0.18, 0.5)
+		if _slide_mat == null or _slide_mat.albedo_color != tint:
+			_slide_mat = StandardMaterial3D.new()
+			_slide_mat.albedo_color = tint
+			_slide_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			_slide_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		for k in 3:
+			var m := MeshInstance3D.new()
+			m.mesh = LowPoly.box(0.0)
+			m.material_override = _slide_mat
+			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			get_tree().current_scene.add_child(m)
+			var mid := (c + last) * 0.5 + side * (k - 1) * 0.006 + slide_n * 0.0015
+			m.global_transform = Transform3D(Basis(side * 0.0016, slide_n * 0.001, along * (d.length() + 0.004)), mid)
+			_slide_marks.append(m)
+		while _slide_marks.size() > 360:
+			var old: Node3D = _slide_marks.pop_front()
+			if is_instance_valid(old):
+				old.queue_free()
 
 
 func _is_climbable(o: Object) -> bool:
