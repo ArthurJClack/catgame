@@ -115,6 +115,31 @@ func _farm() -> bool:
 	await _ticks(5)
 	print("D gift: gifts %d (then %d after re-gifting the same mouse), treats in bowl %d" % [g1, z.gifts, bowl])
 	ok = ok and g1 == 1 and z.gifts == 1 and bowl >= 3
+	# E: pull the string: batting it only swings it, hooking + dragging it back drops the bale
+	var r: PullString = z.rope
+	var tl: Vector3 = r.rest_tail()
+	var stand: Vector3 = Vector3(tl.x, 0.02, tl.z - 0.32)
+	_put(stand, tl + Vector3(0, 0.12, 0))
+	await _ticks(20)
+	await _swat()
+	await _secs(1.0)
+	var swung: int = r.tugs
+	tries = 0
+	while not r.falling and tries < 5:
+		_put(stand, tl + Vector3(0, 0.12, 0))
+		await _ticks(10)
+		p.call("_claw_start", 0)
+		var got: bool = r.hooked()
+		for k in 24:
+			_put(stand + Vector3(0, 0, -0.016 * k), tl + Vector3(0, 0.05, 0))
+			await _ticks(3)
+		print("E pull: try %d hooked %s tugs %d tail off %.2f" % [tries, str(got), r.tugs, r.tail().distance_to(tl)])
+		p.call("_claw_release")
+		await _secs(1.0)
+		tries += 1
+	await _secs(3.5)
+	print("E pull string: tugs %d (batting alone gave %d), bale fell %s, solved %s, bale at %s, treats on floor %d" % [r.tugs, swung, str(r.falling), str(r.done), str(r.bale.global_position.snapped(Vector3.ONE * 0.01)), z.treats.size()])
+	ok = ok and swung == 0 and r.done and r.bale.global_position.y < 0.5 and z.treats.size() >= 5
 	print("   solved: %s" % str(Puzzles.solved))
 	return ok
 

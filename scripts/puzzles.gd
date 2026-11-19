@@ -11,6 +11,8 @@ extends Node3D
 ##                 beam -> spine beam -> sunbeam. sit still in it and it pays out.
 ##   gift          drop something you caught (e) on the doormat outside the patio door. the bowl
 ##                 next to it fills up. every different catch counts once.
+##   pull string   a rope hangs off the barn loft edge, tied to a bale up there. hook it with your
+##                 claws and drag it a couple of times: the bale drops and bursts (puzzle_rope.gd).
 ## rat pit (arena.tscn):
 ##   lanterns      oil lanterns sit on the pillar tops (pillars are rough stone now: climbable).
 ##                 swat one off and it smashes: rats near it take a heavy hit, then the oil burns
@@ -54,6 +56,8 @@ var mat_pos := Vector3.ZERO
 var bowl_pos := Vector3.ZERO
 var gifts := 0
 var _carried_prev: Node3D = null
+# pull the string (puzzle_rope.gd)
+var rope: PullString
 # lanterns
 var lanterns: Array[RigidBody3D] = []
 var fires: Array[Dictionary] = []
@@ -103,6 +107,9 @@ func _build_farm() -> void:
 	bowl_pos = Vector3(3.05, 0.0, 4.5)
 	_doormat(mat_pos)
 	_bowl(bowl_pos)
+	# pull the string: rope off the barn loft edge (beam front z 21.8, underside 2.23), tied to a
+	# bale sitting on the edge above it. between the ladder (x 10.4) and the middle loft post (12)
+	rope = PullString.build(self, Vector3(11.2, 2.2, 21.74), Vector3(11.2, 2.55, 22.12))
 
 
 func _build_pit() -> void:

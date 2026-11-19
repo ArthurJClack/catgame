@@ -16,6 +16,7 @@ const LIST := {
 	"sunbather": ["sunbather", "find the sunbeam up in the barn and sit in it", false],
 	"gift": ["for you, human", "leave something you caught on the doormat", false],
 	"lantern": ["oops", "knock a lantern off a pillar in the rat pit", false],
+	"pull_string": ["tug of war", "pull the rope in the barn until something gives", false],
 	"treats_10": ["snack time", "eat 10 treats", false],
 	"treats_50": ["round boy", "eat 50 treats", false],
 	"hunter": ["hunter", "catch something", false],
@@ -105,6 +106,7 @@ func check(p: CatPlayer) -> void:
 	if solved.has("perch_sunbeam"): unlock("sunbather")
 	if solved.has("gift"): unlock("gift")
 	if solved.has("lantern"): unlock("lantern")
+	if solved.has("pull_string"): unlock("pull_string")
 	if treats >= 10: unlock("treats_10")
 	if treats >= 50: unlock("treats_50")
 	var c := int(st.get("catches", 0))
