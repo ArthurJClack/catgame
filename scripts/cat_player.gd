@@ -316,6 +316,7 @@ func _ready() -> void:
 	paws.pattern = rig.pattern
 	paws.socks = rig.socks
 	paws.sock_col = rig.belly
+	paws.pad = rig.pad_color
 	paws.rig = rig
 	# the paws hang off a yaw-only anchor at the eye, not the camera: look up and they
 	# drop out of view like real paws would, look down and you see more of them
@@ -1231,6 +1232,7 @@ func set_style(st: String) -> void:
 	paws.pattern = rig.pattern
 	paws.socks = rig.socks
 	paws.sock_col = rig.belly
+	paws.pad = rig.pad_color
 	paws.visible = op.visible
 	paws.rig = rig
 	op.get_parent().add_child(paws)
