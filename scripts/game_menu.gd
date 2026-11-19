@@ -28,12 +28,21 @@ func _ready() -> void:
 	layer = 90
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	GameSettings.ensure()
+	CatSfx.ui("warm")      # makes the ui player
 	_build()
 	get_tree().node_added.connect(_on_node_added)
 	GameSettings.apply_all.call_deferred(get_tree())
 
 
 func _on_node_added(n: Node) -> void:
+	if n is BaseButton:
+		# menu clicks everywhere (pause menu, title, lobby)
+		(n as BaseButton).pressed.connect(func(): CatSfx.ui("click"))
+		(n as BaseButton).mouse_entered.connect(func(): CatSfx.ui("hover"))
+	elif n is SoulsRat and CatSfx.available():
+		var v := CatSfx.RatVoice.new()
+		v.rat = n
+		n.add_child.call_deferred(v)
 	# a fresh scene: give its environment / lights / audio / cat the saved settings
 	if n is WorldEnvironment or n is DirectionalLight3D or n is Camera3D \
 			or n is AudioStreamPlayer or n is AudioStreamPlayer2D or n is AudioStreamPlayer3D:
