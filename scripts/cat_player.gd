@@ -235,6 +235,7 @@ var _head_follow: Node
 # hunting
 var carried: Node3D = null      # prey held in the mouth
 var catches := 0
+var leaps := 0                   # aimed leaps taken (tutorial / stats)
 var hunt_info := ""             # hud line: nearest prey while stalking
 var _swat_prey: Node3D = null
 var _auto_t := 0.0
@@ -1996,6 +1997,7 @@ func _leap() -> void:
 		aim_point = _aim_ok_point
 		aim_kind = _aim_ok_kind
 	_aim_ok_age = 99.0
+	leaps += 1
 	stamina.spend(CatStamina.LEAP)
 	velocity = aim_vel
 	leap_lock = true

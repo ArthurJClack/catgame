@@ -54,6 +54,8 @@ func _ready() -> void:
 	_build_hud()
 	Puzzles.farm(self, player)   # knock it off, sunbeam perch, doormat gifts (puzzles.gd)
 	preview_mode = "--preview" in OS.get_cmdline_user_args()
+	if not preview_mode and Tutorial.should_run():
+		Tutorial.start(self, player)        # first time: control hint cards (tutorial.gd)
 	if not preview_mode and TitleScreen.should_show():
 		TitleScreen.show_on(self, player)   # boot: title over the live farm (title_screen.gd)
 		return

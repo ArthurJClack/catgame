@@ -21,6 +21,7 @@ const DEFAULTS := {
 	"render_scale": 1.0,
 	"quality": 2,         # 0 low, 1 medium, 2 high
 	"show_fps": false,
+	"hints": true,        # tutorial hint cards on the farm (tutorial.gd)
 }
 const QUALITY_NAMES := ["low", "medium", "high"]
 const FPS_CAPS := [0, 30, 60, 120, 144, 165, 240]
