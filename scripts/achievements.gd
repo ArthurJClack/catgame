@@ -17,6 +17,7 @@ const LIST := {
 	"gift": ["for you, human", "leave something you caught on the doormat", false],
 	"lantern": ["oops", "knock a lantern off a pillar in the rat pit", false],
 	"pull_string": ["tug of war", "pull the rope in the barn until something gives", false],
+	"herd": ["sheepdog", "walk all five chicks back into their pen", false],
 	"treats_10": ["snack time", "eat 10 treats", false],
 	"treats_50": ["round boy", "eat 50 treats", false],
 	"hunter": ["hunter", "catch something", false],

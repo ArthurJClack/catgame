@@ -13,6 +13,8 @@ extends Node3D
 ##                 next to it fills up. every different catch counts once.
 ##   pull string   a rope hangs off the barn loft edge, tied to a bale up there. hook it with your
 ##                 claws and drag it a couple of times: the bale drops and bursts (puzzle_rope.gd).
+##   herd chicks   five chicks loose in the yard keep their distance from the cat. walk them into
+##                 their pen through the gap; run at them and they scatter (puzzle_herd.gd).
 ## rat pit (arena.tscn):
 ##   lanterns      oil lanterns sit on the pillar tops (pillars are rough stone now: climbable).
 ##                 swat one off and it smashes: rats near it take a heavy hit, then the oil burns
@@ -58,6 +60,7 @@ var gifts := 0
 var _carried_prev: Node3D = null
 # pull the string (puzzle_rope.gd)
 var rope: PullString
+var herd: HerdChicks
 # lanterns
 var lanterns: Array[RigidBody3D] = []
 var fires: Array[Dictionary] = []
@@ -110,6 +113,8 @@ func _build_farm() -> void:
 	# pull the string: rope off the barn loft edge (beam front z 21.8, underside 2.23), tied to a
 	# bale sitting on the edge above it. between the ladder (x 10.4) and the middle loft post (12)
 	rope = PullString.build(self, Vector3(11.2, 2.2, 21.74), Vector3(11.2, 2.55, 22.12))
+	# herd the chicks: five loose in the yard east of the barn door, their pen by the east fence
+	herd = HerdChicks.build(self)
 
 
 func _build_pit() -> void:
