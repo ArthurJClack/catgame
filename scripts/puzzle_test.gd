@@ -1,7 +1,7 @@
 class_name PuzzleTest
 extends Node
 ## checks the first puzzle milestone with the real controller (puzzles.gd).
-##   godot --headless --path . res://main.tscn -- --puzzletest    (knock it off, sunbeam, gift, treats)
+##   godot --headless --path . res://main.tscn -- --puzzletest    (knock it off, sunbeam, gift, treats, rope, chicks)
 ##   godot --headless --path . res://arena.tscn -- --puzzletest   (lanterns: swat off a pillar, smash a rat)
 ## prints each check and PUZZLETEST PASS / FAIL, then quits.
 
@@ -140,8 +140,83 @@ func _farm() -> bool:
 	await _secs(3.5)
 	print("E pull string: tugs %d (batting alone gave %d), bale fell %s, solved %s, bale at %s, treats on floor %d" % [r.tugs, swung, str(r.falling), str(r.done), str(r.bale.global_position.snapped(Vector3.ONE * 0.01)), z.treats.size()])
 	ok = ok and swung == 0 and r.done and r.bale.global_position.y < 0.5 and z.treats.size() >= 5
+	ok = (await _herd()) and ok
 	print("   solved: %s" % str(Puzzles.solved))
 	return ok
+
+
+## F: herd the chicks. first gallop at them (they should scatter), then walk them in one by one
+## the way a person would play it: get behind a chick, on the side away from where it should go,
+## and close in slowly. only ever walking pace (the cat is moved, never faster than 1.1 m/s)
+func _herd() -> bool:
+	var h: HerdChicks = z.herd
+	var c0: Vector3 = h.chicks[1].global_position
+	_put(c0 + Vector3(-4.5, 0.02, 0), c0)
+	await _ticks(10)
+	bot.move = Vector2(0, 1)
+	bot.sprint = true
+	await _secs(1.6)
+	bot.move = Vector2.ZERO
+	bot.sprint = false
+	await _secs(1.0)
+	var scattered: int = h.panics
+	print("F herd: galloping at them made %d chick(s) bolt" % scattered)
+	var gap := Vector3(HerdChicks.PEN.position.x - 0.9, 0, (HerdChicks.GAP_Z.x + HerdChicks.GAP_Z.y) * 0.5)
+	var cat := p.global_position
+	cat.y = 0.02
+	var dt := 1.0 / Engine.physics_ticks_per_second
+	var t := 0.0
+	while not h.done and t < 240.0:
+		# the loose chick closest to the gap
+		var best: CharacterBody3D = null
+		var bd := 1e9
+		for c in h.chicks:
+			if not h.in_pen(c.global_position):
+				var d := c.global_position.distance_to(gap)
+				if d < bd:
+					bd = d
+					best = c
+		if best == null:
+			await _ticks(1)
+			t += dt
+			continue
+		var cp := best.global_position
+		cp.y = 0
+		# lined up with the gap: push it straight in, else push it to the spot in front of the gap
+		var aligned := absf(cp.z - gap.z) < 0.35 and cp.x > gap.x - 0.6 and cp.x < HerdChicks.PEN.position.x + 0.3
+		var target: Vector3 = h.grain if aligned else gap
+		var back := (cp - target)
+		back.y = 0
+		back = back.normalized()
+		var spot := cp + back * 1.15
+		var flat := Vector3(cat.x, 0, cat.z)
+		var rel := flat - cp
+		var want: Vector3
+		if rel.length() < 2.0 and rel.normalized().dot(back) < 0.6:
+			# wrong side of it: circle round outside its flight zone
+			var tang := Vector3(-rel.z, 0, rel.x).normalized()
+			if tang.dot(back) < 0.0:
+				tang = -tang
+			want = cp + (rel.normalized() * 2.0 + tang * 0.9).normalized() * 2.0
+		else:
+			want = spot
+		var step := (want - flat)
+		step.y = 0
+		var sp := 1.1 * dt
+		if step.length() > sp:
+			step = step.normalized() * sp
+		cat += step
+		_put(cat, Vector3(cp.x, 0.1, cp.z))
+		await _ticks(1)
+		t += dt
+		if int(t / dt) % 600 == 0:
+			print("   t %.0f s: %d/5 in the pen, cat %s chick %s" % [t, h.inside(), str(cat.snapped(Vector3.ONE * 0.1)), str(cp.snapped(Vector3.ONE * 0.1))])
+	var n_in: int = h.inside()
+	var treats_before := z.treats.size()
+	await _secs(2.0)
+	var gate_shut: bool = absf(h.gate.rotation.y) < 0.05
+	print("F herd the chicks: %d/5 in after %.0f s walking them, solved %s, gate shut %s, treats out %d" % [n_in, t, str(h.done), str(gate_shut), treats_before])
+	return scattered >= 2 and h.done and gate_shut and treats_before >= 5
 
 
 const SUN_WAIT := 2.2
