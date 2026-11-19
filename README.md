@@ -5,6 +5,8 @@ the cat model, its animation, the level.
 
 open the folder in godot 4.3+ and hit play (f5).
 
+boot = **title screen** (`title_screen.gd`) over the live farm while the camera circles your cat: continue (last save, says where + play time + puzzles + treats), load / new game (3 slots, "start over" needs two clicks), settings, play online (the m lobby), quit. once per run, never in tests / previews / the server. test: `xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/title_test.gd [-- out/title]` (saves screenshots)
+
 ## controls
 - wasd moves relative to where you look (same as the orbit cam in every view), the cat turns to run that way and its head follows your look. backing up is slow, a/d = short sideways hop, hold shift = canter (6 m/s), double tap shift + hold = full gallop (11 m/s), ctrl/c stalk (crouch)
 - momentum: the cat has weight. speed builds (trot ~0.4 s, full gallop ~2.5 s) and bleeds off when you let go (gallop rolls ~1.5-2 s), asking to go the other way at speed plants the paws and skids, and the faster it runs the wider it turns. hold x (or tap caps lock) = walk (~1 m/s)
@@ -49,7 +51,7 @@ open the folder in godot 4.3+ and hit play (f5).
 - v: third person (see the whole cat)
 - **esc (pad start) = pause menu** (`game_menu.gd`, autoload `GameMenu`): resume, settings, controls, back to the farm, quit. single player pauses, online the world keeps going but your cat stands still while it's open
   - settings (`game_settings.gd`, saved to `user://settings.cfg`): master / world ambience / cat + effects volume (audio buses `Ambience` + `SFX`, new players get routed automatically), mouse sensitivity, invert y, fov, head bob off (comfort: the fp eye glides instead of riding each step), fullscreen, vsync, max fps, show fps, quality low / medium / high (low: no ssao / ssil / fog / glow / msaa, shorter shadows) and render scale. defaults = exactly how the game was before
-  - controls: every keyboard / mouse action can be rebound, two binds each (`cat_keys.gd`, `CatKeys.down("jump")`), binding a key takes it off whatever had it, esc / f-keys / m / r are reserved. gamepad map is listed but fixed
+  - controls: every keyboard / mouse action can be rebound, two binds each (`cat_keys.gd`, `CatKeys.down("jump")`), binding a key takes it off whatever had it, esc / f-keys / m / r / h / 1-9 are reserved. gamepad map is listed but fixed
   - test: `xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/menu_test.gd`
 - **save / load** (`save_game.gd`, autoload `Save`): 3 slots (`user://save_<n>.json`, written to a temp file then swapped so a crash can't eat it). keeps the level you're in + where the cat stands, the coat, play time, treats, puzzles solved, stats (catches, rats, best pit wave, best trail laps in one run, lives lost, levels visited) and room for achievements / tutorial flags. autosaves every 45 s, 2 s after every level change, on a puzzle solve and on quit, "saved" blinks bottom right. the pause menu has a save button. booting loads the last slot's progress; `Save.continue_game()` also puts you back in the saved level and spot. off in tests / previews / the server. test: `--script res://tests/save_test.gd` (xvfb), `tests/menu_shots.gd -- out/menu` saves screenshots of the pages
 

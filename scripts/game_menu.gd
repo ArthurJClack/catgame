@@ -21,6 +21,7 @@ var _fps: Label
 var _rebind: Array = []        # [action, slot, button] while waiting for a key
 var _mouse_before := Input.MOUSE_MODE_CAPTURED
 var _paused_tree := false
+var settings_only := false     # opened from the title screen: back closes instead of the paused page
 
 
 func _ready() -> void:
@@ -59,7 +60,7 @@ func can_open() -> bool:
 		return false
 	if Net.ui and Net.ui is CanvasItem and (Net.ui as CanvasItem).visible:
 		return false     # the lobby (m) has its own esc
-	if get_tree().root.has_node("HubFade"):
+	if get_tree().root.has_node("HubFade") or not get_tree().get_nodes_in_group("title_screen").is_empty():
 		return false
 	return local_cat() != null
 
@@ -88,6 +89,7 @@ func close_menu() -> void:
 		return
 	_rebind = []
 	is_open = false
+	settings_only = false
 	_root.visible = false
 	CatKeys.blocked = false
 	if _paused_tree:
@@ -180,6 +182,9 @@ func _build() -> void:
 
 
 func show_page(p: String) -> void:
+	if p == "main" and settings_only and is_open:
+		close_menu.call_deferred()
+		return
 	page = p
 	_rebind = []
 	for c in _body.get_children():

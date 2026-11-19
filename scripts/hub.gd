@@ -78,6 +78,14 @@ static func travel(tree: SceneTree, scene: String, spawn_key := "", style := "")
 	return true
 
 
+## "the forest", "the farm"... for a scene path (title screen, save slots)
+static func scene_name(scene: String) -> String:
+	for k in DESTS:
+		if DESTS[k].scene == scene:
+			return DESTS[k].label
+	return "the farm" if scene == "res://main.tscn" or scene == "" else scene.get_file().get_basename()
+
+
 ## back to the farm from any level, at the gate that leads to it
 static func go_home(node: Node, from_key: String) -> void:
 	var st := ""

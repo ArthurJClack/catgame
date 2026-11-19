@@ -279,6 +279,8 @@ func _process(dt: float) -> void:
 			data.stats.levels[path] = int(data.stats.levels.get(path, 0)) + 1
 		_scene_save_t = 2.0
 		_scene_ms = Time.get_ticks_msec()
+	if not get_tree().get_nodes_in_group("title_screen").is_empty():
+		return    # title screen up: nothing's been played yet, don't overwrite the save with the boot farm
 	data.play_s = float(data.play_s) + dt
 	_track(sc)
 	if not enabled:
@@ -319,7 +321,7 @@ func _track(sc: Node) -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST and enabled:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and enabled and get_tree().get_nodes_in_group("title_screen").is_empty():
 		save_now()
 
 
