@@ -25,6 +25,7 @@ const ACTIONS := [
 	["drop", "drop what's in your mouth"],
 	["lock_on", "lock on"],
 	["toggle_view", "switch view"],
+	["meow", "meow"],
 ]
 
 const DEFAULTS := {
@@ -46,6 +47,7 @@ const DEFAULTS := {
 	"drop": [{"k": KEY_E}],
 	"lock_on": [{"k": KEY_TAB}],
 	"toggle_view": [{"k": KEY_V}],
+	"meow": [{"k": KEY_N}],
 }
 
 ## keys the game keeps for itself (menus, level keys): can't be bound

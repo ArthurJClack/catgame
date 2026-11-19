@@ -273,6 +273,7 @@ var _marks: Array[Node3D] = []
 func _ready() -> void:
 	add_to_group("player")
 	GameSettings.apply_player.call_deferred(self)   # sens / fov / invert / head bob (no-op for bots)
+	(func(): if bot.is_empty() or Engine.get_write_movie_path() != "": CatSfx.attach(self)).call_deferred()   # the cat's own sounds (cat_sfx.gd)
 	floor_snap_length = 0.06
 	floor_max_angle = deg_to_rad(50)
 	safe_margin = 0.002
