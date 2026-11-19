@@ -102,6 +102,21 @@ static var reach_sag := true
 static var follow_fast := true
 ## the footfall solver's "ground level" is the body's (smooth), not the capsule's (hops up steps)
 static var smooth_ref := true
+## the two ends of the body are masses carried by their legs: each planted leg can only
+## push while it's within its length, gives a little under load (a spring about 12 body
+## weights per leg length stiff, what trotting animals measure), can't fold shorter than a
+## real leg does, and when no leg is carrying an end it falls. false = the old eased follow
+## joint limits: a paw in the air hangs under its shoulder / hip by at least a quarter of
+## the leg, and the knee never comes up over the hip. false = legs may fold through the body
+static var leg_limits := true
+static var phys := true
+const K_REL := 12.0
+const ZETA := 0.8
+const LEG_MIN := 0.40    # shortest hip -> paw distance, share of the straight leg
+const LEG_MAX := 0.95
+const LEG_STAND := 0.68  # hip height over the paw standing, share of the straight leg
+var _gv := [0.0, 0.0]    # vertical speed of the fore / hind end (m/s, world)
+var _sup := [2.0, 2.0]   # how many legs' worth of support each end has right now
 var _hop := 0.0
 var _climb_v := 0.0
 const SAG_MAX := 0.06
@@ -1119,8 +1134,16 @@ func animate(dt: float) -> void:
 	# following a steady climb at this rate trails it by speed / rate: lead by that much, so
 	# running up stairs the body rides at its real height over the steps instead of in them
 	var glead := clampf(_climb_v / grate, -0.12, 0.12) if (smooth_ref and rough) else 0.0
-	_fgy = LowPoly.damp(_fgy, clampf(float(gy[0]) + glead, glo, ghi) * plantw, grate, dt)
-	_hgy = LowPoly.damp(_hgy, clampf(float(gy[1]) + glead, glo, ghi) * plantw, grate, dt)
+	if phys and use_planting and plantw > 0.5:
+		var ys := [_fgy, _hgy]
+		for h in 2:
+			ys[h] = _girdle_phys(h, float(ys[h]), float(gy[h]), fl, homes, glo, ghi, dt)
+		_fgy = ys[0]
+		_hgy = ys[1]
+	else:
+		_gv = [0.0, 0.0]
+		_fgy = LowPoly.damp(_fgy, clampf(float(gy[0]) + glead, glo, ghi) * plantw, grate, dt)
+		_hgy = LowPoly.damp(_hgy, clampf(float(gy[1]) + glead, glo, ghi) * plantw, grate, dt)
 	for h in 2:
 		if groll_ok[h] or not rough:
 			_groll[h] = LowPoly.damp(_groll[h], float(groll_t[h]) * plantw, 10.0, dt)
@@ -1572,6 +1595,68 @@ func animate(dt: float) -> void:
 ## leg is long (braking pitches the hips up, a hard start leaves a paw behind, the far end of a
 ## long stance) the girdle over that paw comes down to it: the hip / shoulder sags toward the
 ## paw instead of the paw being pulled off its print. drops in at once, eases back out
+## one end of the body (0 fore, 1 hind) for one frame: a mass on its legs.
+## y: its height offset now, yt: where the paws under it would carry it standing still.
+## fl / homes: paw spots and rest spots in rig space
+func _girdle_phys(h: int, y: float, yt: float, fl: Array, homes: Array, glo: float, ghi: float, dt: float) -> float:
+	var full: float = (F_UP + F_LO + F_PA) if h == 0 else (H_TH + H_SH + H_MT)
+	var h0 := full * LEG_STAND
+	var lmin := full * LEG_MIN
+	var v: float = _gv[h]
+	var n := clampi(int(ceil(dt / 0.004)), 1, 10)
+	var sdt := dt / n
+	var w1 := K_REL * 9.81 / h0   # (rad/s)^2 of this end on one leg
+	# a run is a string of small jumps: the leg takes the body in falling at v0 and sends it
+	# off again rising at v0, so it comes back down just as the next paw lands. in between
+	# (one stance) the body dips by D. no gap between paws (walk, slow trot) = no dip, no jump
+	var v0 := 9.81 * gait.gap_time * 0.5
+	var tst := clampf(gait.st_time, 0.04, 0.5)
+	var dip := v0 * tst / PI
+	for _k in n:
+		var sup := 0.0
+		var ymin := -INF
+		var s_st := 0.0
+		var s_w := 0.0
+		for k in 2:
+			var i := h * 2 + k
+			if float(gait.free_w[i]) > 0.5:
+				continue
+			var d: Vector3 = (fl[i] as Vector3) - (homes[i] as Vector3)
+			var d2 := d.x * d.x + d.z * d.z
+			var planted: bool = gait.mode[i] == CatGait.PLANTED
+			# a paw on its way to a higher spot counts toward the room the leg needs as it gets there
+			var py: float = (fl[i] as Vector3).y if planted else gait.support_y(i) - global_position.y
+			if planted:
+				# a leg pushes as long as it reaches (the ik's own measure of how straight it is)
+				var w := gait.push(i) * (1.0 - smoothstep(1.0, 1.08, float(gait.stretch[i])))
+				sup += w
+				s_st += w * float(gait.st_s[i])
+				s_w += w
+			ymin = maxf(ymin, py - h0 + sqrt(maxf(lmin * lmin - d2, 0.0)))
+		_sup[h] = sup
+		var S := clampf(sup, 0.0, 1.0)
+		var ww := w1 * clampf(sup, 0.5, 2.0)
+		var ss := s_st / s_w if s_w > 0.0 else 0.5
+		# on one leg the end rides lower than on two (the leg gives under the whole load)
+		var yref := clampf(yt, glo, ghi) - (h0 / K_REL) * (1.0 / clampf(sup, 0.5, 2.0) - 0.5) - dip * sin(PI * ss)
+		var vref := -v0 * cos(PI * ss)
+		var aff := dip * (PI / tst) * (PI / tst) * sin(PI * ss)
+		var a := -9.81 * (1.0 - S) + S * (aff + ww * (yref - y) + 2.0 * ZETA * sqrt(ww) * (vref - v))
+		if y < ymin:
+			# the leg is folded as far as it goes: it holds the body up off the paw
+			a += 9.0 * w1 * (ymin - y) - 6.0 * sqrt(w1) * minf(v, 0.0)
+		v += a * sdt
+		y += v * sdt
+		if y < glo:
+			y = glo
+			v = maxf(v, 0.0)
+		elif y > ghi:
+			y = ghi
+			v = minf(v, 0.0)
+	_gv[h] = v
+	return y
+
+
 func _reach_sag(dt: float, fl: Array) -> void:
 	for h in 2:
 		var need := 0.0
@@ -1936,6 +2021,9 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 		var top := to_local(chest.to_global(top_c))
 		# pastern: the wrist stands over the toes on a short sloping bone that gives under load
 		var pa := 0.2 + load * 0.3
+		if leg_limits and climb < 0.3 and clamber < 0.3 and rear < 0.3 and gait.mode[i] != CatGait.PLANTED and float(gait.free_w[i]) < 0.5:
+			var sh_y := to_local(chest.to_global(Vector3(FRONT_SHOULDER.x * side, FRONT_SHOULDER.y, FRONT_SHOULDER.z))).y
+			foot.y = minf(foot.y, sh_y - 0.30 * (F_UP + F_LO + F_PA))
 		var knuckle := foot + R * Vector3(0, 0.013, 0.004)
 		var wrist_t := knuckle + R * Vector3(0, F_PA * cos(pa), F_PA * sin(pa))
 		var reach := (cb.inverse() * (wrist_t - top))
@@ -1980,7 +2068,26 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 		if _air_w > 0.0:
 			theta = lerpf(theta, lerpf(0.9, 0.3, clampf(_vy / 3.5, 0.0, 1.0)), _air_w * (1.0 - climb))
 		theta = clampf(theta, 0.05, 1.65)
+		var lim_on: bool = leg_limits and climb < 0.3 and clamber < 0.3 and rear < 0.3 and _sit_h < 0.1 and float(gait.free_w[i]) < 0.5
+		if lim_on and gait.mode[i] != CatGait.PLANTED:
+			foot.y = minf(foot.y, hip.y - 0.30 * (H_TH + H_SH + H_MT))
 		var hock_t := foot + Basis(Vector3.UP, float(_paw_yaw[i]) * 0.5) * Vector3(0, H_MT * sin(theta), H_MT * cos(theta))
+		if lim_on:
+			# the thigh swings forward to about level, no further (the knee stays beside the
+			# belly): past that the whole lower leg comes down instead
+			# (the foot lays flatter first, which lowers the hock without moving the paw)
+			for _it in 5:
+				var kn: Vector3 = LowPoly.ik2(hip, hock_t, H_TH, H_SH, Vector3(0, 0.1, -1.0))[0]
+				var up_k := kn.y - (hip.y + 0.036)
+				if up_k <= 0.0:
+					break
+				if theta > 0.3:
+					theta = maxf(theta - 0.25, 0.3)
+				elif gait.mode[i] != CatGait.PLANTED:
+					foot.y -= up_k * 1.3
+				else:
+					break
+				hock_t = foot + Basis(Vector3.UP, float(_paw_yaw[i]) * 0.5) * Vector3(0, H_MT * sin(theta), H_MT * cos(theta))
 		var hd := (hock_t - hip).length()
 		gait.stretch[i] = hd / (H_TH + H_SH)
 		var hover := hd - (H_TH + H_SH - 0.004)

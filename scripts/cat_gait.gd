@@ -38,6 +38,8 @@ static var reach_lift := true
 ## ground rays know when they start inside something solid, and paws aim for where the body will
 ## be (stairs, kerbs). false = old
 static var solid_rays := true
+## one paw of each pair (fore, hind) stays on the ground below a run
+static var support_rule := true
 var _ref_y := NAN
 var _ref_vy := 0.0
 const REACH_LIFT := 1.03
@@ -92,6 +94,8 @@ var _aim: Array[int] = [0, 0, 0, 0]
 var uneven := 0.0
 var _clr_t: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _grd: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var st_time := 1.0
+var gap_time := 0.0
 ## how far below the root a paw may reach / how high above it it may step (rough ground)
 const REACH_DOWN := 0.26
 const REACH_UP := 0.24
@@ -332,6 +336,11 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 	uneven = maxf(dev, uneven - dt * 0.03)
 	_since_land += dt
 	var stance_len := minf(duty * stride, lerpf(max_stance, max_stance_gallop, gallop)) * clampf(spd / 0.25, 0.0, 1.0)
+	# how long a paw stays down at this speed, and how long each end of the body then has no
+	# paw down before the next one lands (zero below a run; a run is a string of small jumps)
+	st_time = stance_len / maxf(spd, 0.1) if moving > 0.5 else 1.0
+	var half := lerpf(0.5, 1.0, gallop) / maxf(freq, 0.01)
+	gap_time = clampf(half - st_time * lerpf(1.0, 1.5, gallop), 0.0, 0.25) if moving > 0.5 else 0.0
 	var inv := xf.affine_inverse()
 	var ldir := inv.basis * (hv / spd) if spd > 0.001 else Vector3.ZERO
 	var n_swing := 0
@@ -394,6 +403,10 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 					# (second test: it's behind its hip and the first half of this frame's travel
 					# already takes it out of reach. at a run the body covers 10-18 cm a frame)
 					lift = true
+				# a walking / slow trotting cat always has one paw of each pair on the ground: this
+				# one waits until the other is down (only a run, duty under half, has both in the air)
+				if lift and support_rule and not remote and mode[i ^ 1] != PLANTED and duty >= 0.5 and gallop < 0.5 and stretch[i] < 1.06:
+					lift = false
 			else:
 				st_s[i] = 0.5
 				# standing: settle paws that ended up away from their spot, one at a time
@@ -419,6 +432,10 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				_begin_swing(i, d, lift_h * (1.0 if i < 2 else 0.85), home_w, xf, true)
 				n_swing += 1
 		if mode[i] == SWING:
+			if support_rule and moving > 0.5 and not remote:
+				# the cat sped up since this paw left the ground: the swing speeds up with it,
+				# or the paw would still be in the air when its turn on the ground is over
+				_dur[i] = minf(_dur[i], maxf(clampf((1.0 - duty) / maxf(freq, 0.01), 0.085, 0.36), 0.6 * _dur[i]))
 			sw_t[i] += dt / _dur[i]
 			# the swing is planned in body space: from where the paw left the ground (as the body
 			# saw it then) to its rest spot plus half a stance ahead. at touch down the hip is
@@ -533,6 +550,11 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 ## world height of the ground a paw stands on, or is about to land on (swinging)
 func ground_y(i: int) -> float:
 	return _gyw[i] if mode[i] == SWING else pos[i].y
+
+
+## 0..1 how much of its push a planted paw has: full a moment after touch down
+func push(i: int) -> float:
+	return smoothstep(0.0, 0.022, _st_t[i]) if mode[i] == PLANTED else 0.0
 
 
 ## the height a paw is carrying the body at: where it stands, or (swinging) easing from where

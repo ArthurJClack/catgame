@@ -51,10 +51,18 @@ func _ready() -> void:
 		ps.set("real_move", args[k + 1] != "0")
 	if "--legacy" in args:
 		# every switch this overhaul added, off: the cat as it was before (before / after runs)
-		for sw in [["cat_gait.gd", "reach_lift"], ["cat_rig.gd", "paw_free"], ["cat_rig.gd", "reach_sag"], ["cat_rig.gd", "follow_fast"], ["cat_rig.gd", "smooth_ref"], ["cat_gait.gd", "solid_rays"], ["cat_player.gd", "smooth_steps"], ["cat_player.gd", "real_move"]]:
+		for sw in [["cat_gait.gd", "reach_lift"], ["cat_rig.gd", "paw_free"], ["cat_rig.gd", "reach_sag"], ["cat_rig.gd", "follow_fast"], ["cat_rig.gd", "smooth_ref"], ["cat_gait.gd", "solid_rays"], ["cat_player.gd", "smooth_steps"], ["cat_player.gd", "real_move"], ["cat_rig.gd", "phys"], ["cat_rig.gd", "leg_limits"], ["cat_gait.gd", "pendulum"], ["cat_rig.gd", "load_shift"], ["cat_gait.gd", "support_rule"]]:
 			var sc: Script = load("res://scripts/" + sw[0])
 			if sc.get(sw[1]) != null:
 				sc.set(sw[1], false)
+	# --off a,b: single switches off (name of the static var, looked up in the three scripts)
+	k = args.find("--off")
+	if k >= 0:
+		for nm in args[k + 1].split(","):
+			for fn in ["cat_gait.gd", "cat_rig.gd", "cat_player.gd"]:
+				var sc2: Script = load("res://scripts/" + fn)
+				if sc2.get(nm) != null:
+					sc2.set(nm, false)
 	_build()
 	_scenarios()
 	var only := []
@@ -281,7 +289,7 @@ func _next() -> void:
 	player.bot = {"move": Vector2.ZERO, "pitch": -0.1}
 	t = -0.5    # half a second to settle before the script starts
 	m = {"frames": 0, "planted": 0, "slide": [], "gap": [], "hover": 0, "sink": 0, "miss": [], "over": 0, "stretch_max": 0.0,
-		"pop": 0, "pop_max": 0.0, "pop_what": "", "pop_t": 0.0, "clip": 0, "clip_max": 0.0, "clip_what": "", "snap": 0, "snap_max": 0.0, "nan": 0, "ev": [], "dist": 0.0, "vmax": 0.0, "air": 0.0, "ymax": -9.0}
+		"fold": 0, "frames_leg": 0, "hang_min": 9.0, "pop": 0, "pop_max": 0.0, "pop_what": "", "pop_t": 0.0, "clip": 0, "clip_max": 0.0, "clip_what": "", "snap": 0, "snap_max": 0.0, "nan": 0, "ev": [], "dist": 0.0, "vmax": 0.0, "air": 0.0, "ymax": -9.0}
 	_prev = {}
 	_phys_ok = false
 	if caption:
@@ -385,6 +393,24 @@ func _process(dt: float) -> void:
 		cur["c%d" % i] = c
 		cur["l%d" % i] = c
 		cur["m%d" % i] = g.mode[i]
+		# fold: a leg tucked up into / over the body. the paw has to hang well under its hip /
+		# shoulder (a cat's leg can't fold shorter than about a third of its length), and
+		# the knee / elbow stays under the back line
+		if not on_wall and player.is_on_floor() and rig.sit < 0.03 and rig.loaf < 0.03 and rig.rear < 0.2 and float(g.free_w[i]) < 0.3:
+			var sd := -1.0 if i % 2 == 0 else 1.0
+			var girdle: Node3D = rig.chest if i < 2 else rig.pelvis
+			var jl: Vector3 = Vector3(rig.FRONT_SHOULDER.x * sd, rig.FRONT_SHOULDER.y, rig.FRONT_SHOULDER.z) if i < 2 else Vector3(rig.HIND_HIP.x * sd, rig.HIND_HIP.y, rig.HIND_HIP.z)
+			var jw: Vector3 = girdle.to_global(jl)
+			var full: float = (rig.F_UP + rig.F_LO + rig.F_PA) if i < 2 else (rig.H_TH + rig.H_SH + rig.H_MT)
+			var hang: float = (jw.y - c.y) / full
+			var kn: Vector3 = (rig.legs[i].joint as Node3D).global_position
+			var over_back: float = kn.y - (girdle.global_position.y + 0.03)
+			m.frames_leg += 1
+			m.hang_min = minf(m.hang_min, hang)
+			if hang < 0.25 or over_back > 0.0:
+				m.fold += 1
+				if dbg == "fold":
+					print("  fold %s hang %.2f knee over back %.0f mm mode %s t=%.2f fgy %.3f hgy %.3f sup %s paw_rel_y %.3f sw %.2f" % [LEG[i], hang, over_back * 1000.0, "PSF"[g.mode[i]], t, rig._fgy, rig._hgy, str(rig._sup), c.y - rig.global_position.y, g.sw_t[i]])
 		cur["g%d" % i] = g.pos[i]
 		if g.mode[i] == CatGait.PLANTED and g.load[i] > 0.5:
 			m.stretch_max = maxf(m.stretch_max, float(g.stretch[i]))
@@ -463,6 +489,11 @@ func _process(dt: float) -> void:
 		for i in 4:
 			ln += " %s %s y%+.3f z%+.3f gy%+.3f |" % [LEG[i], "PSF"[g.mode[i]], (g.pos[i] as Vector3).y - rg2.y, (g.pos[i] as Vector3).z - rg2.z, g.ground_y(i) - rg2.y]
 		print(ln)
+	if dbg == "phys":
+		var ln2 := "  t=%.3f v %.2f fgy %+.3f hgy %+.3f gv %+.2f %+.2f sup %.2f %.2f |" % [t, player.velocity.length(), rig._fgy, rig._hgy, rig._gv[0], rig._gv[1], rig._sup[0], rig._sup[1]]
+		for i in 4:
+			ln2 += " %s %s ld %.1f st %.2f |" % [LEG[i], "PSF"[g.mode[i]], g.load[i], g.stretch[i]]
+		print(ln2)
 	if dbg == "head":
 		var rg := rig.global_position
 		print("  t=%.3f root %.3f %.3f | head rel %.3f %.3f %.3f | chest rel y %.3f | fgy %.3f hgy %.3f | soft %.3f | air %.2f floor %s" % [t, rg.y, rg.z, rig.head.global_position.x - rg.x, rig.head.global_position.y - rg.y, rig.head.global_position.z - rg.z, rig.chest.global_position.y - rg.y, rig._fgy, rig._hgy, player._soft_off.length(), rig._air_w, rig.on_floor])
@@ -488,14 +519,14 @@ func _report(n: String) -> void:
 		"miss_p95_mm": snappedf(_pct(m.miss, 0.95) * 1000.0, 0.1), "miss_max_mm": snappedf(_pct(m.miss, 1.0) * 1000.0, 0.1), "over_pct": snappedf(100.0 * m.over / maxf(m.frames * 4, 1), 0.1),
 		"stretch_max": snappedf(m.stretch_max, 0.001), "pops": m.pop, "pop_worst": snappedf(m.pop_max, 0.01), "pop_what": m.pop_what,
 		"clip_frames": m.clip, "clip_max_mm": snappedf(m.clip_max * 1000.0, 0.1), "clip_what": m.clip_what,
-		"snaps": m.snap, "snap_max_mm": snappedf(m.snap_max * 1000.0, 0.1), "nan": m.nan,
+		"fold_pct": snappedf(100.0 * m.fold / maxf(m.frames_leg, 1), 0.1), "hang_min": snappedf(m.hang_min, 0.01), "snaps": m.snap, "snap_max_mm": snappedf(m.snap_max * 1000.0, 0.1), "nan": m.nan,
 		"planted_pct": snappedf(100.0 * m.planted / maxf(m.frames * 4, 1), 0.1), "dist_m": snappedf(m.dist, 0.01), "vmax": snappedf(m.vmax, 0.01), "air_s": snappedf(m.air, 0.01), "ymax": snappedf(m.ymax, 0.001), "events": m.ev,
 	}
 	results[n] = r
 	if dbg == "count":
 		print("  frames %d planted %d slide n %d  dist %.2f vmax %.2f gap0 %s miss0 %s c0 %s pos0 %s" % [m.frames, m.planted, m.slide.size(), m.dist, m.vmax, str(m.gap.slice(0, 3)), str(m.miss.slice(0, 3)), str(_contact(0)), str(player.rig.gait.pos[0])])
-	print("BIO %-20s slide p95 %4.1f max %5.1f mm | off ground %4.1f%% gap p95 %4.1f | miss %4.1f max %5.1f | over %4.1f%% (%.2f) | pops %3d (x%.1f %s) | clip %3d (%.0f mm %s) | snaps %d (%.0f mm) | %s" % [
-		n, r.slide_p95_mm, r.slide_max_mm, r.off_ground_pct, r.gap_p95_mm, r.miss_p95_mm, r.miss_max_mm, r.over_pct, r.stretch_max, r.pops, r.pop_worst, r.pop_what, r.clip_frames, r.clip_max_mm, r.clip_what, r.snaps, r.snap_max_mm, ",".join(PackedStringArray(m.ev))])
+	print("BIO %-20s slide p95 %4.1f max %5.1f mm | off ground %4.1f%% gap p95 %4.1f | miss %4.1f max %5.1f | over %4.1f%% (%.2f) | pops %3d (x%.1f %s) | clip %3d (%.0f mm %s) | snaps %d (%.0f mm) | fold %.1f%% (min hang %.2f) | %s" % [
+		n, r.slide_p95_mm, r.slide_max_mm, r.off_ground_pct, r.gap_p95_mm, r.miss_p95_mm, r.miss_max_mm, r.over_pct, r.stretch_max, r.pops, r.pop_worst, r.pop_what, r.clip_frames, r.clip_max_mm, r.clip_what, r.snaps, r.snap_max_mm, r.fold_pct, r.hang_min, ",".join(PackedStringArray(m.ev))])
 
 
 ## what counts as glitch free for one scenario
@@ -509,6 +540,7 @@ func _bad(r: Dictionary) -> Array:
 	# at a gallop the body covers 18 cm a frame: a paw may be that frame's 15% off its print
 	if r.miss_max_mm > 15.0 + 2.5 * r.vmax: why.append("paw off its spot %.0f mm" % r.miss_max_mm)
 	if r.snap_max_mm > 60.0: why.append("snap %.0f mm" % r.snap_max_mm)
+	if r.fold_pct > 0.5: why.append("legs folded into the body %.1f%%" % r.fold_pct)
 	return why
 
 
