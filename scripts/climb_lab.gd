@@ -2,7 +2,7 @@ extends Node3D
 ## climbing lab: the real CatPlayer (bot driven) climbs, grabs, hauls up and tops out on a
 ## course of fixtures, and every run is checked for jank as well as for doing the thing.
 ##   godot --headless --fixed-fps 60 --path . res://climblab.tscn -- --climbtest [--only box,trunk] [--dbg pop|snap|clip|trace]
-
+##   godot --path . --write-movie out/f.png --fixed-fps 30 res://climblab.tscn -- --show [--fp] [--only a,b]   (xvfb; engine flags go before the --)
 ## (only uses climbing / clambering / mantling, so it runs on old builds too for before / after)
 ##
 ## free climb runs (start with the claws already in, facing the thing):
