@@ -18,6 +18,7 @@ const DESTS := {
 	"docks": {"scene": "res://stealth.tscn", "label": "pier 9", "sign": "pier 9", "spawn": "dock_gate"},
 	"trail": {"scene": "res://trail.tscn", "label": "the trail", "sign": "running trail", "spawn": "trail_gate"},
 	"pit": {"scene": "res://arena.tscn", "label": "the rat pit", "sign": "rat pit", "spawn": "pit_hatch"},
+	"city": {"scene": "res://city.tscn", "label": "the city", "sign": "the city", "spawn": "city_gate"},
 }
 
 ## fence gates: which side of the yard + where along it (world.gd fence runs x -16..26, z -9..31)
@@ -25,6 +26,7 @@ const FENCE_GATES := {
 	"forest": {"side": "west", "at": 12.25},
 	"docks": {"side": "east", "at": 3.25},
 	"trail": {"side": "north", "at": -3.0},
+	"city": {"side": "south", "at": 17.5},
 }
 ## the rat pit is under the barn: a cellar hatch against its west wall
 const PIT_HATCH := Vector3(5.0, 0.0, 23.6)
@@ -50,6 +52,7 @@ static func spawns() -> Dictionary:
 		"dock_gate": [Vector3(FENCE_X1 - 1.2, 0.02, 3.25), PI / 2.0],
 		"trail_gate": [Vector3(-3.0, 0.02, FENCE_Z1 - 1.2), 0.0],
 		"pit_hatch": [PIT_HATCH + Vector3(-1.4, 0.02, -1.2), 0.6],
+		"city_gate": [Vector3(17.35, 0.02, FENCE_Z0 + 1.2), PI],
 	}
 	return out
 
@@ -223,6 +226,7 @@ static func fence_gate(lv: Node3D, key: String, c: Vector3, w: float) -> void:
 		"forest": _gate_forest(lv, c, w, out, along, ry)
 		"docks": _gate_docks(lv, c, w, out, along, ry)
 		"trail": _gate_trail(lv, c, w, out, along, ry)
+		"city": _gate_city(lv, c, w, out, along, ry)
 	var d: Dictionary = DESTS[key]
 	# signs both ways: outside readers rarely matter, but from inside the yard it's the whole point
 	label(lv, c + Vector3(0, 1.78, 0) - out * 0.08, ry + PI, d.sign, d.scene)
@@ -305,6 +309,29 @@ static func _gate_trail(lv: Node3D, c: Vector3, w: float, out: Vector3, along: V
 	label(lv, mp + Vector3(0, 1.05, 0), ry + PI, "loop 137 m", "", 28, Color(1.0, 0.75, 0.45))
 
 
+static func _gate_city(lv: Node3D, c: Vector3, w: float, out: Vector3, along: Vector3, ry: float) -> void:
+	# black steel frame with a pink + cyan neon strip, wet tarmac running off into the dark
+	_posts(lv, c, w, along, Color(0.12, 0.12, 0.14), 2.0)
+	for s in [-1.0, 1.0]:
+		var col := Color(1.0, 0.25, 0.6) if s < 0.0 else Color(0.2, 0.9, 1.0)
+		Level.box(lv, c + along * s * w * 0.5 + Vector3(0, 1.0, 0) - out * 0.07, Vector3(0.03, 1.8, 0.03), col, false, 4.0)
+	Level.rbox(lv, c + Vector3(0, 2.0, 0) - out * 0.07, Vector3(w, 0.04, 0.03), Vector3(0, atan2(-along.z, along.x), 0), Color(0.7, 0.4, 1.0), false)
+	for k in 10:
+		Level.box(lv, c + out * (0.8 + k * 1.0) + Vector3(0, -0.01, 0), Vector3(1.2, 0.025, 1.0), Color(0.08, 0.08, 0.1), false)
+	# a puddle catching the neon + a lit vending machine glow by the gate
+	Level.box(lv, c + out * 1.6 + along * 0.3 + Vector3(0, 0.004, 0), Vector3(0.7, 0.008, 0.5), Color(0.4, 0.15, 0.5), false, 0.6)
+	var vm := c + out * 1.2 - along * 1.4
+	Level.box(lv, vm + Vector3(0, 0.9, 0), Vector3(0.8, 1.8, 0.7), Color(0.1, 0.1, 0.12))
+	Level.box(lv, vm + Vector3(0, 1.0, 0) - out * 0.36, Vector3(0.6, 1.2, 0.02) if absf(out.z) > 0.5 else Vector3(0.02, 1.2, 0.6), Color(0.2, 0.9, 1.0), false, 2.5)
+	var light := OmniLight3D.new()
+	light.position = vm + Vector3(0, 1.2, 0) - out * 0.7
+	light.light_color = Color(0.4, 0.8, 1.0)
+	light.light_energy = 0.8
+	light.omni_range = 3.5
+	light.light_volumetric_fog_energy = 0.0
+	lv.add_child(light)
+
+
 ## cellar hatch against the barn: two doors flung open over a dark stairwell
 static func _pit_hatch(lv: Node3D) -> void:
 	var c := PIT_HATCH
@@ -337,6 +364,7 @@ static func _fingerpost(lv: Node3D, base: Vector3) -> void:
 		"docks": Vector3(FENCE_X1, 0, 3.25),
 		"trail": Vector3(-3.0, 0, FENCE_Z1),
 		"pit": PIT_HATCH,
+		"city": Vector3(17.35, 0, FENCE_Z0),
 	}
 	var k := 0
 	for key in targets:

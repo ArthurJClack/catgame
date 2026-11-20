@@ -93,11 +93,18 @@ boot = **title screen** (`title_screen.gd`) over the live farm while the camera 
 
 - v cycles first person, third person and orbit cam. in orbit, the mouse orbits the cat, the scroll wheel zooms, wasd is camera relative and the cat turns to face where it goes. the camera never clips through walls.
 - the farm is the **hub world** (`scripts/hub.gd`): walk out a gate to travel, every level has a way back that drops you at the gate you left by.
-  - west fence gate -> the forest · east fence steel gate + lamp lit lane -> pier 9 (night docks) · north timber arch -> the running trail · cellar hatch against the barn -> the rat pit
+  - west fence gate -> the forest · east fence steel gate + lamp lit lane -> pier 9 (night docks) · north timber arch -> the running trail · neon steel gate in the back fence behind the house -> the city · cellar hatch against the barn -> the rat pit
   - fingerpost on the patio points at all four. in multiplayer the signs show "2 cats there" and you get a flash when a friend walks off somewhere ("mo went to the forest"); each player travels on their own, lobby "go to them" still works
-  - ways back: forest gate behind the spawn, a lit cat hole in the dock warehouse west wall, a farm gate just off the trail start line, a lit tunnel in the pit wall behind you. f5 still works everywhere
+  - ways back: forest gate behind the spawn, a lit cat hole in the dock warehouse west wall, a farm gate just off the trail start line, a lit tunnel in the pit wall behind you, a farm gate on the sidewalk behind the city start. f5 still works everywhere
   - f6 / f7 / f8 / f10 stay as debug shortcuts. add a destination: an entry in `Hub.DESTS` (+ `FENCE_GATES` for a fence gate or your own builder), a spawn in `Hub.spawns()`, and `Hub.exit(...)` in the level
   - tests: `xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/hub_test.gd` (every gate there and back). `tests/hub_show.gd` renders the tour clip, `tests/hub_map.gd` the labelled map
+
+## the city (res://city.tscn, f4 from the farm)
+- the city street from secret (the pnw cyberpunk crpg): Pioneer Square, Seattle from real OpenStreetMap streets, footprints, heights and elevation (`data/city/pioneer_square.json`, map data (c) OpenStreetMap contributors, ODbL), built by secret's city builder (`scripts/city/city_builder.gd`, `mesh_kit.gd`, `terrain.gd`, `city_props.gd`, psx shader `psx_world.gdshader`) at full real scale, so for a cat it's enormous
+- ~90 parked Shitbox Rally cars (wagon / sedan / hatch glbs in `assets/city/cars/`, `city_cars.gd`) as static colliders: hop onto hoods + roofs, hide underneath
+- cyberpunk night on top (`city_neon.gd`): neon tubes round the shop fronts, vertical blade signs, rooftop ad boards (placeholder cat ad copy), puddles catching the neon, cables + lanterns strung across the streets, steam out of manholes, dumpsters + crates in the alleys (step stools up), rain following the camera, magenta smog sky
+- keys: r back to the start · t next spot · f5 / the farm sign back. preview: `-- --still x,y,z,tx,ty,tz` (heights above the street), `-- --tour` (clip), `-- --citytest` (one line, exit code)
+- no traffic / people here (secret's sims are tied to its own game); the json can be swapped for another bake (a tacoma district once secret has one)
 
 ## forest (res://forest.tscn)
 walk out the gap in the west yard fence (or f6 from the main map). f5 / the gate behind you goes back.

@@ -1,0 +1,44 @@
+{
+	"id": "civic_ep3",
+	"name": "Hondo Civetta Si (2002)",
+	"dimensions": [
+		1.695,
+		1.45,
+		4.18
+	],
+	"collision": [
+		{
+			"size": [
+				1.695,
+				0.72,
+				4.18
+			],
+			"offset": [
+				0,
+				0.1,
+				-0.04
+			]
+		},
+		{
+			"size": [
+				1.44,
+				0.52,
+				2.25
+			],
+			"offset": [
+				0,
+				0.74,
+				0.22
+			]
+		}
+	],
+	"wheelbase": 2.57,
+	"track_front": 1.47,
+	"track_rear": 1.485,
+	"wheel_radius": 0.3075,
+	"color": "#b8babd",
+	"model_yaw": 180,
+	"model": "res://assets/city/cars/civic_ep3/body.glb",
+	"tyre_model": "res://assets/city/cars/civic_ep3/tyre.glb",
+	"from": "secret (data/cars/civic_ep3.json) <- shitbox rally, looks + size only"
+}
