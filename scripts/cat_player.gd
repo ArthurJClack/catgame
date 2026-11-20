@@ -123,6 +123,19 @@ var _hop_cool := 0.0
 var _prev_side := 0.0
 var _hopped_now := false
 var auto_step := true         # glide up roots / lips underfoot (run_assist.gd). the cat never jumps by itself
+## steps, kerbs and stairs up to chest height are walked up and down in stride and the rig's body
+## rides over them behind its paws (run_assist.gd). false = the old stop + scripted hop / little falls
+static var smooth_steps := true
+## speed changes and turns are pushed through the paws that are down (see the ground accel)
+static var paw_drive := true
+const DRIVE_MAX := 7.0
+var _drive := 1.0
+var _drive_avg := 2.0
+## where the visible cat (rig + camera) is relative to the capsule, world space. the capsule
+## still moves in jumps where it has to (onto a step); the cat seen on screen walks across
+var _soft_off := Vector3.ZERO
+var _vis_prev := Vector3.ZERO
+var _vis_curr := Vector3.ZERO
 
 ## when set, input is read from here instead of the keyboard (used by the preview bot)
 var bot := {}
@@ -597,6 +610,7 @@ func _event(name: String) -> void:
 func _physics_process(dt: float) -> void:
 	_phys_prev = global_position
 	_sc_off_prev = step_cam_off
+	_vis_prev = global_position + _soft_off
 	var inp := _read_input()
 	if combat.locks_move():
 		# both fore paws are holding something: a cat can't walk, hop or dodge on its hind legs alone
@@ -956,6 +970,7 @@ func _physics_process(dt: float) -> void:
 		var cur := hv.length()
 		# momentum: what the legs can do depends on what's asked and how fast the body already goes
 		var accel: float
+		var speeding := false
 		if wish_len <= 0.01 and not want_crouch:
 			accel = COAST_DECEL + COAST_DRAG * cur
 		elif _brake_ask or (want_crouch and cur > STALK_SPEED + 0.3) or charging:
@@ -964,6 +979,27 @@ func _physics_process(dt: float) -> void:
 			accel = GAIT_DOWN_DECEL + GAIT_DOWN_DRAG * cur
 		else:
 			accel = minf(PUSH_ACCEL, PUSH_POWER / maxf(cur, 0.5))
+			speeding = true
+		var lat_ask := TURN_ASK
+		if paw_drive and not lock_face and rig and rig.gait:
+			# the body only speeds up, slows down or turns through paws that are on the ground:
+			# with one paw down it gets half the shove of two, with none it just coasts. and
+			# a cat's legs start it at about 0.65 g, not 0.9
+			var down := 0.0
+			for pi in 4:
+				down += rig.gait.push(pi)
+			# (measured against how many paws this gait has down on average: a gallop is in the
+			# air most of the time and makes its speed in the moments it isn't, so over a
+			# stride the cat gets about the same push, in surges. it never drops under 0.6: the
+			# test course and the game's tuned run ups assume the old average)
+			_drive_avg = lerpf(_drive_avg, down, 1.0 - exp(-2.5 * dt))
+			_drive = lerpf(_drive, 0.6 + 0.4 * clampf(down / maxf(_drive_avg, 0.15), 0.0, 2.2), 1.0 - exp(-30.0 * dt))
+			# slowing down keeps its tuned rates and only pulses a little with the paws
+			if speeding:
+				accel = minf(accel, DRIVE_MAX) * _drive
+			else:
+				accel *= lerpf(1.0, _drive, 0.35)
+			lat_ask *= _drive
 		if lock_face and wish_len > 0.01:
 			accel = maxf(accel, LOCK_ACCEL)
 		if cur > target_speed + 0.1 and ground_time < 0.1:
@@ -983,7 +1019,7 @@ func _physics_process(dt: float) -> void:
 			if rundir == Vector3.ZERO:
 				lon = dv
 				lat = Vector3.ZERO
-			hv += lon.limit_length(accel * dt) + lat.limit_length(TURN_ASK * lerpf(0.4, 1.0, clampf(cur / SPRINT_SPEED * 1.6, 0.0, 1.0)) * dt)
+			hv += lon.limit_length(accel * dt) + lat.limit_length(lat_ask * lerpf(0.4, 1.0, clampf(cur / SPRINT_SPEED * 1.6, 0.0, 1.0)) * dt)
 	elif not leap_lock:
 		# quake/cpm style air accel: tiny wish cap so strafing + turning builds speed
 		if wish_len > 0.01:
@@ -1056,8 +1092,24 @@ func _physics_process(dt: float) -> void:
 			stamina.drain(CatStamina.CANTER, dt)
 
 	if grounded and auto_step:
-		RunAssist.step_up(self, hv, dt)   # roots, branches, stone lips: glide up, paws step
+		if smooth_steps:
+			_soft_off -= RunAssist.step_onto(self, hv, dt)   # steps, kerbs, stairs: taken in stride
+		else:
+			RunAssist.step_up(self, hv, dt)   # roots, branches, stone lips: glide up, paws step
+	# just put on top of a step, ahead of where the visible cat is: wait there while it walks up
+	var step_wait := grounded and _soft_off.length_squared() > 4e-6
+	if step_wait:
+		velocity.x = 0.0
+		velocity.z = 0.0
 	move_and_slide()
+	if step_wait:
+		velocity.x = hv.x
+		velocity.z = hv.z
+	_soft_off = _soft_off.move_toward(Vector3.ZERO, maxf(hv.length(), _soft_off.length() * 6.0 + 0.3) * dt)
+	var sd := RunAssist.step_down(self, grounded and not step_wait, hv)
+	if sd[0]:
+		air_time = 0.0
+		_soft_off -= sd[1]
 	_track_walls()
 	_slide_contact()
 	_push_props()
@@ -1138,7 +1190,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 		_step_cam(dt)
 		eye.y += step_cam_off
 	else:
-		if is_on_floor() and not (mantling or clambering or climbing) and absf(_smooth_y - ty) < 0.2:
+		if is_on_floor() and not (mantling or clambering or climbing) and absf(_smooth_y - ty) < (0.3 if smooth_steps else 0.2):
 			_smooth_y = LowPoly.damp(_smooth_y + velocity.y * dt, ty, 18.0, dt)
 		else:
 			_smooth_y = ty
@@ -1209,6 +1261,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	health.physics_tick(dt)
 	stamina.physics_tick(dt, hspd < 0.2 and is_on_floor() and not (climbing or clambering or scratching))
 	_phys_curr = global_position
+	_vis_curr = global_position + _soft_off
 	_rig_base = rig.transform
 	_interp_ok = true
 	max_height = maxf(max_height, global_position.y)
@@ -1236,14 +1289,20 @@ func _process(_dt: float) -> void:
 				pitch = clampf(pitch + ld.y, -1.45, 1.45)
 	if not _interp_ok:
 		return
-	var p := _phys_prev.lerp(_phys_curr, Engine.get_physics_interpolation_fraction())
-	if p.distance_to(global_position) > 0.6:
-		p = global_position   # teleport / respawn: don't smear
-	var off := global_transform.basis.inverse() * (p - global_position)
+	# (the visible cat's spot is what gets smoothed between ticks: the capsule itself may hop onto a step)
+	var vis := global_position + _soft_off
+	if _phys_prev.distance_to(_vis_prev - _soft_off) > 0.3 or _phys_curr.distance_to(global_position) > 0.001:
+		# a test / respawn moved the cat by hand between ticks
+		_vis_prev = _phys_prev + _soft_off
+		_vis_curr = _phys_curr + _soft_off
+	var p := _vis_prev.lerp(_vis_curr, Engine.get_physics_interpolation_fraction())
+	if p.distance_to(vis) > 0.6:
+		p = vis   # teleport / respawn: don't smear
+	var off := global_transform.basis.inverse() * (p - vis)
 	if not _head_cam_on():
 		# eye_local carries this tick's stair glide; swap it for the glide in between ticks, like the body
 		var sc := Vector3(0, step_cam_frame() - step_cam_off, 0) if step_cam else Vector3.ZERO
-		cam_pivot.position = eye_local + off + sc
+		cam_pivot.position = eye_local + off + global_transform.basis.inverse() * _soft_off + sc
 	# (head cam: the pivot keeps last frame's head spot until _place_head_cam moves it, so the
 	# lock aims from where the camera really is)
 	lock.frame_steer(_dt)
@@ -1262,6 +1321,12 @@ func lock_point() -> Vector3:
 ## the rig normally just follows the body. on walls it turns to face the surface,
 ## and when climbing it rotates 90 degrees so its feet are on the wall
 func _orient_rig() -> void:
+	_orient_rig_base()
+	if _soft_off != Vector3.ZERO:
+		rig.global_position += _soft_off
+
+
+func _orient_rig_base() -> void:
 	_clip_guard()
 	if w_slide > 0.002 and w_face < 0.002 and w_kick < 0.002:
 		_orient_slide()
@@ -1342,12 +1407,12 @@ func _clip_guard() -> void:
 	var front := nose
 	var back := rump
 	for h in [0.03, 0.12, 0.22]:
-		var c: Vector3 = global_position + Vector3.UP * h
+		var c: Vector3 = global_position + _soft_off + Vector3.UP * h
 		var hf := _ray(c, c + fwd * nose)
-		if not hf.is_empty() and not hf.collider is RigidBody3D:
+		if not hf.is_empty() and not hf.collider is RigidBody3D and not _steppable(hf):
 			front = minf(front, (hf.position - c).dot(fwd))
 		var hb := _ray(c, c - fwd * rump)
-		if not hb.is_empty() and not hb.collider is RigidBody3D:
+		if not hb.is_empty() and not hb.collider is RigidBody3D and not _steppable(hb):
 			back = minf(back, (c - hb.position).dot(fwd))
 	# +z is backwards in body space
 	var want := maxf(nose - front, 0.0)
@@ -1358,6 +1423,18 @@ func _clip_guard() -> void:
 		_clip_off = want
 	else:
 		_clip_off = LowPoly.damp(_clip_off, want, 10.0, get_physics_process_delta_time())
+
+
+## is what this ray hit something the cat just walks up onto / down off (a step, a kerb, a
+## stair riser: flat top no higher than chest height above the feet)? those are not walls: the
+## body goes over them, front end first, instead of being held back off them
+func _steppable(hit: Dictionary) -> bool:
+	if not smooth_steps:
+		return false
+	var n: Vector3 = hit.normal
+	var p: Vector3 = hit.position - Vector3(n.x, 0, n.z).normalized() * 0.03
+	var top := _ray(Vector3(p.x, global_position.y + STEP_MOUNT + 0.05, p.z), Vector3(p.x, global_position.y - 0.02, p.z))
+	return not top.is_empty() and top.normal.y > 0.7 and top.position.y <= global_position.y + STEP_MOUNT + 0.01
 
 
 ## swap the cat model (block, chamfer, facet, wedge, stepped) on the fly
@@ -2515,9 +2592,12 @@ func _sweep(a: Vector3, b: Vector3, r: float) -> float:
 ## a ramp is tracked with no lag. in the air, climbing, clambering or rearing the spring lets go
 ## fast (no lag on jumps), and big moves (teleport, respawn) snap.
 func _step_cam(dt: float) -> void:
-	var ty := global_position.y
-	var moved := global_position.distance_to(_sc_last)
-	_sc_last = global_position
+	# (the visible cat's height: with the soft root the capsule hops onto a step and the cat seen
+	# on screen walks up after it, so the spring follows the walk, not the hop)
+	var vis := global_position + _soft_off
+	var ty := vis.y
+	var moved := vis.distance_to(_sc_last)
+	_sc_last = vis
 	if not _sc_ok or absf(ty - _sc_y) > 0.6 or dt <= 0.0 or moved > 0.4:
 		_hs_ok = false   # teleport / respawn / lab reset: the head cam snaps too
 		_sc_act = 0.0
