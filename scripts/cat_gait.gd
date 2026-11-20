@@ -38,6 +38,8 @@ static var reach_lift := true
 ## ground rays know when they start inside something solid, and paws aim for where the body will
 ## be (stairs, kerbs). false = old
 static var solid_rays := true
+## paws don't step into a wall (the foothold search skips spots inside one)
+static var wall_stop := true
 ## one paw of each pair (fore, hind) stays on the ground below a run
 static var support_rule := true
 var _ref_y := NAN
@@ -207,6 +209,13 @@ func _top(x: float, z: float, root_y: float) -> float:
 	return root_y + REACH_UP
 
 
+## the down ray at x,z started inside something: is that a wall (goes on up past what a paw
+## can step onto) or just a step / kerb whose top is a little higher than the ray began?
+func _is_wall(x: float, z: float, top: float) -> bool:
+	var h := _ray(x, z, top + 0.45, top - 0.01, true)
+	return h.is_empty() or h.size() > 2 or float(h[0]) > top + 0.3
+
+
 func _can_ray() -> bool:
 	return use_rays and rig != null and rig.is_inside_tree() and rig.get_world_3d().direct_space_state != null
 
@@ -215,9 +224,10 @@ func _ground_rough(p: Vector3, root_y: float, i: int) -> Vector3:
 	nrm[i] = Vector3.UP
 	if not _can_ray():
 		return Vector3(p.x, root_y, p.z)
-	var h := _ray(p.x, p.z, _top(p.x, p.z, root_y), root_y - REACH_DOWN - 0.06, solid_rays)
-	if h.is_empty():
-		return Vector3(p.x, root_y, p.z)
+	var gtop := _top(p.x, p.z, root_y)
+	var h := _ray(p.x, p.z, gtop, root_y - REACH_DOWN - 0.06, solid_rays)
+	if h.is_empty() or (wall_stop and h.size() > 2 and _is_wall(p.x, p.z, gtop)):
+		return Vector3(p.x, root_y, p.z)   # (a paw against a wall stands on the floor, not up it)
 	var n: Vector3 = h[1]
 	nrm[i] = n if n.y > 0.5 else Vector3.UP.slerp(n, 0.4)
 	# a drop the leg can't reach down: the paw stops at the edge's height
@@ -238,12 +248,16 @@ func _foothold(p: Vector3, root_y: float, i: int, fwd: Vector3) -> Vector3:
 	var best := Vector3(p.x, root_y, p.z)
 	var best_n := Vector3.UP
 	var best_s := INF
+	var walled := false
 	for c in HOLDS:
 		var cv: Vector2 = c
 		var q: Vector3 = p + side * cv.x + fwd * cv.y
 		var h := _ray(q.x, q.z, top, bot, solid_rays)
 		if h.is_empty():
 			continue
+		if wall_stop and h.size() > 2 and _is_wall(q.x, q.z, top):
+			walled = true
+			continue   # inside a wall, not a step: no paw goes there
 		var y: float = h[0]
 		var n: Vector3 = h[1]
 		# an edge under the pad: ground a pad's length ahead / behind / beside is at another height
@@ -263,6 +277,16 @@ func _foothold(p: Vector3, root_y: float, i: int, fwd: Vector3) -> Vector3:
 		# the planned spot is fine: take it (most steps on flat floors end here, 5 rays)
 		if cv == Vector2.ZERO and sc < 0.02:
 			break
+	if walled and best_s == INF:
+		# every spot is in the wall: the paw comes down in front of it
+		for k in range(1, 9):
+			var q2: Vector3 = p - fwd * (0.035 * k)
+			var hb := _ray(q2.x, q2.z, top, bot, solid_rays)
+			if hb.is_empty() or (hb.size() > 2 and _is_wall(q2.x, q2.z, top)):
+				continue
+			best = Vector3(q2.x, maxf(float(hb[0]), root_y - REACH_DOWN), q2.z)
+			best_n = hb[1]
+			break
 	nrm[i] = best_n if best_n.y > 0.5 else Vector3.UP.slerp(best_n, 0.4)
 	return best
 
@@ -277,7 +301,7 @@ func _clearance(a: Vector3, b: Vector3, root_y: float) -> float:
 	for u in [0.25, 0.5, 0.75]:
 		var q := a.lerp(b, u)
 		var h := _ray(q.x, q.z, root_y + REACH_UP, root_y - 0.1, solid_rays)
-		if not h.is_empty():
+		if not h.is_empty() and not (wall_stop and h.size() > 2 and _is_wall(q.x, q.z, root_y + REACH_UP)):
 			# the swing arc rises toward hi in the middle, less near the ends
 			var arc := lerpf(lerpf(a.y, b.y, u), hi, sin(PI * u))
 			worst = maxf(worst, float(h[0]) - arc)
@@ -520,8 +544,10 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				var gmax := -INF
 				for o in [Vector3.ZERO, fw2 * 0.025]:
 					var ov: Vector3 = o
-					var h := _ray(wp.x + ov.x, wp.z + ov.z, maxf(xf.origin.y + REACH_UP, wp.y + 0.05), wp.y - 0.08, solid_rays)
-					if not h.is_empty():
+					var gtop := maxf(xf.origin.y + REACH_UP, wp.y + 0.05)
+					var h := _ray(wp.x + ov.x, wp.z + ov.z, gtop, wp.y - 0.08, solid_rays)
+					# (a wall is not ground to ride up over: the paw just stops short of it)
+					if not h.is_empty() and not (wall_stop and h.size() > 2 and _is_wall(wp.x + ov.x, wp.z + ov.z, gtop)):
 						gmax = maxf(gmax, float(h[0]))
 				floor_y[i] = gmax
 				var under := maxf(gmax + 0.014 - wp.y, 0.0)

@@ -44,6 +44,7 @@ var scratch_dist := 0.16 # distance from the rig root (-z) to the scratched surf
 var climb := 0.0         # claws in, going up a vertical surface. owner rotates the rig onto the wall
 var slide := 0.0         # 0..1 sliding down something it can't climb, fore claws dragging (cat_slide.gd). owner rotates the rig onto it
 var slide_fx := CatSlide.new()
+var slide_out := false   # the slide is over and blending out: the paws go back to the ground early
 var clamber := 0.0       # hanging off a ledge by the forepaws
 var clamber_pull := 0.0  # 0..1 progress of hauling up over it
 var ledge_world := Vector3.ZERO # top of the ledge edge (world)
@@ -127,6 +128,15 @@ static var smooth_ref := true
 ## the leg, and the knee never comes up over the hip. false = legs may fold through the body
 static var leg_limits := true
 static var phys := true
+## pose changes in the air and at landings are eased, never switched in one frame
+static var soft_pose := true
+var _dive := 0.0
+var _vy_s := 0.0   # vertical speed as the pose sees it: eased, so a landing doesn't switch the pose
+## set by the controller: how far the root is off the capsule because of the body's own
+## vertical inertia (take off lag, landing sink). 0 when the controller doesn't do that
+var inertia_y := 0.0
+var inertia_on := false
+var _gv_rel := true
 const K_REL := 12.0
 const ZETA := 0.8
 const LEG_PUSH_G := 6.0
@@ -914,7 +924,7 @@ func animate(dt: float) -> void:
 	if on_floor:
 		if not _prev_floor:
 			_abs_imp = clampf(-_vy_prev, 0.0, 8.0)
-			_land_fv += _abs_imp * (0.2 if phys else 0.5)
+			_land_fv += _abs_imp * ((0.03 if inertia_on else 0.2) if phys else 0.5)
 			_abs_delay = 0.07
 			for j in TAIL_N:
 				_tpv[j] -= _abs_imp * 0.9 * float(j) / TAIL_N
@@ -925,8 +935,10 @@ func animate(dt: float) -> void:
 			if drive_velocity.y > 0.8:
 				gait.takeoff()
 				_launch = 1.0
-			elif _climb_prev > 0.5 and drive_velocity.y < 0.3:
-				tumble(0.5)   # came off a wall back first
+			elif _climb_prev > 0.5 and drive_velocity.y < 0.3 and not soft_pose:
+				# (old: an instant half roll, then a righting twist. the body flipped over in one
+				# frame. now it just tips away from the wall and drops onto its feet)
+				tumble(0.5)
 		_air_vy_max = maxf(_air_vy_max, absf(_vy))
 		_air_timer += dt
 	_prev_floor = on_floor
@@ -934,10 +946,10 @@ func animate(dt: float) -> void:
 	if _abs_delay >= 0.0:
 		_abs_delay -= dt
 		if _abs_delay < 0.0:
-			_land_v += _abs_imp * (0.17 if phys else 0.42)
+			_land_v += _abs_imp * ((0.03 if inertia_on else 0.17) if phys else 0.42)
 	_launch = move_toward(_launch, 0.0, dt * 5.5)
 	var air_target := 1.0 if _air_timer > 0.03 else 0.0
-	_air_w = move_toward(_air_w, air_target, dt * (9.0 if air_target > _air_w else 14.0))
+	_air_w = move_toward(_air_w, air_target, dt * (9.0 if air_target > _air_w else (8.0 if soft_pose and inertia_on else 14.0)))
 	# _land_f / _land: how far (m) the chest / hips have sunk into the landing
 	_land_v += (-_land * 190.0 - _land_v * 19.0) * dt
 	_land += _land_v * dt
@@ -953,7 +965,8 @@ func animate(dt: float) -> void:
 		_tum_c = move_toward(_tum_c, 0.0, trate * dt)
 		if on_floor or absf(_tum_p) - absf(_tum_c) > 1.2 or _tum_c == 0.0:
 			_tum_p = move_toward(_tum_p, 0.0, trate * dt)
-	var rise := clampf(_vy / 3.5, -1.0, 1.0)
+	_vy_s = LowPoly.damp(_vy_s, _vy, 16.0, dt) if soft_pose else _vy
+	var rise := clampf(_vy_s / 3.5, -1.0, 1.0)
 
 	# weight: the body is a mass on springs over the paws. it hangs back and squats when the
 	# cat takes off, pitches onto the forelegs and dips when it brakes, and rocks once as it settles
@@ -1010,7 +1023,7 @@ func animate(dt: float) -> void:
 			home.z = lerpf(home.z, 0.07 * pelvis_z / 0.095, loaf_h)
 			home.z += rear * 0.02
 		homes.append(yb * home)
-	var all_free := (not on_floor) or climb > 0.02 or clamber > 0.02 or slide > 0.02 or not use_planting
+	var all_free := (not on_floor) or climb > 0.02 or clamber > 0.02 or slide > (0.5 if slide_out else 0.02) or not use_planting
 	var want_free := [all_free, all_free, all_free, all_free]
 	if paw_free:
 		# a fore paw that is swatting, hooked on something or gripping is off the ground: the gait
@@ -1085,7 +1098,9 @@ func animate(dt: float) -> void:
 	var rough := CatGait.rough and use_planting
 	if rough:
 		# the capsule hopped up / down a bump: the planted paws didn't, so neither does the body
-		var ry := gx.origin.y
+		# (the part of the root's motion that is the body's own bounce, `inertia_y`, is real
+		# motion of the body: only steps of the capsule are taken out)
+		var ry := gx.origin.y - inertia_y
 		if not is_nan(_root_y_prev) and on_floor and _prev_floor_g and nc > 0.5 and slide < 0.02 and absf(ry - _root_y_prev) < 0.3:
 			_fgy -= ry - _root_y_prev
 			_hgy -= ry - _root_y_prev
@@ -1158,7 +1173,16 @@ func animate(dt: float) -> void:
 	# following a steady climb at this rate trails it by speed / rate: lead by that much, so
 	# running up stairs the body rides at its real height over the steps instead of in them
 	var glead := clampf(_climb_v / grate, -0.12, 0.12) if (smooth_ref and rough) else 0.0
+	# (the root as drawn this frame, not the physics velocity: the two differ by a frame)
+	var droot := gx.origin.y - _phys_ry if not is_nan(_phys_ry) and absf(gx.origin.y - _phys_ry) < 0.4 else 0.0
+	var rvy := droot / dt if dt > 0.0 else 0.0
+	if absf(rvy) > 12.0:
+		rvy = 0.0   # moved by hand (a respawn, a test): not a speed the body has
 	if phys and use_planting and plantw > 0.5 and on_floor:
+		if not _gv_rel:
+			# coming out of the air: from here the speeds are relative to the root again
+			_gv_rel = true
+			_gv = [clampf(float(_gv[0]) - rvy, -6.0, 6.0), clampf(float(_gv[1]) - rvy, -6.0, 6.0)]
 		var ys := [_fgy, _hgy]
 		for h in 2:
 			ys[h] = _girdle_phys(h, float(ys[h]), float(gy[h]), fl, homes, glo, ghi, dt)
@@ -1170,9 +1194,9 @@ func animate(dt: float) -> void:
 		# second (no harder than they can push), in the air it settles over its legs, and
 		# at a landing it carries on down until the legs have stopped it
 		var ys2 := [_fgy, _hgy]
-		# (the root as drawn this frame, not the physics velocity: the two differ by a frame)
-		var droot := gx.origin.y - _phys_ry if not is_nan(_phys_ry) and absf(gx.origin.y - _phys_ry) < 0.4 else 0.0
-		var rvy := droot / dt if dt > 0.0 else 0.0
+		if _gv_rel:
+			_gv_rel = false
+			_gv = [float(_gv[0]) + rvy, float(_gv[1]) + rvy]
 		for h in 2:
 			var full: float = (F_UP + F_LO + F_PA) if h == 0 else (H_TH + H_SH + H_MT)
 			var y: float = ys2[h]
@@ -1184,14 +1208,17 @@ func animate(dt: float) -> void:
 			var push_up := 9.81 * (12.0 if (not on_floor and _air_timer < 0.09) else (LEG_PUSH_G if on_floor else 2.0))
 			var lo := -full * (LEG_STAND - LEG_HANG - 0.08)
 			for _k in n:
-				var a := -9.81 * (0.0 if on_floor else 1.0) + clampf(900.0 * (0.0 - y) + 2.0 * ZETA * 30.0 * (rvy - v), -9.81 * 2.0, push_up)
+				# (when the root itself carries the body's inertia the two ends just ride it,
+				# settling over the legs)
+				var wn := 60.0 if inertia_on else 30.0
+				var a := -9.81 * (0.0 if on_floor else 1.0) + clampf(wn * wn * (0.0 - y) + 2.0 * ZETA * wn * (rvy - v), -9.81 * (8.0 if inertia_on else 2.0), maxf(push_up, 9.81 * (12.0 if inertia_on else 0.0)))
 				if y < lo:
 					# the legs are as long (take off) or as short (landing) as they go
 					a += clampf(6000.0 * (lo - y) + 120.0 * (rvy - v), 0.0, 400.0)
 				v += a * sdt
 				y += (v - rvy) * sdt
-				if y > 0.06:
-					y = 0.06
+				if y > ghi:
+					y = ghi
 					v = minf(v, rvy)
 				elif on_floor and y < lo - 0.025:
 					y = lo - 0.025   # belly nearly on the ground: that's as far as a landing goes
@@ -1202,6 +1229,7 @@ func animate(dt: float) -> void:
 		_hgy = ys2[1]
 	else:
 		_gv = [0.0, 0.0]
+		_gv_rel = true
 		_fgy = LowPoly.damp(_fgy, clampf(float(gy[0]) + glead, glo, ghi) * plantw, grate, dt)
 		_hgy = LowPoly.damp(_hgy, clampf(float(gy[1]) + glead, glo, ghi) * plantw, grate, dt)
 	_phys_ry = gx.origin.y
@@ -1219,11 +1247,15 @@ func animate(dt: float) -> void:
 	var pdy := _pelvis_dy - clampf(_land, -0.02, 0.08)
 	var gait_pitch := atan2((cdy + _fgy) - (pdy + _hgy), span)
 
-	var air_pitch := clampf(_vy * 0.065, -0.42, 0.42)
+	var air_pitch := clampf(_vy_s * 0.065, -0.42, 0.42)
+	var dive_t := 0.0
 	if land_known and _vy < 0.0:
 		# a long drop: nose down toward the landing, levelling out just before the paws hit
 		var fall := clampf((gx.origin.y - land_point.y) / 0.6, 0.0, 1.0) * (1.0 - clampf(spd / 2.5, 0.0, 1.0))
-		air_pitch -= 0.32 * fall * smoothstep(0.03, 0.22, land_t)
+		dive_t = 0.32 * fall * smoothstep(0.03, 0.22, land_t)
+	# (eased in: the body tips over the top of the jump, it doesn't snap nose down at the apex)
+	_dive = LowPoly.damp(_dive, dive_t, 9.0, dt) if soft_pose else dive_t
+	air_pitch -= _dive
 	air_pitch *= _air_w * nc
 	# the back folds and opens with the paws: hind paws coming up under the body round it,
 	# fore paws reaching out ahead of the hind ones stretch it (that is the whole gallop)
@@ -2159,7 +2191,7 @@ func _solve_leg(i: int, foot: Vector3, side: float, prot: float, heel: float, lo
 		theta = lerpf(theta, 1.3, rear)
 		theta += heel - load * 0.1 * (1.0 - _sit_h)
 		if _air_w > 0.0:
-			theta = lerpf(theta, lerpf(0.9, 0.3, clampf(_vy / 3.5, 0.0, 1.0)), _air_w * (1.0 - climb))
+			theta = lerpf(theta, lerpf(0.9, 0.3, clampf(_vy_s / 3.5, 0.0, 1.0)), _air_w * (1.0 - climb))
 		theta = clampf(theta, 0.05, 1.65)
 		var lim_on: bool = leg_limits and climb < 0.3 and clamber < 0.3 and rear < 0.3 and _sit_h < 0.1 and float(gait.free_w[i]) < 0.5
 		if lim_on and gait.mode[i] != CatGait.PLANTED:
@@ -2228,7 +2260,7 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 		var v := lerpf(idle[k], moving, move_amt)
 		v = lerpf(v, stalk[k], maxf(crouch, charge))
 		if _air_w > 0.0:
-			var airv: float = [0.45 + clampf(-_vy * 0.12, -0.3, 0.5), 0.0, 0.03, 2.0, 0.0][k]
+			var airv: float = [0.45 + clampf(-_vy_s * 0.12, -0.3, 0.5), 0.0, 0.03, 2.0, 0.0][k]
 			v = lerpf(v, airv, _air_w)
 		v = lerpf(v, sitp[k], sit)
 		v = lerpf(v, loafp[k], loaf)
