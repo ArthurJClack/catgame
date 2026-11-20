@@ -75,6 +75,8 @@ boot = **title screen** (`title_screen.gd`) over the live farm while the camera 
   (`godot --headless --fixed-fps 60 --path . res://movelab.tscn -- --realtest [--only a,b] [--csv out.csv]`, ~1 min)
 - grip: `CatPlayer.real_move` (default on) holds push, brake and turn to what the surface grips (`CatPlayer.MU` x g,
   `GRIP_REAL` scales it all). `CAT_OFF=real_move` or `--real 0` in the labs = the old grip table
+- jumps (also `real_move`): a hop loads the legs first (`GATHER_MIN`..`GATHER_MAX`), goes lower the faster the run
+  (`RUN_HOP`), and can't be steered in the air past a small nudge (`AIR_NUDGE`, `AIR_BUDGET`)
 - `scripts/cat_pad.gd` gamepad reader (deadzones, button map, `CatPad.sim` fake pad for tests)
 - `scripts/level.gd` living room gym + gait reference studio
 - `scripts/npc_cat.gd` wandering cats
