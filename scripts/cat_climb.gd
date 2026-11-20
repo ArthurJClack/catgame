@@ -44,7 +44,7 @@ const WRAP_PAUSE := 0.2      # s at an edge after swinging round one (thin posts
 const TURN_IN_T := 0.42       # s to turn into an inside corner
 const CLIMB_ACC := 9.0       # m/s2 the climbing speed can change by (starts, stops, reversing)
 const ABSORB := 9.0         # 1/s: speed it hits the wall with bleeds off as the claws sink in
-const FLOOR_LET_GO := 0.11   # climbing down: let go this far above the floor (rump would touch)
+const FLOOR_LET_GO := 0.22   # climbing down: step off onto the floor from this high (before the rump reaches it)
 const GAP := 0.012           # capsule skin off the face
 # moves over edges
 const HAUL_UP := 1.1         # m/s average rise hauling up off a hang
@@ -65,6 +65,7 @@ var _then := NONE
 var _haul: Array = []        # pre planned haul from the hang (validated when it grabbed on)
 var _head_v := 0.0
 var _absorb := Vector3.ZERO
+var _tan_v := Vector3.ZERO   # climbing velocity along the face last tick
 var _cv := Vector2.ZERO      # climbing speed along the face (x across, y up): eases toward what's asked
 var _edge := Vector3.ZERO    # ledge edge point / normal for the move in progress
 var _edge_n := Vector3.ZERO
@@ -100,7 +101,7 @@ func is_climbing() -> bool:
 
 
 func _over_kind() -> bool:
-	return kind == "haul" or kind == "lip" or kind == "mantle"
+	return kind == "haul" or kind == "lip" or kind == "mantle" or kind == "down"
 
 
 ## hanging / hauling up off a hang (the rig's rear up + pull pose)
@@ -135,7 +136,7 @@ func climb_pose() -> float:
 		return 1.0
 	if mode == MOVE and from_climb and _over_kind():
 		var u := progress()
-		var e := clampf((u - 0.1) / 0.75, 0.0, 1.0)
+		var e := clampf((u - 0.1) / 0.75, 0.0, 1.0) if kind != "down" else u
 		return 1.0 - e * e * e * (e * (e * 6.0 - 15.0) + 10.0)
 	return 0.0
 
@@ -149,6 +150,7 @@ func cling(n: Vector3) -> void:
 		return
 	mode = CLING
 	kind = ""
+	_tan_v = Vector3.ZERO
 	corner = {}
 	wrap_t = 0.0
 	p.climb_n = fn
@@ -343,9 +345,10 @@ func _run(dt: float) -> void:
 					# settle onto the top through the body's own floor check, so the very next
 					# tick knows it's standing (not in the air touching the wall: no slide)
 					var ev: Vector3 = p.velocity
-					p.velocity = Vector3.DOWN * 0.4
+					p.velocity = Vector3.DOWN * 1.5
 					p.move_and_slide()
 					p.velocity = ev
+				p._slide_seen = 10.0   # (wall touches from before the move are old news)
 				if kind != "push":
 					p._event("up")
 
@@ -513,7 +516,7 @@ func _probe(feet: Vector3, n: Vector3, h := CHEST) -> Dictionary:
 func _let_go(cool: float, ev: String, vel: Vector3) -> void:
 	mode = NONE
 	p.climb_cool = cool
-	p.velocity = vel
+	p.velocity = vel + _tan_v   # (keeps the speed it was climbing at: no dead stop in mid air)
 	p._event(ev)
 
 
@@ -526,9 +529,9 @@ func _cling(dt: float, mv: Vector2, wish_dir: Vector3, jump_pressed: bool, want_
 	p.climb_wrap_t = wrap_t
 
 	if not p.stamina.infinite and p.stamina.is_empty():
+		# (it drops off: the claw drag slide is for faces it can't grip, and this one it can, so
+		# handing over to it just flicked the slide pose on for a tick)
 		_let_go(0.5, "claws give out", n * 0.4)
-		if p.has_method("start_wall_slide"):
-			p.start_wall_slide(n)
 		return
 
 	if not corner.is_empty():
@@ -617,7 +620,8 @@ func _cling(dt: float, mv: Vector2, wish_dir: Vector3, jump_pressed: bool, want_
 	if vy < -0.05:
 		var fh: Dictionary = p._ray(feet + Vector3.UP * 0.02, feet + Vector3.DOWN * FLOOR_LET_GO)
 		if not fh.is_empty() and fh.normal.y > 0.6:
-			_let_go(0.4, "down", n * 0.3 + Vector3.DOWN * 0.3)
+			if not _step_down(n, (fh.position as Vector3).y):
+				_let_go(0.4, "down", n * 0.3 + Vector3.DOWN * 0.3)
 			return
 
 	# the limbs can only change the speed so fast: ease toward it (the bursts stay in)
@@ -630,6 +634,7 @@ func _cling(dt: float, mv: Vector2, wish_dir: Vector3, jump_pressed: bool, want_
 	vx = _cv.x
 	vy = _cv.y
 	var v := Vector3.UP * vy + right * vx
+	_tan_v = v
 	_absorb = _absorb.lerp(Vector3.ZERO, clampf(dt * ABSORB, 0.0, 1.0))
 	v += _absorb
 
@@ -670,6 +675,20 @@ func _head_tick(dt: float, dir: Vector2, moving: bool, room: float) -> void:
 	var w := HEAD_W * (1.6 if room_k < 0.5 else 1.0)
 	_head_v += (w * w * (head - p.climb_head) - 2.0 * w * _head_v) * dt
 	p.climb_head += _head_v * dt
+
+
+## climbing down, the floor's right there: the hind paws reach down for it, the body tips off
+## the wall onto all fours (a path, like a top out in reverse)
+func _step_down(n: Vector3, floor_y: float) -> bool:
+	var feet: Vector3 = p.global_position
+	var to := Vector3(feet.x, floor_y + 0.004, feet.z) + n * 0.07
+	var keys := [_key(feet, _calm(p.velocity, n), 0.0), _key(to, n * 0.15, 0.34)]
+	if not _valid(keys) or not p._fits(to):
+		return false
+	from_climb = true
+	_start("down", keys, NONE)
+	p._event("down")
+	return true
 
 
 func _push_off(vel: Vector3) -> void:
@@ -721,9 +740,14 @@ func _wrap_outside(feet: Vector3, n: Vector3, travel: Vector3) -> bool:
 		# angle over time: a cubic that starts at the speed it was going across the face and
 		# ends at the speed it'll go across the next one (no stop, no lurch)
 		var w0 := clampf(p.velocity.dot(travel), 0.0, 2.0) / r * signf(a1)
-		var w1 := SIDE_SPEED * 0.85 / r * signf(a1)
-		var dur := clampf(absf(a1) / maxf((absf(w0) + absf(w1)) * 0.5, 0.1), 0.12, 0.45)
-		corner = {"in": false, "e": e, "r": r, "n0": n, "n1": hn, "a1": a1, "t": 0.0, "dur": dur, "w0": w0, "w1": w1}
+		var w1 := SIDE_SPEED * 0.5 / r * signf(a1)   # (comes out of it a bit slower: the body stops turning gently)
+		# (starts from where the capsule really is: a few mm past the edge already)
+		var d0 := Vector3(feet.x - e.x, 0.0, feet.z - e.z)
+		var a0 := atan2(n.cross(d0.normalized()).y, n.dot(d0.normalized())) if d0.length() > 0.01 else 0.0
+		if signf(a0) != signf(a1) or absf(a0) > absf(a1):
+			a0 = 0.0
+		var dur := clampf(absf(a1 - a0) / maxf((absf(w0) + absf(w1)) * 0.5, 0.1), 0.12, 0.45)
+		corner = {"in": false, "e": e, "r": r, "r0": d0.length(), "n0": n, "n1": hn, "a0": a0, "a1": a1, "t": 0.0, "dur": dur, "w0": w0, "w1": w1}
 		p._event("round the corner")
 		return true
 	return false
@@ -741,7 +765,8 @@ func _corner_tick(dt: float, dir: Vector2) -> void:
 		var a1: float = corner.a1
 		var u2 := u * u
 		var u3 := u2 * u
-		var aa: float = (u3 - 2 * u2 + u) * float(corner.w0) * dur + (-2 * u3 + 3 * u2) * a1 + (u3 - u2) * float(corner.w1) * dur
+		var a0: float = corner.a0
+		var aa: float = a0 + (u3 - 2 * u2 + u) * float(corner.w0) * dur + (-2 * u3 + 3 * u2) * (a1 - a0) + (u3 - u2) * float(corner.w1) * dur
 		e = aa / a1
 	var n0: Vector3 = corner.n0
 	var n1: Vector3 = corner.n1
@@ -761,7 +786,7 @@ func _corner_tick(dt: float, dir: Vector2) -> void:
 	else:
 		var a := float(corner.a1) * e
 		var nn := n0.rotated(Vector3.UP, a).normalized()
-		var r: float = corner.r
+		var r: float = lerpf(float(corner.r0), float(corner.r), smoothstep(0.0, 1.0, u))
 		var c: Vector3 = corner.e
 		var to := c + nn * r
 		to.y = feet.y + vy * dt
@@ -778,6 +803,9 @@ func _corner_tick(dt: float, dir: Vector2) -> void:
 	_head_tick(dt, dir, dir.length() > 0.15, p.RADIUS if corner["in"] else BODY_SIDE + p.RADIUS)
 	if u >= 1.0:
 		p.climb_n = n1
+		if not corner["in"]:
+			# carry on across the new face at the speed it came round at
+			_cv.x = absf(float(corner.w1)) * float(corner.r) * signf(_cv.x if _cv.x != 0.0 else dir.x)
 		corner = {}
 		wrap_t = WRAP_PAUSE
 		p.climb_wrap_t = wrap_t

@@ -302,6 +302,7 @@ var _w_clamber_v := 0.0
 var _w_climb_m := 0.0     # (the blends go through a smoothing stage first, then the spring: the
 var _w_clamber_m := 0.0   #  body starts turning onto / off a wall without a kick)
 var _w_slide_v := 0.0
+var _w_slide_m := 0.0
 var w_clamber := 0.0
 var w_scratch := 0.0
 # wall kick: plant (all four paws on the wall, body flat against it) then push + twist away
@@ -1344,7 +1345,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 			var fh := _ray(global_position + Vector3.UP * 0.05, global_position + Vector3.DOWN * 0.45)
 			if not fh.is_empty() and fh.normal.y > 0.7:
 				st = smoothstep(0.03, 0.4, global_position.y - fh.position.y)
-		_w_slide_v += (16.0 * 16.0 * (st - w_slide) - 32.0 * _w_slide_v) * dt
+		_w_slide_m = LowPoly.damp(_w_slide_m, st, 24.0, dt)
+		_w_slide_v += (16.0 * 16.0 * (_w_slide_m - w_slide) - 32.0 * _w_slide_v) * dt
 		w_slide = clampf(w_slide + _w_slide_v * dt, 0.0, 1.0)
 		if (w_slide <= 0.0 and _w_slide_v < 0.0) or (w_slide >= 1.0 and _w_slide_v > 0.0):
 			_w_slide_v = 0.0
