@@ -191,6 +191,14 @@ var ledge_n := Vector3.ZERO
 var climbing := false
 var climb_n := Vector3.ZERO
 var climb_cool := 0.0
+var climb_face := Vector3.FORWARD   # smoothed climb_n the rig turns with (corners don't pop)
+var climb_head := 0.0               # rad the body is turned on the wall toward sideways travel
+var climb_side := 0.0               # -1 / 0 / 1: going left / not across / right (tests, rig)
+var climb_lunge_t := 0.0
+var climb_lunge_dir := Vector3.UP
+var climb_wrap_t := 0.0             # pause after swinging round an edge (thin posts don't spin)
+var climb_mv := Vector2.ZERO        # raw move input while on a wall (up = up, whatever the camera)
+var clamber_climb := false          # this clamber started from a climb: w hauls up, not camera fwd
 var scratching := false
 var scratch_n := Vector3.ZERO
 var scratch_t := 0.0
@@ -752,6 +760,8 @@ func _physics_process(dt: float) -> void:
 		dash.cancel()
 	if climbing and wish_dir.length() > 0.0:
 		stamina.drain(CatStamina.CLIMB, dt)
+	if climbing or clambering:
+		climb_mv = mv
 	if mantling:
 		_mantle_step(dt)
 		_post(dt, inp)
@@ -1010,11 +1020,11 @@ func _physics_process(dt: float) -> void:
 		if pushing and not is_on_floor():
 			leap_lock = false
 			# rough surface: sink the claws in and climb. otherwise go for the ledge
-			if _is_climbable(wall_collider) and climb_cool <= 0.0 and wish_dir.dot(into) > 0.4 and not is_on_floor():
+			if _is_climbable(wall_collider) and climb_cool <= 0.0 and stamina.can_run() and wish_dir.dot(into) > 0.4 and not is_on_floor():
 				_start_climb(wall_normal)
 			else:
 				_try_ledge(into)
-		elif pushing and is_on_floor() and _is_climbable(wall_collider) and jump_pressed and climb_cool <= 0.0:
+		elif pushing and is_on_floor() and _is_climbable(wall_collider) and jump_pressed and climb_cool <= 0.0 and stamina.can_run():
 			_start_climb(wall_normal)
 
 	# small stuff up to chest height (curbs, steps, rocks, logs): walking into it the cat just steps
@@ -1051,7 +1061,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	w_clamber = LowPoly.damp(w_clamber, 1.0 if clambering else 0.0, 16.0, dt)
 	w_scratch = LowPoly.damp(w_scratch, 1.0 if scratching else 0.0, 8.0, dt)
 	if climbing:
-		face_n = climb_n
+		climb_face = climb_face.slerp(climb_n, clampf(dt * 14.0, 0.0, 1.0)).normalized() if climb_face.dot(climb_n) > -0.9 else climb_n
+		face_n = climb_face
 	elif clambering:
 		face_n = ledge_n
 	elif scratching:
@@ -1209,6 +1220,8 @@ func _orient_rig() -> void:
 	var up := Vector3.UP
 	var face := Basis(up.cross(n).normalized(), up, n)
 	var climb_b := Basis(n.cross(Vector3.DOWN).normalized(), n, Vector3.DOWN)
+	if absf(climb_head) > 0.001:
+		climb_b = Basis(n, -climb_head) * climb_b   # free climb: body turned toward sideways travel
 	var q := global_transform.basis.get_rotation_quaternion()
 	q = q.slerp(face.get_rotation_quaternion(), clampf(w_face, 0.0, 1.0))
 	var wc := w_climb
@@ -1491,8 +1504,16 @@ func _bump_dir() -> Vector3:
 	return Vector3.ZERO
 
 
+## surfaces claws sink into even when the level didn't tag them "climbable" (free climbing)
+const CLIMB_SURFACES := ["bark", "fabric", "carpet", "rug", "hay", "sisal", "rope"]
+
 func _is_climbable(o: Object) -> bool:
-	return o != null and is_instance_valid(o) and o is Node and (o as Node).is_in_group("climbable")
+	if o == null or not is_instance_valid(o) or not (o is Node):
+		return false
+	var nd := o as Node
+	if nd.is_in_group("climbable"):
+		return true
+	return not FreeClimb.off and nd.has_meta("surface") and CLIMB_SURFACES.has(str(nd.get_meta("surface")))
 
 
 func _ray(from: Vector3, to: Vector3) -> Dictionary:
@@ -1655,6 +1676,7 @@ func _try_ledge(into: Vector3) -> bool:
 		# low: hook a paw over and hop straight up
 		mantling = true
 		mantle_t = 0.0
+		clamber_climb = climbing
 		mantle_from = global_position
 		mantle_to = onto
 		paws.mantle()
@@ -1691,6 +1713,7 @@ func _try_lip(into: Vector3) -> bool:
 
 func _start_clamber(edge: Vector3, n: Vector3, onto: Vector3) -> void:
 	clambering = true
+	clamber_climb = climbing
 	clamber_phase = 0
 	clamber_t = 0.0
 	clamber_from = global_position
@@ -1720,6 +1743,9 @@ func _clamber_step(dt: float, wish_dir: Vector3, jump_pressed: bool, want_crouch
 		1:
 			global_position = clamber_hang
 			var into := -ledge_n
+			if clamber_climb:
+				# came off a climb: the camera can be anywhere round a trunk, w / s mean up / down
+				wish_dir = into * climb_mv.y
 			if want_crouch or wish_dir.dot(ledge_n) > 0.5:
 				clambering = false
 				velocity = ledge_n * 0.8 + Vector3.DOWN * 0.3
@@ -1781,6 +1807,8 @@ func _mantle_step(dt: float) -> void:
 		mantling = false
 		var fwd := -global_transform.basis.z
 		velocity = fwd * maxf(1.2, mantle_quick)   # keeps the pace it came in at
+		if clamber_climb:
+			velocity = Vector3.ZERO   # topped out a climb: stand on it, don't run off a thin top
 		mantle_quick = 0.0
 
 
@@ -1793,10 +1821,14 @@ func _start_climb(n: Vector3) -> void:
 	leap_lock = false
 	pounce_air = false
 	charging = false
+	FreeClimb.start(self, n)
 	_event("claws in, climbing")
 
 
 func _climb_step(dt: float, mv: Vector2, wish_dir: Vector3, jump_pressed: bool, want_crouch: bool) -> void:
+	if not FreeClimb.off:
+		FreeClimb.step(self, dt, mv, wish_dir, jump_pressed, want_crouch)
+		return
 	var into := -climb_n
 	var c := global_position + Vector3.UP * 0.12
 	var hit := _ray(c, c + into * (RADIUS + 0.2))
