@@ -3,7 +3,7 @@ extends CharacterBody3D
 ## first person cat controller. movement shooter feel, real cat numbers:
 ##   stalk 0.7 m/s, trot 3.2 m/s, canter 6 m/s (hold shift), gallop up to 11 m/s (double tap shift) (~40 km/h, real cats top out ~48)
 ##   hop 1.0 m, charged pounce up to 1.8 m (real cats clear ~1.5-1.8 m, ~5x their height)
-##   gravity 9.8, wall kicks (3 per airtime), wall scramble, bhop, air strafing
+##   gravity 9.8, 1 wall kick per airtime, wall scramble. real_move: grip per surface, jumps take a push, no air steering
 ## parkour (the easy part): hold right mouse, look at where you want to be, let go.
 ##   the cat crouches, wiggles and leaps on a real ballistic arc that lands exactly there.
 ##   look at the side of something and it finds the top. too high to land on? it leaps
@@ -154,6 +154,21 @@ static var real_move := true
 const MU := {"tile": 0.45, "metal": 0.45, "wood": 0.55, "stone": 0.7, "default": 0.7, "dirt": 0.85, "hay": 0.9, "grass": 1.0, "carpet": 1.2, "rug": 1.2, "bark": 1.2}
 const GRIP_REAL := 1.0        # feel dial on top of the real numbers (1.3 = a third more grip everywhere)
 const SKID := 0.85            # sliding paws hold less than planted ones
+## movement plan phase 3 (also behind real_move): a jump is a push, and a push takes time and
+## footing. the legs load, then extend (GATHER_MIN..MAX s for a tap..full spring) before the paws
+## leave the floor. the faster the run, the less time the paws are down to push up with, so a
+## running jump goes long and low. and nothing in the air can change where the cat is going,
+## bar a small correction (AIR_NUDGE, AIR_BUDGET m/s in all per jump, sideways only)
+const GATHER_MIN := 0.04
+const GATHER_MAX := 0.18
+const RUN_HOP := 0.3          # share of the hop height left at a full gallop
+const STAND_PUSH := 1.2       # a standing hop with the stick held goes toward it (m/s)
+const AIR_NUDGE := 1.5
+const AIR_BUDGET := 0.5
+var _gather_t := 0.0
+var _gather_vy := 0.0
+var _air_left := AIR_BUDGET
+var _launch_hv := Vector3.ZERO   # the way the push sent it (a face it brushed on the way up doesn't cancel that)
 var _hard_ask := false        # this tick the cat asked for more than the footing holds on purpose
 const WALL_BRAKE := 9.0
 const LIFT_UP_ACC := 60.0     # hardest the legs shove the body up / stop it, m/s^2 (~6 g)
@@ -931,6 +946,8 @@ func _physics_process(dt: float) -> void:
 		air_time = 0.0
 		ground_time += dt
 		kicks_left = MAX_KICKS
+		_air_left = AIR_BUDGET
+		_launch_hv = Vector3.ZERO
 		jumped_this_air = false
 		scramble_avail = true
 		last_kick_normal = Vector3.ZERO
@@ -966,7 +983,7 @@ func _physics_process(dt: float) -> void:
 			return
 
 	# crouch / stand (only stand if there's room)
-	var crouch_target := 1.0 if (want_crouch or charging) else 0.0
+	var crouch_target := 1.0 if (want_crouch or charging or _gather_t > 0.0) else 0.0
 	crouch_target = maxf(crouch_target, space_charge() * 0.5)   # gathering for a bigger hop
 	if crouch_target < crouch_amt and not _can_stand():
 		crouch_target = crouch_amt
@@ -985,6 +1002,19 @@ func _physics_process(dt: float) -> void:
 		# humans: the space filter says how big (a tap is tiny). bots: plain hop scaled by charge
 		_hop_mul = inp.get("hop_mul", lerpf(1.0, HOP_CHARGE_MUL, _hop_charge))
 	var can_ground_jump := grounded or (air_time < 0.09 and not jumped_this_air)
+	if _gather_t > 0.0:
+		# legs loaded: the push ends, the paws leave the floor
+		_gather_t -= dt
+		if _gather_t <= 0.0:
+			_gather_t = 0.0
+			if can_ground_jump:
+				velocity.y = _gather_vy
+				if Vector2(velocity.x, velocity.z).length() < 1.0 and wish_len > 0.3:
+					velocity += wish_dir * STAND_PUSH * wish_len
+				jumped_this_air = true
+				grounded = false
+				_launch_hv = Vector3(velocity.x, 0, velocity.z)
+				_event("hop")
 
 	# hold q / mouse3 = aimed leap (movement). the one pounce lives on both paws (cat_combat.gd)
 	if not charging and can_ground_jump and aim_in:
@@ -1011,17 +1041,26 @@ func _physics_process(dt: float) -> void:
 			jumped_this_air = true
 			grounded = false
 			charge = 0.0
-	elif jump_buffer > 0.0 and can_ground_jump:
+	elif jump_buffer > 0.0 and can_ground_jump and _gather_t <= 0.0:
 		# a cat always gets off the ground, but spent it's a lower hop
 		var hh := HOP_HEIGHT * _hop_mul
 		if not stamina.spend(CatStamina.HOP * (1.0 + _hop_charge)):
 			hh = HOP_HEIGHT * 0.55
-		_hop_charge = 0.0
-		velocity.y = sqrt(2.0 * G * hh)
-		jumped_this_air = true
-		jump_buffer = 0.0
-		grounded = false
-		_event("hop")
+		if real_move:
+			hh *= lerpf(1.0, RUN_HOP, smoothstep(TROT_SPEED + 0.3, SPRINT_SPEED, hv.length()))
+			_gather_vy = sqrt(2.0 * G * hh)
+			_gather_t = lerpf(GATHER_MIN, GATHER_MAX, clampf((hh - 0.14) / 1.36, 0.0, 1.0))
+			if inp.has("hop_mul") and _hop_charge > 0.0:
+				_gather_t = GATHER_MIN + 0.02   # a held space bar already was the crouch
+			_hop_charge = 0.0
+			jump_buffer = 0.0
+		else:
+			_hop_charge = 0.0
+			velocity.y = sqrt(2.0 * G * hh)
+			jumped_this_air = true
+			jump_buffer = 0.0
+			grounded = false
+			_event("hop")
 	elif jump_pressed and not grounded:
 		_try_wall_kick(wish_dir)
 	if not charging and not combat.aiming():
@@ -1122,7 +1161,7 @@ func _physics_process(dt: float) -> void:
 		if lock_face and wish_len > 0.01:
 			# (real_move: quick short steps, but placed ones: as hard as the floor holds, no skid)
 			accel = maxf(accel, minf(LOCK_ACCEL, 0.95 * g_now) if real_move else LOCK_ACCEL)
-		if cur > target_speed + 0.1 and ground_time < 0.1:
+		if cur > target_speed + 0.1 and ground_time < 0.1 and not real_move:
 			# bhop window: keep momentum if you jump again quickly
 			pass
 		elif cur > SPRINT_SPEED + 0.3 and wish_len > 0.01 and not _brake_ask:
@@ -1140,6 +1179,26 @@ func _physics_process(dt: float) -> void:
 				lon = dv
 				lat = Vector3.ZERO
 			hv += lon.limit_length(accel * dt) + lat.limit_length(lat_ask * (1.0 if real_move else lerpf(0.4, 1.0, clampf(cur / SPRINT_SPEED * 1.6, 0.0, 1.0))) * dt)
+	elif not leap_lock and real_move:
+		# in the air there is nothing to push on: the path is set. a twist of the body buys a
+		# small sideways correction, once, and never any speed
+		if wish_len > 0.01 and _air_left > 0.0:
+			var sp := hv.length()
+			var add := wish_dir * AIR_NUDGE * dt
+			if sp > 0.3:
+				add -= hv / sp * add.dot(hv / sp)
+			add = add.limit_length(_air_left)
+			_air_left -= add.length()
+			hv += add
+			if sp > 0.3:
+				hv = hv.limit_length(sp)
+		# hopping up at something right in front: the capsule catches its face on the way up and
+		# loses the forward half of the push. once clear it carries on the way it was sent
+		var ll := _launch_hv.length()
+		if ll > 0.3 and wish_len > 0.3 and wish_dir.dot(_launch_hv / ll) > 0.5:
+			var lack := ll - hv.dot(_launch_hv / ll)
+			if lack > 0.05:
+				hv += _launch_hv / ll * minf(lack, 10.0 * dt)
 	elif not leap_lock:
 		# quake/cpm style air accel: tiny wish cap so strafing + turning builds speed
 		if wish_len > 0.01:
