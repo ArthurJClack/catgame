@@ -10,6 +10,7 @@ extends Node3D
 ##   --real 0 turns CatPlayer.real_move off where the build has it (before / after)
 ##   godot --path . res://movelab.tscn -- --show [--real 0] --write-movie out/zoom.avi --fixed-fps 30   (xvfb)
 ##     films one run on the tile from above: gallop, hard right, throw it into reverse, stop
+##     (--path-csv f also writes that run's path, headless works too)
 ##
 ## rows (unit, band):
 ##   start_g_<surface>   mean push off a stand up to 3 m/s, in g. band = what the surface holds (mu), capped by the legs
@@ -62,7 +63,7 @@ func _ready() -> void:
 	_build()
 	_scenarios()
 	if show:
-		scen = {"zoomies": [LANE.tile, 0.0, -30.0, 11.0, func(tt): return _go({"sprint": tt < 8.5, "turn_to": 0.0 if tt < 2.6 else (-PI * 0.5 if tt < 5.2 else PI * 0.5)}) if tt < 8.5 else {"move": Vector2.ZERO, "pitch": -0.1}, func(): pass]}
+		scen = {"zoomies": [LANE.tile, 0.0, -30.0, 11.0, func(tt): return _go({"sprint": tt < 8.5, "turn_to": 0.0 if tt < 2.6 else (-PI * 0.5 if tt < 5.2 else PI * 0.5)}) if tt < 8.5 else {"move": Vector2.ZERO, "pitch": -0.1}, _dump_path]}
 	var only := []
 	k = args.find("--only")
 	if k >= 0:
@@ -429,6 +430,17 @@ func _m_hill() -> void:
 
 func _m_steep() -> void:
 	_row("steep_slide_m", ((tr.p[-1] as Vector3) - (tr.p[_idx(0.5)] as Vector3)).length(), "m", 0.5, 20.0)
+
+
+## --show: the run's path as csv (t,x,z,speed) when --path f is given
+func _dump_path() -> void:
+	var args := OS.get_cmdline_user_args()
+	var k := args.find("--path-csv")
+	if k < 0:
+		return
+	var f := FileAccess.open(args[k + 1], FileAccess.WRITE)
+	for i in tr.t.size():
+		f.store_line("%.3f,%.3f,%.3f,%.3f" % [tr.t[i], (tr.p[i] as Vector3).x, (tr.p[i] as Vector3).z, _speed(i)])
 
 
 func _summary() -> void:
