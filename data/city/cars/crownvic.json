@@ -1,0 +1,44 @@
+{
+	"id": "crownvic",
+	"name": "Fjord Crown Victor LX (2005)",
+	"dimensions": [
+		2.01,
+		1.47,
+		5.39
+	],
+	"collision": [
+		{
+			"size": [
+				2.01,
+				0.73,
+				5.39
+			],
+			"offset": [
+				0,
+				0.08,
+				0
+			]
+		},
+		{
+			"size": [
+				1.65,
+				0.53,
+				2.43
+			],
+			"offset": [
+				0,
+				0.73,
+				0.25
+			]
+		}
+	],
+	"wheelbase": 2.913,
+	"track_front": 1.62,
+	"track_rear": 1.67,
+	"wheel_radius": 0.338,
+	"color": "#6e1b26",
+	"model_yaw": 180,
+	"model": "res://assets/city/cars/crownvic/body.glb",
+	"tyre_model": "res://assets/city/cars/crownvic/tyre.glb",
+	"from": "secret (data/cars/crownvic.json) <- shitbox rally, looks + size only"
+}

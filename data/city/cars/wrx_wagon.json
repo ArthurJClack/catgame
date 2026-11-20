@@ -1,0 +1,44 @@
+{
+	"id": "wrx_wagon",
+	"name": "Pleiades WRX Wagon (2002)",
+	"dimensions": [
+		1.695,
+		1.485,
+		4.415
+	],
+	"collision": [
+		{
+			"size": [
+				1.695,
+				0.74,
+				4.415
+			],
+			"offset": [
+				0,
+				0.12,
+				0
+			]
+		},
+		{
+			"size": [
+				1.48,
+				0.55,
+				2.75
+			],
+			"offset": [
+				0,
+				0.765,
+				0.4
+			]
+		}
+	],
+	"wheelbase": 2.525,
+	"track_front": 1.465,
+	"track_rear": 1.455,
+	"wheel_radius": 0.316,
+	"color": "#b8bcc2",
+	"model_yaw": 180,
+	"model": "res://assets/city/cars/wrx_wagon/body.glb",
+	"tyre_model": "res://assets/city/cars/wrx_wagon/tyre.glb",
+	"from": "secret (data/cars/wrx_wagon.json) <- shitbox rally, looks + size only"
+}

@@ -170,7 +170,7 @@ func _build_hud() -> void:
 	help_label.add_theme_font_size_override("font_size", 15)
 	help_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	help_label.add_theme_constant_override("outline_size", 5)
-	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop (hold = higher, hold long = pounce + aim line) / wall kick (1 per jump) · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\ntab = lock on (rats first, then prey / wildlife): camera holds it, wasd circles it, flick the mouse = next target, tab again = unlock\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb (then wasd any way, round trunks + corners, space + direction = lunge) · hold f at a wall = scratch\nstalk (c) up to prey, hold space to pounce · mouse1 / mouse2 = left / right paw swat (hold = rake, or claws: hook stuff) · g / mouse5 = grab + pin it · e drop\nattacks are committed (souls style): dodge comes out of the recovery, extra clicks are buffered\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · walk out the yard gates to travel: west = forest, east = pier 9, north = trail, cellar by the barn = rat pit (f6 / f7 / f8 / f10 shortcuts) · n meow · h hide help · esc = menu (settings, rebind keys)"
+	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop (hold = higher, hold long = pounce + aim line) / wall kick (1 per jump) · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\ntab = lock on (rats first, then prey / wildlife): camera holds it, wasd circles it, flick the mouse = next target, tab again = unlock\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb (then wasd any way, round trunks + corners, space + direction = lunge) · hold f at a wall = scratch\nstalk (c) up to prey, hold space to pounce · mouse1 / mouse2 = left / right paw swat (hold = rake, or claws: hook stuff) · g / mouse5 = grab + pin it · e drop\nattacks are committed (souls style): dodge comes out of the recovery, extra clicks are buffered\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · walk out the yard gates to travel: west = forest, east = pier 9, north = trail, back fence behind the house = the city, cellar by the barn = rat pit (f6 / f7 / f8 / f10 / f4 shortcuts) · n meow · h hide help · esc = menu (settings, rebind keys)"
 	if OS.has_feature("web"):
 		help_label.text = "click the game to grab the mouse (in a browser use c to crouch, ctrl+w closes the tab!)\n" + help_label.text.replace("ctrl/c", "c")
 		help_label.offset_top = -152
@@ -205,6 +205,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			go_scene("res://trail.tscn")
 		elif k == KEY_F10:
 			go_scene("res://arena.tscn")
+		elif k == KEY_F4:
+			go_scene("res://city.tscn")
 
 
 ## level hop (debug keys, lobby "go to them", server map). keeps the cat style via Engine
