@@ -14,6 +14,9 @@ extends Node3D
 ##   --real 0 turns CatPlayer.real_move off where the build has it (before / after)
 
 const LEG := ["LF", "RF", "LH", "RH"]
+var _fall_vy := 0.0
+var _land_vy := 0.0
+var _land_age := 1.0
 const PARTS := ["chest", "pelvis", "head"]
 
 var player: CatPlayer
@@ -51,7 +54,7 @@ func _ready() -> void:
 		ps.set("real_move", args[k + 1] != "0")
 	if "--legacy" in args:
 		# every switch this overhaul added, off: the cat as it was before (before / after runs)
-		for sw in [["cat_gait.gd", "reach_lift"], ["cat_rig.gd", "paw_free"], ["cat_rig.gd", "reach_sag"], ["cat_rig.gd", "follow_fast"], ["cat_rig.gd", "smooth_ref"], ["cat_gait.gd", "solid_rays"], ["cat_player.gd", "smooth_steps"], ["cat_player.gd", "real_move"], ["cat_rig.gd", "phys"], ["cat_rig.gd", "leg_limits"], ["cat_gait.gd", "pendulum"], ["cat_rig.gd", "load_shift"], ["cat_gait.gd", "support_rule"], ["cat_player.gd", "paw_drive"]]:
+		for sw in [["cat_gait.gd", "reach_lift"], ["cat_rig.gd", "paw_free"], ["cat_rig.gd", "reach_sag"], ["cat_rig.gd", "follow_fast"], ["cat_rig.gd", "smooth_ref"], ["cat_gait.gd", "solid_rays"], ["cat_player.gd", "smooth_steps"], ["cat_player.gd", "real_move"], ["cat_rig.gd", "phys"], ["cat_rig.gd", "leg_limits"], ["cat_gait.gd", "pendulum"], ["cat_rig.gd", "load_shift"], ["cat_gait.gd", "support_rule"], ["cat_player.gd", "paw_drive"], ["cat_player.gd", "soft_air"], ["cat_rig.gd", "soft_pose"], ["cat_gait.gd", "wall_stop"], ["cat_player.gd", "wall_brake"], ["cat_player.gd", "climb_cost"]]:
 			var sc: Script = load("res://scripts/" + sw[0])
 			if sc.get(sw[1]) != null:
 				sc.set(sw[1], false)
@@ -464,6 +467,14 @@ func _process(dt: float) -> void:
 				if d > m.clip_max:
 					m.clip_max = d
 					m.clip_what = "%s paw @%.2fs" % [LEG[i], t]
+	if not player.is_on_floor():
+		_fall_vy = maxf(-player.velocity.y, 0.0)
+		_land_age = 9.0
+	elif _land_age > 8.0:
+		_land_age = 0.0
+		_land_vy = _fall_vy
+	else:
+		_land_age += dt
 	# pops: the change of a part's speed (world space) between two frames
 	if not _prev.is_empty() and _prev.has("dt"):
 		for key in cur.keys():
@@ -478,6 +489,10 @@ func _process(dt: float) -> void:
 				var is_paw: bool = key.begins_with("l")
 				# paws: a step meets the ground at ground speed, so up to ~1.5x the run speed + a flick
 				var lim: float = (3.5 + 1.6 * spd) if is_paw else (1.6 + 0.12 * spd)
+				# a landing: a paw meets the ground at the speed the cat falls, and the legs have
+				# about 16 cm to stop the body in, so a harder fall is a harder (real) stop
+				if _land_age < 0.25:
+					lim = maxf(lim, _land_vy * 1.2 if is_paw else _land_vy * _land_vy / (2.0 * 0.16) / 60.0 * 1.3)
 				if is_paw and int(key.substr(1)) < 2 and (rig.is_swatting() or player.combat.busy()):
 					lim = 14.0   # a swat is a whip: 4 m/s paw tip, there and back in a few frames
 				if dv > lim:
@@ -493,6 +508,11 @@ func _process(dt: float) -> void:
 		for i in 4:
 			ln += " %s %s y%+.3f z%+.3f gy%+.3f |" % [LEG[i], "PSF"[g.mode[i]], (g.pos[i] as Vector3).y - rg2.y, (g.pos[i] as Vector3).z - rg2.z, g.ground_y(i) - rg2.y]
 		print(ln)
+	if dbg == "body":
+		print("  t=%.3f cap %.3f root %.3f hd %.3f pelv %s chest %s floor %s lift %.3f capx %.3f rootx %.3f headz %.3f capz %.3f clipoff %.3f" % [t, player.global_position.y, rig.global_position.y, rig.head.global_position.y, str(rig.pelvis.global_position.snapped(Vector3.ONE * 0.001)), str(rig.chest.global_position.snapped(Vector3.ONE * 0.001)), player.is_on_floor(), player._lift, player.global_position.x, rig.global_position.x, rig.head.global_position.z, player.global_position.z, player._clip_off])
+	if dbg == "rot":
+		var rb := rig.global_transform.basis
+		print("  t=%.3f fwd %s up %s climb %.2f wface %.2f piv %s chestrot %s pelvrot %s air %.2f tum %.2f %.2f ev %s" % [t, str((-rb.z).snapped(Vector3.ONE * 0.01)), str(rb.y.snapped(Vector3.ONE * 0.01)), rig.climb, player.w_face, str(rig.pivot.rotation.snapped(Vector3.ONE * 0.01)), str(rig.chest.rotation.snapped(Vector3.ONE * 0.01)), str(rig.pelvis.rotation.snapped(Vector3.ONE * 0.01)), rig._air_w, rig._tum_c, rig._tum_p, player.last_event])
 	if dbg == "phys":
 		var ln2 := "  t=%.3f v %.2f fgy %+.3f hgy %+.3f gv %+.2f %+.2f sup %.2f %.2f str %.2f du %.2f st_t %.3f gap %.3f |" % [t, player.velocity.length(), rig._fgy, rig._hgy, rig._gv[0], rig._gv[1], rig._sup[0], rig._sup[1], g.stride, g.duty, g.st_time, g.gap_time]
 		for i in 4:
