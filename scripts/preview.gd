@@ -1617,6 +1617,7 @@ func _run_dashtest() -> void:
 	bot.sprint = true
 	t = 0.0
 	var winded_at := -1.0
+	var wind_wait := 1.8 if CatPlayer.real_move else 1.0   # real grip: a gallop takes longer to come down to a trot
 	var vw := 0.0
 	while t < 12.0:
 		await get_tree().physics_frame
@@ -1625,13 +1626,13 @@ func _run_dashtest() -> void:
 			winded_at = t
 		if OS.has_environment("DASH_DBG") and int(t * 60) % 30 == 0:
 			print("  t %.1f v %.1f st %.0f pos %s floor %s" % [t, Vector2(p.velocity.x, p.velocity.z).length(), p.stamina.value, p.global_position.snapped(Vector3.ONE * 0.1), p.is_on_floor()])
-		if winded_at > 0.0 and t > winded_at + 1.0:
+		if winded_at > 0.0 and t > winded_at + wind_wait:
 			vw = Vector2(p.velocity.x, p.velocity.z).length()
 			break
 		if absf(p.global_position.x) > 50.0:
 			p.global_position.x = -signf(p.global_position.x) * 45.0
 			p._phys_prev = p.global_position
-	print("gallop from full: winded after %.1f s, 1 s later running %.1f m/s (trot is %.1f)" % [winded_at, vw, CatPlayer.TROT_SPEED])
+	print("gallop from full: winded after %.1f s, %.1f s later running %.1f m/s (trot is %.1f)" % [winded_at, wind_wait, vw, CatPlayer.TROT_SPEED])
 	ok = ok and winded_at > 2.5 and winded_at < 6.0 and vw < CatPlayer.TROT_SPEED + 0.4
 	bot.sprint = false
 	bot.move = Vector2.ZERO
@@ -1934,7 +1935,7 @@ func _run_movetest() -> void:
 		if c[0] == "trot":
 			ok = ok and t90 > 0.2 and t90 < 0.8
 		if c[0] == "gallop":
-			ok = ok and t90 > 1.2 and t90 < 4.0
+			ok = ok and t90 > 1.2 and t90 < (4.5 if CatPlayer.real_move else 4.0)   # real grip: the start scrabbles
 		# 2. let go: coast to a stop
 		bot.move = Vector2.ZERO
 		bot.erase("canter")
@@ -1950,7 +1951,7 @@ func _run_movetest() -> void:
 		print("%-17s let go: stops in %.2f s over %.2f m" % ["", ts, dist])
 		ok = ok and ts > 0.1
 		if c[0] == "gallop":
-			ok = ok and ts > 0.8 and ts < 2.5 and dist > 3.0
+			ok = ok and ts > 0.8 and ts < (3.0 if CatPlayer.real_move else 2.5) and dist > 3.0   # real grip: easing off can't out brake the floor
 	# 3. analog curve: tilt -> speed
 	var line := "tilt -> speed:"
 	for m in [0.1, 0.25, 0.45, 0.6, 0.75, 1.0]:

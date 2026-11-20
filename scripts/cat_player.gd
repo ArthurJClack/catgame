@@ -145,6 +145,16 @@ var _grade_y := 0.0
 var _grade_v := 0.0
 ## slow down for a wall dead ahead instead of running into it
 static var wall_brake := true
+## movement plan phase 1: one traction budget. everything the cat does to its own motion on the
+## ground (push, brake, turn) has to come out of what the paws can hold on this surface: mu x g.
+## the body can't swing round faster than that lets the run follow, a cat that knows its footing
+## asks for just under it (and carves), and a flat out start, a thrown brake or a yanked turn
+## asks for more and slides. false = the old per surface accel table (1.4 to 3 g)
+static var real_move := true
+const MU := {"tile": 0.45, "metal": 0.45, "wood": 0.55, "stone": 0.7, "default": 0.7, "dirt": 0.85, "hay": 0.9, "grass": 1.0, "carpet": 1.2, "rug": 1.2, "bark": 1.2}
+const GRIP_REAL := 1.0        # feel dial on top of the real numbers (1.3 = a third more grip everywhere)
+const SKID := 0.85            # sliding paws hold less than planted ones
+var _hard_ask := false        # this tick the cat asked for more than the footing holds on purpose
 const WALL_BRAKE := 9.0
 const LIFT_UP_ACC := 60.0     # hardest the legs shove the body up / stop it, m/s^2 (~6 g)
 const LIFT_DN_ACC := 40.0
@@ -413,7 +423,7 @@ func _ready() -> void:
 	# debugging: CAT_OFF=soft_air,wall_brake turns named biomechanics switches off in any scene / test
 	if OS.has_environment("CAT_OFF"):
 		for nm in OS.get_environment("CAT_OFF").split(","):
-			for f in ["cat_player.gd", "cat_rig.gd", "cat_gait.gd"]:
+			for f in ["cat_player.gd", "cat_rig.gd", "cat_gait.gd", "cat_stop.gd"]:
 				var sc: Script = load("res://scripts/" + f)
 				if sc.get(nm) != null:
 					sc.set(nm, false)
@@ -771,6 +781,9 @@ func _physics_process(dt: float) -> void:
 			# momentum: the faster it's going, the slower the body can swing round
 			var spd := Vector2(velocity.x, velocity.z).length()
 			var tr := lerpf(TURN_RATE_SLOW, TURN_RATE_FAST, smoothstep(0.8, SPRINT_SPEED, spd)) if is_on_floor() else TURN_RATE_SLOW
+			if real_move and is_on_floor():
+				# the body swings only a bit ahead of what the paws can bend the run by (v x turn rate = mu g)
+				tr = minf(TURN_RATE_SLOW, 1.15 * grip_now() / maxf(spd, 0.5))
 			yaw += clampf(diff, -tr * dt, tr * dt)
 			# asking to go back the way it came at speed: plant the paws and brake before turning round
 			_brake_ask = absf(diff) > 1.7 and spd > 1.2
@@ -1075,6 +1088,17 @@ func _physics_process(dt: float) -> void:
 					accel = maxf(accel, BRAKE_DECEL)
 					speeding = false
 		var lat_ask := TURN_ASK
+		var g_now := grip_now()
+		if real_move:
+			# the cat knows its footing: easing off, a normal start and a steady turn ask for just
+			# under what the paws hold. a flat out start, a thrown brake (stick back / crouch / a wall
+			# coming) and a yanked turn ask for more than that, and slide
+			var hard := accel >= BRAKE_DECEL - 0.01 or (speeding and target_speed > CANTER_SPEED + 0.5 and cur < 2.0)
+			if not hard:
+				accel = minf(accel, 0.95 * g_now)
+			var off := wish_dir.angle_to(hv / cur) if (cur > 0.5 and wish_len > 0.01) else 0.0
+			lat_ask = g_now * lerpf(0.95, 1.8, smoothstep(0.6, 1.3, off))
+			_hard_ask = hard or off > 0.6
 		if paw_drive and not lock_face and rig and rig.gait:
 			# the body only speeds up, slows down or turns through paws that are on the ground:
 			# with one paw down it gets half the shove of two, with none it just coasts. and
@@ -1093,9 +1117,11 @@ func _physics_process(dt: float) -> void:
 				accel = minf(accel, DRIVE_MAX) * _drive
 			else:
 				accel *= lerpf(1.0, _drive, 0.35)
-			lat_ask *= _drive
+			if not real_move:
+				lat_ask *= _drive   # (real_move: the turn is already held to what the paws grip)
 		if lock_face and wish_len > 0.01:
-			accel = maxf(accel, LOCK_ACCEL)
+			# (real_move: quick short steps, but placed ones: as hard as the floor holds, no skid)
+			accel = maxf(accel, minf(LOCK_ACCEL, 0.95 * g_now) if real_move else LOCK_ACCEL)
 		if cur > target_speed + 0.1 and ground_time < 0.1:
 			# bhop window: keep momentum if you jump again quickly
 			pass
@@ -1113,7 +1139,7 @@ func _physics_process(dt: float) -> void:
 			if rundir == Vector3.ZERO:
 				lon = dv
 				lat = Vector3.ZERO
-			hv += lon.limit_length(accel * dt) + lat.limit_length(lat_ask * lerpf(0.4, 1.0, clampf(cur / SPRINT_SPEED * 1.6, 0.0, 1.0)) * dt)
+			hv += lon.limit_length(accel * dt) + lat.limit_length(lat_ask * (1.0 if real_move else lerpf(0.4, 1.0, clampf(cur / SPRINT_SPEED * 1.6, 0.0, 1.0))) * dt)
 	elif not leap_lock:
 		# quake/cpm style air accel: tiny wish cap so strafing + turning builds speed
 		if wish_len > 0.01:
@@ -1130,10 +1156,17 @@ func _physics_process(dt: float) -> void:
 	if grounded:
 		# grip fades a little at speed (paws spend less time planted per stride)
 		var g: float = GRIP.get(surface, GRIP.default) * lerpf(1.0, 0.75, clampf(hv_before.length() / SPRINT_SPEED, 0.0, 1.0))
+		if real_move:
+			g = grip_now()
 		var need := (hv - hv_before) / dt
 		var nl := need.length()
+		if real_move and not _hard_ask and nl > 0.97 * g:
+			# pushing and turning at once: a cat that isn't forcing it shares out what the paws hold
+			need *= 0.97 * g / nl
+			nl = 0.97 * g
+			hv = hv_before + need * dt
 		if nl > g:
-			hv = hv_before + need / nl * g * 0.85 * dt
+			hv = hv_before + need / nl * g * SKID * dt
 			slip = LowPoly.damp(slip, clampf((nl - g) / g, 0.0, 1.0), 20.0, dt)
 		else:
 			slip = LowPoly.damp(slip, 0.0, 10.0, dt)
@@ -1458,10 +1491,16 @@ func _process(_dt: float) -> void:
 
 ## fastest the cat may be going so that braking at WALL_BRAKE it reaches a wall dead ahead at
 ## a slow walk (INF when there's no wall in the way)
+## what the paws can hold on what's underfoot right now (m/s2)
+func grip_now() -> float:
+	return float(MU.get(surface, MU.default)) * G * GRIP_REAL
+
+
 func _wall_cap(dir: Vector3, cur: float) -> float:
+	var wb := minf(WALL_BRAKE, SKID * 0.9 * grip_now()) if real_move else WALL_BRAKE
 	var L: float = rig.S_.get("len", 1.0) if rig.S_ is Dictionary else 1.0
 	var nose := NOSE_REACH * L
-	var look := nose + 0.05 + cur * cur / (2.0 * WALL_BRAKE) + cur * 0.05
+	var look := nose + 0.05 + cur * cur / (2.0 * wb) + cur * 0.05
 	var gap := INF
 	for h in [0.14, 0.6]:
 		var c: Vector3 = global_position + Vector3.UP * h
@@ -1472,7 +1511,7 @@ func _wall_cap(dir: Vector3, cur: float) -> float:
 		if absf(n.y) > 0.5 or n.dot(dir) > -0.75:
 			return INF   # a slope, or a glancing angle: the cat runs along it
 		gap = minf(gap, (hit.position - c).dot(dir) - nose)
-	return sqrt(2.0 * WALL_BRAKE * maxf(gap - 0.03, 0.0)) + 0.5
+	return sqrt(2.0 * wb * maxf(gap - 0.03, 0.0)) + 0.5
 
 
 func _vis_off() -> Vector3:
