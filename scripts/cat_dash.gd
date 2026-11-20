@@ -34,6 +34,7 @@ const BACK_UP := 1.7
 const IFRAMES := 0.34         # from the push off (souls roll is ~13 of 30 frames)
 const IFRAMES_BACK := 0.2
 const RECOVER := 0.16         # after landing: paws absorbing, no new inputs
+const STICK := 0.24           # after landing: all four paws planted where they came down (like the pounce)
 const BUFFER := 0.25
 
 var player: Node3D            # CatPlayer (untyped to keep this file free of a cycle)
@@ -50,6 +51,10 @@ var gather := 0.0             # 0..1 rig crouch while winding up
 var count := 0                # for tests
 var last_kind := ""
 var last_push := Vector3.ZERO
+var air_t := 0.0              # time since the push (rig pose progress)
+var air_total := 0.3          # how long the traced flight lasts
+var land_at := Vector3.INF    # where the capsule trace says the feet come down (tests)
+var slide_d := 0.0            # how far the feet moved after touch down (tests: should be ~0)
 
 
 func busy() -> bool:
@@ -69,6 +74,8 @@ func tick(dt: float) -> void:
 	iframes = maxf(iframes - dt, 0.0)
 	recover = maxf(recover - dt, 0.0)
 	buffer = maxf(buffer - dt, 0.0)
+	if state == AIR:
+		air_t += dt
 	if state != WIND:
 		gather = move_toward(gather, 0.0, dt * 9.0)
 
@@ -170,6 +177,22 @@ func _push() -> void:
 	p.velocity = v
 	last_push = v
 	state = AIR
+	air_t = 0.0
+	# the flight is a plain projectile (leap_lock): trace the cat's own capsule along it, like the
+	# pounce, so the paws reach for the exact spots they come down on and the landing sticks there
+	var tr: Dictionary = p.combat._trace(p.global_position, v)
+	air_total = maxf(float(tr.t), 0.1)
+	p.land_stick = 0.0
+	p.pounce_yaw = p.yaw
+	if tr.land:
+		land_at = tr.point
+		p.pounce_land = tr.point
+		p.set_spots(CatRig.pounce_paw_spots(tr.point, p.yaw))
+	else:
+		land_at = Vector3.INF
+		p.pounce_land = Vector3.INF
+		p._clear_spots()
+	p.stick_armed = true
 	iframes = IFRAMES_BACK if kind == Kind.BACK else IFRAMES
 	gather = 0.0
 	count += 1
@@ -190,6 +213,7 @@ func on_land() -> void:
 	if state == AIR:
 		state = IDLE
 		recover = RECOVER
+		slide_d = 0.0
 
 
 ## climbing / clambering / mantling took over mid dodge

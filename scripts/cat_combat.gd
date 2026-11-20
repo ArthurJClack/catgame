@@ -79,9 +79,9 @@ enum { A_OFF, A_WIND, A_ACTIVE, A_RECOVER }
 ## cancel: into the recovery, a dodge may roll out of it. move / turn: per phase (wind, active,
 ## recover) wasd scale and body turn rate (rad/s). plant: how hard the feet brake per phase
 const MOVES := {
-	"swat": {"wind": STRIKE_T, "active": 0.06, "recover": 0.24, "chain": 0.10, "cancel": 0.14, "lunge": 1.5,
+	"swat": {"wind": STRIKE_T, "active": 0.06, "recover": 0.24, "chain": 0.10, "cancel": 0.14, "lunge": 3.0,
 		"move": [0.3, 0.1, 0.5], "turn": [3.0, 0.0, 2.0], "plant": [5.0, 7.0, 14.0]},
-	"rake": {"wind": STRIKE_T, "active": 0.04, "recover": 0.20, "chain": 0.08, "cancel": 0.12, "lunge": 1.0,
+	"rake": {"wind": STRIKE_T, "active": 0.04, "recover": 0.20, "chain": 0.08, "cancel": 0.12, "lunge": 2.2,
 		"move": [0.25, 0.1, 0.4], "turn": [3.0, 0.0, 1.5], "plant": [5.0, 7.0, 14.0]},
 	"grab_out": {"wind": 0.0, "active": 0.0, "recover": 0.26, "chain": 0.18, "cancel": 0.16,
 		"move": [0.0, 0.0, 0.2], "turn": [0.0, 0.0, 1.5], "plant": [0.0, 0.0, 8.0]},
@@ -273,6 +273,8 @@ func _atk_step(dt: float) -> void:
 				if to.length() > 0.01:
 					fwd = fwd.slerp(to.normalized(), 0.5).normalized()
 			var spd := clampf(room / maxf(dt, 0.001), 0.0, lv) if room > 0.0 else 0.0
+			if spd > 0.0 and not _floor_ahead(fwd):
+				spd = 0.0            # the edge of a ledge: the hind legs don't push it off into the drop
 			p.velocity.x = fwd.x * spd
 			p.velocity.z = fwd.z * spd
 			lunge_d = Vector2(p.global_position.x - _lunge_start.x, p.global_position.z - _lunge_start.z).length()
@@ -293,6 +295,15 @@ func _atk_step(dt: float) -> void:
 		buf_paw = -1
 		if not _fire(i, buf_rake) and buf_rake:
 			mode[i] = SPENT
+
+
+## ground under the forepaws a short step ahead (a lunge stops at an edge)
+func _floor_ahead(fwd: Vector3) -> bool:
+	var p := player
+	var a: Vector3 = p.global_position + fwd * 0.2 + Vector3.UP * 0.1
+	var q := PhysicsRayQueryParameters3D.create(a, a + Vector3.DOWN * 0.35)
+	q.exclude = [p.get_rid()]
+	return not p.get_world_3d().direct_space_state.intersect_ray(q).is_empty()
 
 
 func tick(dt: float, l: bool, r: bool, grab := false, pounce := false) -> void:

@@ -244,6 +244,7 @@ var stick_armed := false      # paw pounce in flight: stick the landing (no slid
 var land_stick := 0.0         # planted after a stuck landing
 var pounce_air := false       # launched as a pounce/leap: pin on landing
 var pounce_land := Vector3.INF # where the pounce's capsule trace says the feet come down
+var _dodge_land_t := 9.0      # time since a dodge touched down (rig landing pose)
 var pounce_yaw := 0.0          # the body faces the flight the whole way (paw spots are laid out on it)
 var pounce_prey: Node = null   # what it's pouncing on: no collision with it till the paws are down
 var _spots_t := 0.0            # paw spots stay put this long after touch down (pin pose + gait)
@@ -300,8 +301,14 @@ var _clip_v := 0.0
 const PAW_MASS := 0.25          # effective mass behind a swatting forepaw (kg)
 const PAW_SPEED := 4.0          # paw tip speed at impact (m/s)
 const CLAW_FORCE := 6.0         # max pull one hooked forepaw manages (N)
-const SWAT_RANGE := 0.62
+const SWAT_RANGE := 1.15        # how far out (from the eye) a paw strike looks for something to hit
+const SWAT_HIT_NEAR := 0.18     # the strike's hitbox: a capsule along the look line from this far out...
+const SWAT_HIT_FWD := 0.62      # ...to this far ahead of the eye...
+const SWAT_HIT_R := 0.2         # ...this thick. it rides with the cat through the lunge (re-placed every tick)
+const SWAT_LIVE := 0.08         # the hitbox stays out this long after the paw lands (catches what the lunge runs into)
 var _swat_hit_t := -1.0
+var _swat_live := 0.0           # > 0: the strike's hitbox is still out (see _swat_sweep)
+var _swat_done: Array = []      # what this strike already hit (one hit per strike)
 var _swat_rb: RigidBody3D
 var _swat_side := 1.0
 var prev_claw := false
@@ -804,6 +811,9 @@ func _physics_process(dt: float) -> void:
 		_swat_hit_t -= dt
 		if _swat_hit_t < 0.0:
 			_swat_impact()
+	elif _swat_live > 0.0:
+		_swat_live -= dt
+		_swat_sweep()
 	if clawing:
 		_claw_step(dt)
 	var drop_in: bool = inp.get("drop", false)
@@ -1280,7 +1290,19 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.on_floor = is_on_floor() or mantling or clambering or climbing or scratching
 	var crouch_t := maxf(maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85), combat.gather_w())
 	# (legs open out of a gather over a few hundredths of a second, they don't switch)
-	rig.crouch = move_toward(rig.crouch, crouch_t, 10.0 * dt) if soft_air else crouch_t
+	# dodge: the rig's own air pose per kind (stretched dart, arched side spring, rearing backstep)
+	# and a deep four paw squat soaking up the landing
+	_dodge_land_t += dt
+	var dland := smoothstep(0.0, 0.05, _dodge_land_t) * (1.0 - smoothstep(0.08, 0.3, _dodge_land_t))
+	crouch_t = maxf(crouch_t, 0.6 * dland)
+	rig.dodge = move_toward(rig.dodge, 1.0 if dash.state == CatDash.AIR else 0.0, (16.0 if dash.state == CatDash.AIR else 7.0) * dt)
+	if dash.state == CatDash.AIR:
+		rig.dodge_kind = dash.kind
+		rig.dodge_u = clampf(dash.air_t / dash.air_total, 0.0, 1.0)
+		var ld := global_transform.basis.inverse() * dash.dir
+		rig.dodge_lat = clampf(ld.x * 1.4, -1.0, 1.0)
+	rig.dodge_land = dland
+	rig.crouch = move_toward(rig.crouch, crouch_t, (16.0 if dland > 0.0 else 10.0) * dt) if soft_air else crouch_t
 	rig.charge = charge
 	rig.look_pitch = pitch * 0.6 * (1.0 - maxf(w_face, w_slide))
 	# head camera: looking down past ~15 deg the cat curls its neck to look at its own paws
@@ -1444,7 +1466,7 @@ func _lift_tick(dt: float) -> void:
 	var hb := global_position + _soft_off
 	hb.y = 0.0
 	# (a pounce promises where each paw comes down: the body flies and lands exactly with the capsule)
-	_pounce_hold = 0.3 if pounce_air else maxf(_pounce_hold - dt, 0.0)
+	_pounce_hold = 0.3 if (pounce_air or dash.state == CatDash.AIR) else maxf(_pounce_hold - dt, 0.0)
 	var h_off: bool = busy or _pounce_hold > 0.0 or not _lag_base.is_finite() or hb.distance_to(_lag_base) > 0.25
 	var hvc := Vector3.ZERO if h_off else (hb - _lag_base) / dt
 	_lag_base = hb
@@ -2567,15 +2589,20 @@ func _leap() -> void:
 
 
 func _on_land() -> void:
+	var dodge_land := dash.state == CatDash.AIR
 	dash.on_land()
 	var impact := -prev_vy
 	land_dip_v -= clampf(impact * 0.12, 0.0, 0.9)
 	paws.land(impact)
-	if stick_armed and pounce_air:
-		land_stick = 0.3
+	if stick_armed and (pounce_air or dodge_land):
+		# stuck it: four paws down and the body stops right there, no skid, no steps after
+		land_stick = 0.3 if pounce_air else CatDash.STICK
 		velocity.x = 0.0
 		velocity.z = 0.0
-		combat.land_recover()
+		if pounce_air:
+			combat.land_recover()
+		else:
+			_dodge_land_t = 0.0
 		var off := Vector2(global_position.x - pounce_land.x, global_position.z - pounce_land.z).length() if pounce_land != Vector3.INF else 99.0
 		if off < 0.12 and absf(global_position.y - pounce_land.y) < 0.1:
 			# right where the circle said: settle onto the exact spot (the last physics step can
@@ -2584,9 +2611,10 @@ func _on_land() -> void:
 			if _fits(tp):
 				global_position = tp
 				_phys_curr = tp
-			yaw = pounce_yaw
-			rotation.y = yaw
-			_spots_t = 1.4
+			if pounce_air:
+				yaw = pounce_yaw
+				rotation.y = yaw
+			_spots_t = 1.4 if pounce_air else 0.8
 		else:
 			_clear_spots()   # it hit something else on the way: the paws find their own footing
 	elif _spots_t <= 0.0:
@@ -3034,47 +3062,126 @@ func _do_swat(paw := -1, rake := false) -> void:
 		_swat_prey = null
 		var dir := _look_dir()
 		var hit := _ray(_eye_pos(), _eye_pos() + dir * 0.4)
-		wt = hit.position if not hit.is_empty() else _eye_pos() + dir * 0.3
+		wt = hit.position if not hit.is_empty() else swat_box()
 		paws.swat(paw, paw_anchor.to_local(hit.position) if not hit.is_empty() else null)
 	# the real foreleg swats too (seen in third person / orbit, and in the shadow)
 	if rig.has_method("swat"):
 		var sh := global_transform * Vector3((-0.04 if paw == 0 else 0.04), 0.17, -0.13)
-		rig.swat(paw, sh + (wt - sh).limit_length(0.24))
+		rig.swat(paw, sh + (wt - sh).limit_length(0.27))
 	_swat_pt = wt
 	if clawing and paw == paws.claw_i:
 		_claw_release()
 	_swat_hit_t = 0.12   # paw lands at the end of the strike, not on the click
 
+## where the strike's hitbox is right now: out in front of the eye, carried along with the cat
+## (the far end of it: that's where the claws are going)
+func swat_box() -> Vector3:
+	return _eye_pos() + _look_dir() * SWAT_HIT_FWD
+
+
+## distance from a point to the strike's hitbox core (the segment along the look line)
+func _swat_box_d(q: Vector3) -> float:
+	var a := _eye_pos() + _look_dir() * SWAT_HIT_NEAR
+	var b := swat_box()
+	var ab := b - a
+	var u := clampf((q - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
+	return q.distance_to(a + ab * u)
+
+
 func _swat_impact() -> void:
 	var dir := _look_dir()
 	var sweep := -cam.global_transform.basis.x * _swat_side   # paw whips across from its own side
+	_swat_done = []
+	_swat_live = SWAT_LIVE
 	var hits: Array[RigidBody3D] = []
 	if is_instance_valid(_swat_rb) and _swat_rb.global_position.distance_to(_eye_pos()) < SWAT_RANGE + 0.15:
 		hits.append(_swat_rb)
-	# anything else in the path of the paw
-	var params := PhysicsShapeQueryParameters3D.new()
-	var sph := SphereShape3D.new()
-	sph.radius = 0.1
-	params.shape = sph
-	params.transform = Transform3D(Basis(), _eye_pos() + dir * 0.3)
-	params.exclude = [get_rid()]
-	for r in get_world_3d().direct_space_state.intersect_shape(params, 8):
-		if r.collider is RigidBody3D and not hits.has(r.collider):
-			hits.append(r.collider)
+	for rb in _box_bodies():
+		if not hits.has(rb):
+			hits.append(rb)
 	# prey gets knocked silly (a stunned mouse is an easy pounce)
 	var prey_hit := is_instance_valid(_swat_prey) and _swat_prey.global_position.distance_to(_eye_pos()) < SWAT_RANGE + 0.15
+	if not prey_hit:
+		# nothing locked at the click: whatever the lunge carried the hitbox onto
+		var np := _box_prey()
+		if np != null:
+			_swat_prey = np
+			prey_hit = true
 	_slash_fx(dir, sweep, _swat_prey if prey_hit else null, hits)
 	if prey_hit:
-		if _swat_rake and _swat_prey.has_method("take_hit"):
-			_swat_prey.call("take_hit", CatCombat.RAKE_DMG, global_position, false, CatCombat.RAKE_POISE)
-		elif _swat_prey.has_method("stun"):
-			_swat_prey.call("stun", 1.6)
-		_event("swatted the " + _prey_name(_swat_prey) + "!")
-	if hits.is_empty():
-		return
-	for rb in hits:
-		if rb == carried:
+		_hit_prey(_swat_prey)
+	_hit_bodies(hits, dir, sweep)
+
+
+## the hitbox is still out: anything the lunge carries it onto gets hit too (once per strike)
+func _swat_sweep() -> void:
+	var dir := _look_dir()
+	var sweep := -cam.global_transform.basis.x * _swat_side
+	var np := _box_prey()
+	if np != null:
+		_swat_prey = np
+		_hit_prey(np)
+		SlashFx.sparks(self, np.global_position + Vector3.UP * 0.04, (_eye_pos() - np.global_position).normalized(), np.is_in_group("enemy"), 8)
+	var hits: Array[RigidBody3D] = []
+	for rb in _box_bodies():
+		hits.append(rb)
+	_hit_bodies(hits, dir, sweep)
+
+
+## rigid bodies inside the strike's hitbox (not hit yet this strike)
+func _box_bodies() -> Array[RigidBody3D]:
+	var out: Array[RigidBody3D] = []
+	var params := PhysicsShapeQueryParameters3D.new()
+	var cap := CapsuleShape3D.new()
+	cap.radius = SWAT_HIT_R
+	cap.height = SWAT_HIT_FWD - SWAT_HIT_NEAR + SWAT_HIT_R * 2.0
+	params.shape = cap
+	var dir := _look_dir()
+	var mid := _eye_pos() + dir * (SWAT_HIT_NEAR + SWAT_HIT_FWD) * 0.5
+	# capsules stand along y: turn y onto the look line
+	var ax := Vector3.UP.cross(dir)
+	var bas := Basis(ax.normalized(), Vector3.UP.angle_to(dir)) if ax.length() > 0.001 else Basis()
+	params.transform = Transform3D(bas, mid)
+	params.exclude = [get_rid()]
+	for r in get_world_3d().direct_space_state.intersect_shape(params, 8):
+		if r.collider is RigidBody3D and not _swat_done.has(r.collider) and r.collider != carried:
+			out.append(r.collider)
+	return out
+
+
+## prey / enemies whose body is inside the strike's hitbox (not hit yet this strike)
+func _box_prey() -> Node3D:
+	var best: Node3D = null
+	var best_d := 1e9
+	for n in get_tree().get_nodes_in_group("prey"):
+		if not n is Node3D or n == carried or _swat_done.has(n):
 			continue
+		var rad: float = 0.16 * float(n.get("s")) if "s" in n else 0.06
+		var q: Vector3 = (n as Node3D).global_position + Vector3.UP * 0.04
+		var d := _swat_box_d(q) - rad
+		if d < SWAT_HIT_R and d < best_d:
+			best_d = d
+			best = n
+	return best
+
+
+func _hit_prey(n: Node3D) -> void:
+	if _swat_done.has(n):
+		return
+	_swat_done.append(n)
+	if _swat_rake and n.has_method("take_hit"):
+		n.call("take_hit", CatCombat.RAKE_DMG, global_position, false, CatCombat.RAKE_POISE)
+	elif n.has_method("stun"):
+		n.call("stun", 1.6)
+	_event("swatted the " + _prey_name(n) + "!")
+
+
+func _hit_bodies(hits: Array[RigidBody3D], dir: Vector3, sweep: Vector3) -> void:
+	var any := false
+	for rb in hits:
+		if rb == carried or _swat_done.has(rb):
+			continue
+		_swat_done.append(rb)
 		if rb.freeze:
 			if rb.is_in_group("prey"):
 				continue
@@ -3087,21 +3194,24 @@ func _swat_impact() -> void:
 		var off := -sweep * 0.025 + Vector3.UP * 0.015
 		rb.sleeping = false
 		rb.apply_impulse(j, off)
-	_event("swat!")
+		any = true
+	if any:
+		_event("swat!")
 
 
 ## claw streak along the swipe + sparks / scratch lines where it connects (slash_fx.gd)
 func _slash_fx(dir: Vector3, sweep: Vector3, prey: Node3D, hits: Array[RigidBody3D]) -> void:
-	var c := _swat_pt
 	var eye := _eye_pos()
+	# out where the strike's hitbox is now (the lunge carried it), or on what got locked at the click
+	var c := swat_box()
+	if is_instance_valid(_swat_rb) and hits.has(_swat_rb):
+		c = _swat_pt
 	if prey != null:
 		var q := prey.global_position + Vector3.UP * 0.06 * float(prey.get("s") if "s" in prey else 0.5)
 		c = q + (eye - q).normalized() * 0.04
-	if prey == null and hits.is_empty() and view_mode == 0:
-		return     # a whiff in first person: the streak would be drawn right across the lens
-	var a := c - sweep * 0.11 + Vector3.UP * 0.05
-	var b := c + sweep * 0.09 - Vector3.UP * 0.035
-	SlashFx.streak(self, a, b, -dir * 0.03 + Vector3.UP * 0.01, Color(1.0, 0.82, 0.78) if prey != null else Color(1.0, 0.95, 0.85))
+	var a := c - sweep * 0.17 + Vector3.UP * 0.07
+	var b := c + sweep * 0.14 - Vector3.UP * 0.05
+	SlashFx.streak(self, a, b, -dir * 0.05 + Vector3.UP * 0.015, Color(1.0, 0.82, 0.78) if prey != null else Color(1.0, 0.95, 0.85), self)
 	var n := (eye - c).normalized()
 	if prey != null:
 		var flesh := prey.is_in_group("enemy")
@@ -3111,7 +3221,7 @@ func _slash_fx(dir: Vector3, sweep: Vector3, prey: Node3D, hits: Array[RigidBody
 	elif not hits.is_empty():
 		SlashFx.sparks(self, c, n + sweep * 0.6, false, 6)
 	else:
-		var hit := _ray(eye, eye + (c - eye).normalized() * 0.5)
+		var hit := _ray(eye, eye + (c - eye).normalized() * ((c - eye).length() + 0.12))
 		if not hit.is_empty():
 			SlashFx.sparks(self, hit.position, hit.normal, false, 5)
 

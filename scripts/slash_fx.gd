@@ -8,7 +8,7 @@ extends RefCounted
 ##   wound()   three short scratch lines stuck on whatever got hit, fade over ~1.4 s
 ## headless (tests) does nothing: the dummy renderer can't build meshes.
 
-const STREAK_T := 0.18
+const STREAK_T := 0.24
 const WOUND_T := 1.4
 
 
@@ -30,8 +30,9 @@ static func _mat(col: Color, additive := true) -> StandardMaterial3D:
 
 
 ## a swipe from a to b, bowed toward `bow` (world offset at the middle). side = the across
-## direction the three claws are spread along
-static func streak(host: Node, a: Vector3, b: Vector3, bow: Vector3, col := Color(1.0, 0.95, 0.85)) -> void:
+## direction the three claws are spread along. follow: the streak rides along with that node
+## (the cat: a strike thrown on the move stays out in front of it instead of hanging in the air behind)
+static func streak(host: Node, a: Vector3, b: Vector3, bow: Vector3, col := Color(1.0, 0.95, 0.85), follow: Node3D = null) -> void:
 	if not _ok(host):
 		return
 	var cam := host.get_viewport().get_camera_3d()
@@ -75,8 +76,13 @@ static func streak(host: Node, a: Vector3, b: Vector3, bow: Vector3, col := Colo
 	root.mesh = st.commit()
 	var mat := _mat(Color(1, 1, 1, 1))
 	root.material_override = mat
-	host.get_tree().current_scene.add_child(root)
-	root.global_transform = Transform3D.IDENTITY
+	if follow != null and follow.is_inside_tree():
+		root.top_level = false
+		follow.add_child(root)
+		root.transform = follow.global_transform.affine_inverse()
+	else:
+		host.get_tree().current_scene.add_child(root)
+		root.global_transform = Transform3D.IDENTITY
 	var tw := root.create_tween()
 	tw.tween_property(mat, "albedo_color:a", 0.0, STREAK_T).set_ease(Tween.EASE_IN)
 	tw.tween_callback(root.queue_free)
