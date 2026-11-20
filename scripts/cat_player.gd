@@ -386,7 +386,7 @@ func _ready() -> void:
 	# debugging: CAT_OFF=soft_air,wall_brake turns named biomechanics switches off in any scene / test
 	if OS.has_environment("CAT_OFF"):
 		for nm in OS.get_environment("CAT_OFF").split(","):
-			for f in ["cat_player.gd", "cat_rig.gd", "cat_gait.gd"]:
+			for f in ["cat_player.gd", "cat_rig.gd", "cat_gait.gd", "cat_stop.gd"]:
 				var sc: Script = load("res://scripts/" + f)
 				if sc.get(nm) != null:
 					sc.set(nm, false)
