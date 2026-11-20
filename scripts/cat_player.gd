@@ -154,6 +154,7 @@ static var real_move := true
 const MU := {"tile": 0.45, "metal": 0.45, "wood": 0.55, "stone": 0.7, "default": 0.7, "dirt": 0.85, "hay": 0.9, "grass": 1.0, "carpet": 1.2, "rug": 1.2, "bark": 1.2}
 const GRIP_REAL := 1.0        # feel dial on top of the real numbers (1.3 = a third more grip everywhere)
 const SKID := 0.85            # sliding paws hold less than planted ones
+var _hard_ask := false        # this tick the cat asked for more than the footing holds on purpose
 const WALL_BRAKE := 9.0
 const LIFT_UP_ACC := 60.0     # hardest the legs shove the body up / stop it, m/s^2 (~6 g)
 const LIFT_DN_ACC := 40.0
@@ -1079,6 +1080,7 @@ func _physics_process(dt: float) -> void:
 				accel = minf(accel, 0.95 * g_now)
 			var off := wish_dir.angle_to(hv / cur) if (cur > 0.5 and wish_len > 0.01) else 0.0
 			lat_ask = g_now * lerpf(0.95, 1.8, smoothstep(0.6, 1.3, off))
+			_hard_ask = hard or off > 0.6
 		if paw_drive and not lock_face and rig and rig.gait:
 			# the body only speeds up, slows down or turns through paws that are on the ground:
 			# with one paw down it gets half the shove of two, with none it just coasts. and
@@ -1100,7 +1102,8 @@ func _physics_process(dt: float) -> void:
 			if not real_move:
 				lat_ask *= _drive   # (real_move: the turn is already held to what the paws grip)
 		if lock_face and wish_len > 0.01:
-			accel = maxf(accel, LOCK_ACCEL)
+			# (real_move: quick short steps, but placed ones: as hard as the floor holds, no skid)
+			accel = maxf(accel, minf(LOCK_ACCEL, 0.95 * g_now) if real_move else LOCK_ACCEL)
 		if cur > target_speed + 0.1 and ground_time < 0.1:
 			# bhop window: keep momentum if you jump again quickly
 			pass
@@ -1139,6 +1142,11 @@ func _physics_process(dt: float) -> void:
 			g = grip_now()
 		var need := (hv - hv_before) / dt
 		var nl := need.length()
+		if real_move and not _hard_ask and nl > 0.97 * g:
+			# pushing and turning at once: a cat that isn't forcing it shares out what the paws hold
+			need *= 0.97 * g / nl
+			nl = 0.97 * g
+			hv = hv_before + need * dt
 		if nl > g:
 			hv = hv_before + need / nl * g * SKID * dt
 			slip = LowPoly.damp(slip, clampf((nl - g) / g, 0.0, 1.0), 20.0, dt)

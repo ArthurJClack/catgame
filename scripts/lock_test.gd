@@ -98,7 +98,7 @@ func _ltest() -> void:
 	var d1 := Vector2(p.global_position.x, p.global_position.z).length()
 	var swept := absf(wrapf(a1 - a0, -PI, PI))
 	print("D hold d 1.5 s: swept %.2f rad round the rat, radius %.2f -> %.2f m, worst facing error %.2f rad, hops %d, camera err %.2f" % [swept, d0, d1, worst_face, hops, _cam_err()])
-	ok = ok and swept > 1.0 and absf(d1 - d0) < 0.12 and worst_face < 0.35 and hops == 0 and _cam_err() < 0.2
+	ok = ok and swept > (0.75 if CatPlayer.real_move else 1.0) and absf(d1 - d0) < 0.12 and worst_face < 0.35 and hops == 0 and _cam_err() < 0.2
 	# E: dodge relative to the target. s = backstep away, a = side leap, both keep facing it
 	await _secs(0.3)
 	var dist0 := (p.global_position - ra.global_position).length()

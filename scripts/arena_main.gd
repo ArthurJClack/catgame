@@ -252,7 +252,7 @@ func _build_pit() -> void:
 	fcs.shape = fbs
 	fcs.position.y = -0.5
 	fl.add_child(fcs)
-	fl.set_meta("surface", "tile")
+	fl.set_meta("surface", "stone")   # worn flagstones: more bite than glazed tile (CatPlayer.MU), fights need footing
 	add_child(fl)
 	LowPoly.part(fl, LowPoly.box(0.0), Color(0.16, 0.15, 0.14), Vector3(0, -0.5, 0), Vector3(R * 2.4, 1.0, R * 2.4))
 	# flagstones: one multimesh (one draw call), colour per stone
