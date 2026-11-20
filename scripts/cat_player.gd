@@ -168,6 +168,7 @@ const AIR_BUDGET := 0.5
 var _gather_t := 0.0
 var _gather_vy := 0.0
 var _air_left := AIR_BUDGET
+var _launch_hv := Vector3.ZERO   # the way the push sent it (a face it brushed on the way up doesn't cancel that)
 var _hard_ask := false        # this tick the cat asked for more than the footing holds on purpose
 const WALL_BRAKE := 9.0
 const LIFT_UP_ACC := 60.0     # hardest the legs shove the body up / stop it, m/s^2 (~6 g)
@@ -928,6 +929,7 @@ func _physics_process(dt: float) -> void:
 		ground_time += dt
 		kicks_left = MAX_KICKS
 		_air_left = AIR_BUDGET
+		_launch_hv = Vector3.ZERO
 		jumped_this_air = false
 		scramble_avail = true
 		last_kick_normal = Vector3.ZERO
@@ -993,6 +995,7 @@ func _physics_process(dt: float) -> void:
 					velocity += wish_dir * STAND_PUSH * wish_len
 				jumped_this_air = true
 				grounded = false
+				_launch_hv = Vector3(velocity.x, 0, velocity.z)
 				_event("hop")
 
 	# hold q / mouse3 = aimed leap (movement). the one pounce lives on both paws (cat_combat.gd)
@@ -1171,6 +1174,13 @@ func _physics_process(dt: float) -> void:
 			hv += add
 			if sp > 0.3:
 				hv = hv.limit_length(sp)
+		# hopping up at something right in front: the capsule catches its face on the way up and
+		# loses the forward half of the push. once clear it carries on the way it was sent
+		var ll := _launch_hv.length()
+		if ll > 0.3 and wish_len > 0.3 and wish_dir.dot(_launch_hv / ll) > 0.5:
+			var lack := ll - hv.dot(_launch_hv / ll)
+			if lack > 0.05:
+				hv += _launch_hv / ll * minf(lack, 10.0 * dt)
 	elif not leap_lock:
 		# quake/cpm style air accel: tiny wish cap so strafing + turning builds speed
 		if wish_len > 0.01:
