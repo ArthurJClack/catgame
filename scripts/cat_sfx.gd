@@ -130,10 +130,11 @@ func _process(dt: float) -> void:
 	# ---- hop / land
 	if floor and not _was_floor:
 		var drop := _fall_v * _fall_v / 19.6
-		if drop > 0.25 or _air_t > 0.25:
+		if drop > 0.25 or _air_t > 0.2:   # (a tapped tiny hop is ~0.25 s up and down)
 			var hard := drop > 1.4
 			_one("land_hard" if hard else "land_soft", clampf(0.35 + drop * 0.25, 0.3, 1.2), rng.randf_range(0.92, 1.06))
-	elif not floor and _was_floor and player.velocity.y > 1.2:
+	# (a tapped tiny hop leaves at ~1.7 m/s and is already under 1 m/s when the floor lets go)
+	elif not floor and _was_floor and (player.velocity.y > 1.2 or (player.jumped_this_air and player.velocity.y > 0.3)):
 		_one(_variant("step_" + SURF.get(player.surface, "tap")), 0.6, 0.8)
 		_one("jump", 0.45, rng.randf_range(0.95, 1.1))
 	if not floor:
