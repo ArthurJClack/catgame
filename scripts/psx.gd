@@ -318,6 +318,10 @@ static func box_mesh(size: Vector3, density := 1.0, cell := 1.2, ao_base := -100
 		var nu := maxi(1, ceili(su / cell))
 		var nv := maxi(1, ceili(sv / cell))
 		var origin := n * absf(n.dot(h)) - u * su * 0.5 - v * sv * 0.5
+		# godot culls counter clockwise tris (seen from outside), so wind every face clockwise
+		# around its normal. u x v points along n on the four side faces, so those get flipped,
+		# otherwise the near walls of crates/containers vanish and you see their inside instead
+		var tris := [[0, 2, 1], [0, 3, 2]] if u.cross(v).dot(n) > 0.0 else [[0, 1, 2], [0, 2, 3]]
 		for i in nu:
 			for j in nv:
 				var p := []
@@ -335,7 +339,7 @@ static func box_mesh(size: Vector3, density := 1.0, cell := 1.2, ao_base := -100
 						# fake baked ao: darker toward the floor, like vertex lit psx levels
 						ao = lerpf(0.55, 1.0, clampf((ao_base + q.y + h.y) / 1.4, 0.0, 1.0))
 					cols.append(Color(shade * ao, shade * ao, shade * ao))
-				for t in [[0, 1, 2], [0, 2, 3]]:
+				for t in tris:
 					for idx in t:
 						st.set_normal(n)
 						st.set_color(cols[idx])
@@ -365,7 +369,8 @@ static func cyl_mesh(radius: float, height: float, segs := 8, density := 1.0, ca
 			var y1 := -hh + height * float(r + 1) / rings
 			var q := [p0 + Vector3(0, y0, 0), p1 + Vector3(0, y0, 0), p1 + Vector3(0, y1, 0), p0 + Vector3(0, y1, 0)]
 			var uv := [Vector2(u0, y0 * density), Vector2(u1, y0 * density), Vector2(u1, y1 * density), Vector2(u0, y1 * density)]
-			for idx in [0, 2, 1, 0, 3, 2]:
+			# clockwise seen from outside (front face in godot), same as the box faces
+			for idx in [0, 1, 2, 0, 2, 3]:
 				st.set_normal(n)
 				st.set_color(Color(sh, sh, sh))
 				st.set_uv(uv[idx])
@@ -392,7 +397,8 @@ static func quad_mesh(size: Vector2, density := 1.0) -> ArrayMesh:
 	for side in [1, -1]:
 		var p := [Vector3(-hx, -hy, 0), Vector3(hx, -hy, 0), Vector3(hx, hy, 0), Vector3(-hx, hy, 0)]
 		var uv := [Vector2(0, size.y), Vector2(size.x, size.y), Vector2(size.x, 0), Vector2(0, 0)]
-		var order := [0, 1, 2, 0, 2, 3] if side == 1 else [0, 2, 1, 0, 3, 2]
+		# each side clockwise seen from the side its normal faces, so lighting matches what you see
+		var order := [0, 2, 1, 0, 3, 2] if side == 1 else [0, 1, 2, 0, 2, 3]
 		for idx in order:
 			st.set_normal(Vector3(0, 0, side))
 			st.set_color(Color.WHITE)
