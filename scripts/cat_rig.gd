@@ -49,6 +49,21 @@ var stretch := 0.0       # big front stretch, butt up
 var groom := 0.0         # sitting, licking a paw + face wipes
 var loaf := 0.0          # legs tucked under, eyes half shut
 var pin := 0.0           # forepaws slammed down together (pounce landing), decays by itself
+## a pounce's four landing spots (world, LF RF LH RH), the ones its aim circles show: in the air
+## each paw reaches for its spot and the pin pose plants it exactly there. empty = none
+var pounce_spots: Array = []
+## where a pounce lays the paws out around the feet point, in body space (-z forward): forepaws
+## slammed down together ahead of the chest, hind paws tucked under the hips
+const POUNCE_PAWS := [Vector3(-0.032, 0, -0.205), Vector3(0.032, 0, -0.205), Vector3(-0.036, 0, 0.105), Vector3(0.036, 0, 0.105)]
+
+
+## the world spots a pounce landing at feet facing yaw puts each paw on
+static func pounce_paw_spots(feet: Vector3, yaw: float) -> Array:
+	var b := Basis(Vector3.UP, yaw)
+	var out := []
+	for o in POUNCE_PAWS:
+		out.append(feet + b * (o as Vector3))
+	return out
 var claws_out := 0.0     # read only
 var slip_claws := 0.0    # 0..1 paws slipping on the floor: claws come out, paws stay down
 
@@ -1346,6 +1361,8 @@ func animate(dt: float) -> void:
 					var lw := 1.0 - smoothstep(0.1, 0.34, land_t)
 					var sh0 := yb * Vector3(side * 0.04, pivot.position.y - 0.02, (HOME[i] as Vector3).z)
 					var rv := land_l + home + yb * Vector3(0, 0, -0.035) - sh0
+					if pounce_spots.size() == 4:
+						rv = rinv * (pounce_spots[i] as Vector3) - sh0
 					af = af.lerp(yb.inverse() * (sh0 + rv.limit_length(F_UP + F_LO + F_PA * 0.7)), lw)
 					arot = lerpf(arot, 0.25, lw)
 			else:
@@ -1358,6 +1375,8 @@ func animate(dt: float) -> void:
 					var lw := (1.0 - smoothstep(0.05, 0.2, land_t)) * 0.85
 					var hp0 := yb * Vector3(side * 0.04, pivot.position.y - 0.01, pelvis_z + 0.05)
 					var rv := land_l + home + yb * Vector3(0, 0, -0.02) - hp0
+					if pounce_spots.size() == 4:
+						rv = rinv * (pounce_spots[i] as Vector3) - hp0
 					af = af.lerp(yb.inverse() * (hp0 + rv.limit_length(H_TH + H_SH + H_MT * 0.5)), lw)
 					arot = lerpf(arot, 0.0, lw)
 			if _hop_w > 0.0:
@@ -1402,6 +1421,8 @@ func animate(dt: float) -> void:
 				prot = lerpf(prot, -1.9, loaf_f)
 			if pin > 0.0:
 				var pt := Vector3(side * 0.02, 0.0, home.z - 0.1)
+				if pounce_spots.size() == 4:
+					pt = rinv * (pounce_spots[i] as Vector3)   # on its circle
 				foot = foot.lerp(pt, pin)
 				prot = lerpf(prot, 0.05, pin)
 			if rear > 0.0 and scratch < 1.0:

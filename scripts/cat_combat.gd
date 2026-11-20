@@ -445,6 +445,9 @@ func _grip_start(grab: bool) -> void:
 	p.charge = 0.0
 	if not grab:
 		grip_phase = G_AIM
+		# space has already been held POUNCE_HOLD to get here: that WAS the wind up, so the
+		# pounce is at full power from the first frame of aiming (no second charge to wait out)
+		p.charge = 1.0
 		grip_target = null
 		_seen.clear()
 		p._event("pounce crouch")
@@ -614,6 +617,19 @@ func _launch() -> void:
 		sol = _solve(minf(c, 0.25))   # spent: a feeble little pounce
 	pounces += 1
 	p.velocity = sol.vel
+	var fl := Vector2(sol.vel.x, sol.vel.z)
+	p.pounce_yaw = float(sol.get("yaw", atan2(-sol.vel.x, -sol.vel.z) if fl.length() > 0.05 else p.yaw))
+	p.pounce_land = sol.point if sol.get("land", false) else Vector3.INF
+	if sol.get("land", false):
+		p.set_spots(sol.spots)
+	else:
+		p._clear_spots()
+	p._end_pounce_prey()
+	var prey: Node = sol.get("prey")
+	if prey != null and is_instance_valid(prey) and prey is PhysicsBody3D:
+		# flying onto it, not into it: no capsule shove (the paws come down on it, _pin_check)
+		p.add_collision_exception_with(prey)
+		p.pounce_prey = prey
 	p.leap_lock = true          # a projectile now: no steering in the air
 	p.pounce_air = true
 	p.stick_armed = true
@@ -639,14 +655,16 @@ func _solve(c := -1.0) -> Dictionary:
 	var spd := lerpf(POUNCE_SPD_MIN, POUNCE_SPD_MAX, c)
 	var v0 := flat * cos(el) * spd + Vector3.UP * sin(el) * spd
 	var tr := _trace(feet, v0)
-	var out := {"vel": v0, "point": tr.point, "kind": "free", "ok": true, "t": tr.t}
+	var out := _sol(v0, tr, "free", null)
 	# soft lock targets, best first
 	var tgt := Vector3.INF
 	var kind := ""
+	var prey: Node3D = null
 	var lock: Node3D = p.get("lock_target") if "lock_target" in p else null
 	if lock != null and is_instance_valid(lock):
 		tgt = _lead_on(lock, feet)
 		kind = "lock"
+		prey = lock
 	if tgt == Vector3.INF:
 		var best := MAGNET_R + 0.12 * Vector2(tr.point.x - feet.x, tr.point.z - feet.z).length()
 		var eye: Vector3 = p._aim_pos()
@@ -662,17 +680,46 @@ func _solve(c := -1.0) -> Dictionary:
 				best = dl
 				tgt = _lead_on(n, feet)
 				kind = "prey"
-	if tgt == Vector3.INF and tr.n.y < 0.5 and tr.n != Vector3.ZERO:
-		# smacks into the side of something: if the top is close above, land on top instead
+				prey = n
+	if tgt == Vector3.INF and not tr.land and tr.n.y < 0.5 and tr.n != Vector3.ZERO:
+		# smacks into the side of something: if the top is close above, land on top instead,
+		# far enough in that the whole cat (hind paws too) is up there
 		var nh := Vector3(tr.n.x, 0, tr.n.z).normalized()
-		var top: Dictionary = p._ray(tr.point - nh * 0.12 + Vector3.UP * 0.7, tr.point - nh * 0.12 - Vector3.UP * 0.05)
-		if not top.is_empty() and top.normal.y > 0.7 and p._fits(top.position + Vector3.UP * 0.02):
-			tgt = top.position
-			kind = "ledge"
+		for depth in [0.24, 0.17, 0.12]:
+			var top: Dictionary = p._ray(tr.point - nh * depth + Vector3.UP * 0.7, tr.point - nh * depth - Vector3.UP * 0.05)
+			if not top.is_empty() and top.normal.y > 0.7 and top.position.y > tr.point.y - 0.02 and p._fits(top.position + Vector3.UP * 0.02):
+				tgt = top.position
+				kind = "ledge"
+				break
 	if tgt != Vector3.INF:
-		var sv := _arc_to(feet, tgt)
-		if not sv.is_empty() and sv.vel.length() <= POUNCE_SPD_MAX * 1.2:
-			out = {"vel": sv.vel, "point": tgt, "kind": kind, "ok": true, "t": sv.t}
+		# the snap only counts if the real body really comes down there (traced with the cat's own
+		# capsule, so a lip, a crate edge or the prey itself can't knock it off the spot)
+		var ex: RID = (prey as PhysicsBody3D).get_rid() if prey is PhysicsBody3D else RID()
+		for lift in [0.0, 0.1, 0.22]:
+			var sv := _arc_to(feet, tgt, lift)
+			if sv.is_empty() or sv.vel.length() > POUNCE_SPD_MAX * 1.2:
+				break
+			var t2 := _trace(feet, sv.vel, ex)
+			if t2.land and Vector2(t2.point.x - tgt.x, t2.point.z - tgt.z).length() < 0.07 and absf(t2.point.y - tgt.y) < 0.08:
+				out = _sol(sv.vel, t2, kind, prey if kind != "ledge" else null)
+				break
+	return out
+
+
+## a solve: launch velocity + the traced flight (path, where it comes down) + the four paw spots
+func _sol(vel: Vector3, tr: Dictionary, kind: String, prey: Node) -> Dictionary:
+	var out := {"vel": vel, "point": tr.point, "kind": kind, "ok": true, "t": tr.t, "path": tr.path, "land": tr.land, "prey": prey, "spots": []}
+	if tr.land:
+		var fl := Vector2(vel.x, vel.z)
+		var yaw: float = atan2(-vel.x, -vel.z) if fl.length() > 0.05 else player.yaw
+		out.yaw = yaw
+		var spots := CatRig.pounce_paw_spots(tr.point, yaw)
+		for i in 4:
+			var q: Vector3 = spots[i]
+			var g: Dictionary = player._ray(q + Vector3.UP * 0.12, q - Vector3.UP * 0.12)
+			if not g.is_empty() and g.normal.y > 0.5:
+				spots[i] = Vector3(q.x, g.position.y, q.z)
+		out.spots = spots
 	return out
 
 
@@ -755,39 +802,61 @@ func _paws_on(n: Node3D, feet: Vector3, ahead := Vector3.ZERO) -> Vector3:
 
 ## arc from feet that lands exactly on tgt: apex a little above the higher end (flatter than
 ## the aimed leap, it's an attack)
-func _arc_to(feet: Vector3, tgt: Vector3) -> Dictionary:
+func _arc_to(feet: Vector3, tgt: Vector3, lift := 0.0) -> Dictionary:
 	var dh := tgt.y - feet.y
 	var flat := Vector3(tgt.x - feet.x, 0, tgt.z - feet.z)
 	var d := flat.length()
 	if d > POUNCE_RANGE + 0.2:
 		return {}
-	var apex := maxf(dh, 0.0) + 0.12 + 0.09 * d
+	var apex := maxf(dh, 0.0) + 0.12 + 0.09 * d + lift
 	var vy := sqrt(2.0 * CatPlayer.G * apex)
 	var t := vy / CatPlayer.G + sqrt(2.0 * maxf(apex - dh, 0.0) / CatPlayer.G)
 	var vh := d / maxf(t, 0.05)
 	var hd := flat / d if d > 0.001 else Vector3.ZERO
+	# the flight is stepped (v -= g dt, then x += v dt), which sinks g dt t / 2 below the smooth
+	# parabola: half a tick of extra up speed puts the stepped arc right back on it, so it lands
+	# on the spot instead of a few cm short
+	vy += CatPlayer.G * 0.5 / float(Engine.physics_ticks_per_second)
 	return {"vel": hd * vh + Vector3.UP * vy, "t": t}
 
 
-## step the projectile through the world (physics tick segments) until it hits something
-func _trace(feet: Vector3, v0: Vector3) -> Dictionary:
+## fly the cat's own capsule through the world exactly the way the physics will (same tick, same
+## stepping, same collision shape): where it comes down, what it hits, and every point on the way.
+## ex = a body to fly through (the prey being pounced on)
+func _trace(feet: Vector3, v0: Vector3, ex := RID()) -> Dictionary:
 	var p := player
-	# the feet point. while it's still rising it can't land on a floor (that's the one it's
-	# standing on), only smack into walls / ceilings
 	var pos := feet
 	var v := v0
-	var dt := 1.0 / float(Engine.physics_ticks_per_second)   # same steps the real flight takes
+	var dt := 1.0 / float(Engine.physics_ticks_per_second)
 	var t := 0.0
+	var path := PackedVector3Array([feet])
+	var prm := PhysicsTestMotionParameters3D.new()
+	prm.margin = p.safe_margin
+	prm.max_collisions = 1
+	if ex.is_valid():
+		prm.exclude_bodies = [ex]
+	var res := PhysicsTestMotionResult3D.new()
+	var basis: Basis = p.global_transform.basis
+	var floor_y := cos(p.floor_max_angle)
+	var rid: RID = p.get_rid()
 	while t < 2.5:
 		v.y -= CatPlayer.G * dt
-		var nxt := pos + v * dt
-		var rising := v.y > 0.0
-		var hit: Dictionary = p._ray(pos, nxt)
+		var mo := v * dt
 		t += dt
-		if not hit.is_empty() and not (rising and hit.normal.y > 0.5):
-			return {"point": hit.position, "n": hit.normal, "t": t}
-		pos = nxt
-	return {"point": pos, "n": Vector3.ZERO, "t": t}
+		prm.from = Transform3D(basis, pos)
+		prm.motion = mo
+		if PhysicsServer3D.body_test_motion(rid, prm, res):
+			var n := res.get_collision_normal()
+			# rising it can't land on a floor (that's the one it's leaving), only hit walls / ceilings
+			if not (v.y > 0.0 and n.y > 0.5):
+				pos += res.get_travel()
+				path.append(pos)
+				if n.y >= floor_y:
+					return {"point": pos, "n": n, "t": t, "path": path, "land": true}
+				return {"point": res.get_collision_point(), "n": n, "t": t, "path": path, "land": false}
+		pos += mo
+		path.append(pos)
+	return {"point": pos, "n": Vector3.ZERO, "t": t, "path": path, "land": false}
 
 
 func _show_aim(sol: Dictionary) -> void:
@@ -798,13 +867,30 @@ func _show_aim(sol: Dictionary) -> void:
 	(p._aim_ring.material_override as StandardMaterial3D).albedo_color = col
 	var pt: Vector3 = sol.point
 	p._aim_ring.global_transform = Transform3D(Basis().scaled(Vector3(0.16, 0.004, 0.16)), pt + Vector3.UP * 0.006)
-	var start: Vector3 = p.global_position + Vector3.UP * 0.12
+	# the line IS the flight: the traced feet path (the same steps and collisions the real
+	# jump takes), laid out evenly along its length so it reads as one line from paws to circle
+	var path: PackedVector3Array = sol.path
 	var dots: Array = p._aim_dots
+	var cum := PackedFloat32Array([0.0])
+	for k in range(1, path.size()):
+		cum.append(cum[k - 1] + path[k].distance_to(path[k - 1]))
+	var total: float = cum[cum.size() - 1]
+	var j := 1
 	for k in dots.size():
-		var tt: float = sol.t * float(k + 1) / (dots.size() + 1)
-		var v: Vector3 = sol.vel
-		dots[k].global_position = start + v * tt + Vector3.DOWN * 0.5 * CatPlayer.G * tt * tt
-		dots[k].visible = true
+		var want: float = total * float(k + 1) / float(dots.size())
+		while j < path.size() - 1 and cum[j] < want:
+			j += 1
+		var seg := maxf(cum[j] - cum[j - 1], 0.00001)
+		dots[k].global_position = path[j - 1].lerp(path[j], clampf((want - cum[j - 1]) / seg, 0.0, 1.0)) + Vector3.UP * 0.006
+		dots[k].visible = path.size() > 1
+	# where each paw comes down
+	var spots: Array = sol.get("spots", [])
+	for i in p._paw_rings.size():
+		var r: MeshInstance3D = p._paw_rings[i]
+		r.visible = spots.size() == 4
+		if r.visible:
+			(r.material_override as StandardMaterial3D).albedo_color = Color(col.r, col.g, col.b, 0.95)
+			r.global_transform = Transform3D(Basis(Vector3.UP, float(sol.get("yaw", p.yaw))), (spots[i] as Vector3) + Vector3.UP * 0.008)
 
 
 ## both fore paws rake down onto it: two claw streaks + red bits + scratch lines

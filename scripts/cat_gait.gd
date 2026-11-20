@@ -48,6 +48,9 @@ var max_stance := 0.26
 var max_stance_gallop := 0.34
 var use_rays := true
 var exclude: Array[RID] = []
+## a pounce's landing spots (world, LF RF LH RH): coming down, every paw plants right on its spot
+## (the aim circles) instead of where it happens to be / swinging the hinds in. empty = none
+var land_spots: Array = []
 ## multiplayer copy: never decide to lift a paw itself, only lift the ones queue_lift() hands it
 ## (the owner's lifts, replayed), so every step, settle step and turn-in-place step is taken by
 ## the same paw at the same moment on every screen. landing and the rest run as normal
@@ -330,7 +333,12 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 		elif mode[i] == FREE:
 			# coming back to the ground: fore paws plant where they are, hind paws swing in after
 			var p: Vector3 = pos[i]
-			if i < 2 or not on_floor:
+			if land_spots.size() == 4 and on_floor:
+				pos[i] = _ground(land_spots[i], xf.origin.y, i)
+				mode[i] = PLANTED
+				_st_t[i] = 0.0
+				touched[i] = true
+			elif i < 2 or not on_floor:
 				pos[i] = _ground(p, xf.origin.y, i)
 				mode[i] = PLANTED
 				_st_t[i] = 0.0

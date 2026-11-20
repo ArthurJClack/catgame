@@ -12,6 +12,8 @@ func _ready() -> void:
 		_ctest.call_deferred()
 	elif "--pounceshow" in OS.get_cmdline_user_args():
 		_pshow.call_deferred()
+	elif "--landshow" in OS.get_cmdline_user_args():
+		_landshow.call_deferred()
 	elif "--commitshow" in OS.get_cmdline_user_args():
 		_commitshow.call_deferred()
 	else:
@@ -35,6 +37,29 @@ func _land_spot() -> Vector3:
 		elif left:
 			return p.global_position
 	return p.global_position
+
+
+## how far a point is from a polyline
+func _dist_to_path(q: Vector3, path: PackedVector3Array) -> float:
+	var best := INF
+	for k in range(1, path.size()):
+		var a := path[k - 1]
+		var ab := path[k] - a
+		var u := clampf((q - a).dot(ab) / maxf(ab.length_squared(), 1e-9), 0.0, 1.0)
+		best = minf(best, q.distance_to(a + ab * u))
+	return best
+
+
+## worst distance (flat) from each planted paw to the circle it was promised
+func _paws_off(spots: Array) -> float:
+	if spots.size() != 4:
+		return 99.0
+	var worst := 0.0
+	for i in 4:
+		var g: Vector3 = p.rig.gait.pos[i]
+		var s: Vector3 = spots[i]
+		worst = maxf(worst, Vector2(g.x - s.x, g.z - s.z).length())
+	return worst
 
 
 func _still_rat(yaw: float, size := 1.0) -> SoulsRat:
@@ -199,22 +224,37 @@ func _ctest() -> void:
 	bot.pitch = -0.15
 	await _ticks(3)
 	bot.pounce = true
+	await _ticks(3)
+	var charge0: float = p.charge     # space was already held to get here: full from the start
 	await _secs(0.9)
 	var aimed := c.aiming()
 	var pred: Vector3 = c.pounce.point
 	var pkind: String = c.pounce.kind
+	var ppath: PackedVector3Array = c.pounce.path
+	var pspots: Array = c.pounce.spots
 	var n0 := c.pounces
 	bot.pounce = false
-	if OS.has_environment("ARENA_DBG"):
-		for k in 6:
-			await get_tree().physics_frame
-			print("  I fly: pos %s v %s floor %s lock %s" % [p.global_position, p.velocity, p.is_on_floor(), p.leap_lock])
-	var land := await _land_spot()
+	# the line: every point the body passes on the way is on the drawn path
+	var path_off := 0.0
+	var left_floor := false
+	var tt := 0.0
+	while tt < 3.0:
+		await get_tree().physics_frame
+		tt += get_physics_process_delta_time()
+		if not p.is_on_floor():
+			left_floor = true
+			path_off = maxf(path_off, _dist_to_path(p.global_position, ppath))
+		elif left_floor:
+			break
+	var land := p.global_position
+	await _secs(0.1)
+	var settled := p.global_position
+	var paws_off := _paws_off(pspots)
 	await _secs(0.4)
-	var drift := Vector2(p.global_position.x - land.x, p.global_position.z - land.z).length()
-	var miss := Vector2(land.x - pred.x, land.z - pred.z).length()
-	print("I free pounce: aiming %s, launched %d, %s arc predicted %.2f m out, landed %.2f m out, miss %.3f m, drift after landing %.3f m" % [str(aimed), c.pounces - n0, pkind, 2.0 - pred.z, 2.0 - land.z, miss, drift])
-	ok = ok and aimed and c.pounces - n0 == 1 and pkind == "free" and miss < 0.04 and drift < 0.01 and 2.0 - land.z > 1.0
+	var drift := Vector2(p.global_position.x - settled.x, p.global_position.z - settled.z).length()
+	var miss := Vector2(settled.x - pred.x, settled.z - pred.z).length()
+	print("I free pounce: charge at aim start %.2f, aiming %s, launched %d, %s arc predicted %.2f m out, landed %.2f m out, miss %.4f m, flight off the line %.4f m, paws off their circles %.4f m, drift after landing %.4f m" % [charge0, str(aimed), c.pounces - n0, pkind, 2.0 - pred.z, 2.0 - land.z, miss, path_off, paws_off, drift])
+	ok = ok and charge0 > 0.99 and aimed and c.pounces - n0 == 1 and pkind == "free" and miss < 0.005 and path_off < 0.01 and paws_off < 0.01 and drift < 0.002 and 2.0 - land.z > 1.0
 	# J: soft lock: rat a bit off the aim line, the pounce bends onto it and pins it
 	await _clear_rats()
 	_reset_cat(Vector3(0, 0.02, 1.8))
@@ -254,10 +294,15 @@ func _ctest() -> void:
 	pkind = c.pounce.kind
 	pred = c.pounce.point
 	bot.pounce = false
+	pspots = c.pounce.spots
 	land = await _land_spot()
-	await _secs(0.3)
-	print("K ledge: kind %s, top at %.2f m, landed y %.2f, miss %.3f m" % [pkind, pred.y, land.y, Vector2(land.x - pred.x, land.z - pred.z).length()])
-	ok = ok and pkind == "ledge" and land.y > 0.4
+	await _secs(0.1)
+	paws_off = _paws_off(pspots)
+	var hind_y: float = minf((pspots[2] as Vector3).y, (pspots[3] as Vector3).y) if pspots.size() == 4 else 0.0
+	await _secs(0.2)
+	var kmiss := Vector2(p.global_position.x - pred.x, p.global_position.z - pred.z).length()
+	print("K ledge: kind %s, top at %.2f m, landed y %.2f, miss %.4f m, hind paws on top %s, paws off their circles %.4f m" % [pkind, pred.y, land.y, kmiss, str(hind_y > 0.4), paws_off])
+	ok = ok and pkind == "ledge" and land.y > 0.4 and kmiss < 0.01 and hind_y > 0.4 and paws_off < 0.015
 	box.queue_free()
 	await _ticks(2)
 	# L: a paw press while aiming = call it off, no pounce
@@ -296,14 +341,22 @@ func _hold_space(t: float, dt: float) -> Dictionary:
 	var o2: Dictionary = p._space_filter(false, true, dt)
 	out.jump = out.jump or o2.jump
 	out.charge = o2.hop_charge
+	out.mul = o2.hop_mul
 	return out
 
 
-func _hop_height(charge: float) -> float:
+func _hop_height(charge: float, mul := -1.0) -> float:
 	_reset_cat(Vector3(0, 0.02, 1.0))
 	await _secs(0.3)
+	# a big hop's hard landing can still be playing out (ouch knock): settle on the floor first
+	var w := 0.0
+	while w < 0.25:
+		await get_tree().physics_frame
+		w = w + get_physics_process_delta_time() if p.is_on_floor() else 0.0
 	var y0 := p.global_position.y
 	bot.hop_charge = charge
+	if mul > 0.0:
+		bot.hop_mul = mul
 	bot.jump = true
 	await _ticks(2)
 	bot.jump = false
@@ -316,6 +369,7 @@ func _hop_height(charge: float) -> float:
 		if t > 0.2 and p.is_on_floor():
 			break
 	bot.erase("hop_charge")
+	bot.erase("hop_mul")
 	await _secs(0.3)
 	return top - y0
 
@@ -494,12 +548,14 @@ func _commit_test() -> bool:
 	var f_air: Dictionary = p._space_filter(true, false, dt)
 	p._space_filter(false, false, dt)
 	print("T space filter: tap %s, 0.3 s %s, 0.6 s %s, air press jumps at once %s" % [str(f_tap), str(f_mid), str(f_long), str(f_air.jump)])
-	ok = ok and f_tap.jump and f_tap.charge == 0.0 and f_mid.jump and f_mid.charge > 0.3 and f_mid.charge < 0.8 and not f_mid.pounce and f_long.pounce and not f_long.jump and f_air.jump
+	ok = ok and f_tap.jump and f_tap.charge == 0.0 and f_tap.mul < 0.2 and f_mid.mul > f_tap.mul * 3.0 and f_mid.jump and f_mid.charge > 0.3 and f_mid.charge < 0.8 and not f_mid.pounce and f_long.pounce and not f_long.jump and f_air.jump
 	# U: a charged hop goes higher than a tapped one
 	var h_tap := await _hop_height(0.0)
 	var h_big := await _hop_height(1.0)
-	print("U hop %.2f m tapped, %.2f m fully charged" % [h_tap, h_big])
-	ok = ok and h_big > h_tap * 1.4
+	var h_tiny := await _hop_height(0.0, CatPlayer.HOP_TAP_MUL)
+	var h_full := await _hop_height(1.0, CatPlayer.HOP_CHARGE_MUL)
+	print("U hop %.2f m tapped, %.2f m fully charged (bot) / player space: tap %.2f m, held %.2f m" % [h_tap, h_big, h_tiny, h_full])
+	ok = ok and h_big > h_tap * 1.4 and h_tiny < 0.2 and h_full > h_tiny * 6.0
 	# V: every swat lunges a bit: into open air the full step, at a rat it stops just short + hits
 	await _clear_rats()
 	_reset_cat(Vector3(0, 0.02, 1.5))
@@ -729,6 +785,126 @@ func _pshow() -> void:
 	await _secs(0.3)
 	await _pounce(0.9, false)
 	await _secs(0.8)
+	get_tree().quit()
+
+
+# ---------------------------------------------------------------- exact landing reel (--landshow)
+
+## copies of the aim's paw circles + landing ring left in the world (video only), so you can watch
+## the paws come down in them after the real ones vanish at launch
+func _ghost_marks() -> Array:
+	var out := []
+	var src: Array = [p._aim_ring]
+	src.append_array(p._paw_rings)
+	for r in src:
+		if not (r as MeshInstance3D).is_visible_in_tree():
+			continue
+		var g := MeshInstance3D.new()
+		g.mesh = r.mesh
+		var m: StandardMaterial3D = (r.material_override as StandardMaterial3D).duplicate()
+		m.albedo_color.a *= 0.7
+		g.material_override = m
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		arena.add_child(g)
+		g.global_transform = r.global_transform
+		out.append(g)
+	return out
+
+
+func _slow_pounce(aim_t: float, slow := 0.3) -> void:
+	bot.pounce = true
+	await _secs(aim_t)
+	var ghosts := _ghost_marks()
+	Engine.time_scale = slow
+	bot.pounce = false
+	var left := false
+	var t := 0.0
+	while t < 2.0:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		if not p.is_on_floor():
+			left = true
+		elif left:
+			break
+	await _secs(0.35)
+	Engine.time_scale = 1.0
+	await _secs(1.1)
+	for g in ghosts:
+		g.queue_free()
+
+
+func _landshow() -> void:
+	_labels()
+	arena.hud.visible = true
+	cam = Camera3D.new()
+	cam.fov = 45
+	cam.near = 0.02
+	arena.add_child(cam)
+	cam.current = true
+	p.set_third_person(true)
+	await _ticks(10)
+	await _clear_rats()
+	_dummy = null
+	# 1: tap vs hold
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	_face(Vector3(0, 0.02, -2))
+	cam.global_position = Vector3(2.4, 0.6, 0.9)
+	cam.look_at(Vector3(0, 0.45, 0.9))
+	_say("tap space", "tiny hop")
+	await _secs(0.6)
+	bot.hop_charge = 0.0
+	bot.hop_mul = CatPlayer.HOP_TAP_MUL
+	bot.jump = true
+	await _ticks(2)
+	bot.jump = false
+	await _secs(1.2)
+	_say("hold space a bit", "the hop builds up the longer you hold")
+	bot.hop_charge = 1.0
+	bot.hop_mul = CatPlayer.HOP_CHARGE_MUL
+	bot.jump = true
+	await _ticks(2)
+	bot.jump = false
+	await _secs(1.6)
+	bot.erase("hop_charge")
+	bot.erase("hop_mul")
+	# 2: free pounce from above: line + four paw circles, slow mo landing into them
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	_face(Vector3(0, 0.02, -2.0))
+	bot.pitch = -0.12
+	cam.global_position = Vector3(1.1, 1.15, 2.6)
+	cam.look_at(Vector3(0, 0.0, 1.2))
+	_say("hold space: pounce mode", "full power straight away, line = the exact flight, a circle for each paw")
+	await _slow_pounce(1.4)
+	_say("lands on the spot", "no slide, no bounce, every paw in its circle")
+	await _secs(0.8)
+	# 3: close up on the paws
+	_reset_cat(Vector3(0, 0.02, 2.0))
+	_face(Vector3(0.3, 0.02, -2.0))
+	bot.pitch = -0.2
+	cam.global_position = Vector3(0.55, 0.55, 1.15)
+	cam.look_at(Vector3(0.12, 0.0, 0.85))
+	_say("close up", "paw circles")
+	await _slow_pounce(1.2, 0.25)
+	# 4: crate: the old ray-only line could clip the edge, now the cat's own body is traced
+	var box := _block(Vector3(0, 0.25, 0.1), Vector3(1.0, 0.5, 0.7))
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	_face(Vector3(0, 0.1, 0.4))
+	bot.pitch = -0.08
+	cam.global_position = Vector3(1.6, 1.1, 2.3)
+	cam.look_at(Vector3(0, 0.3, 1.0))
+	_say("onto a crate", "snaps on top, far enough in for the back paws too")
+	await _slow_pounce(1.2)
+	box.queue_free()
+	# 5: rat: soft lock
+	_reset_cat(Vector3(0, 0.02, 2.2))
+	_dummy_rat(PI, Vector3(0.0, 0.02, 0.4))
+	_face(Vector3(0.4, 0.02, 0.4))
+	bot.pitch = -0.05
+	cam.global_position = Vector3(1.5, 1.0, 2.4)
+	cam.look_at(Vector3(0, 0.1, 1.2))
+	_say("onto a rat", "flies onto it, not into it: no shove off the spot")
+	await _slow_pounce(1.2)
+	await _secs(0.5)
 	get_tree().quit()
 
 
