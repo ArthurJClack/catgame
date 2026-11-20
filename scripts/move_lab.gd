@@ -8,6 +8,8 @@ extends Node3D
 ##
 ##   godot --headless --fixed-fps 60 --path . res://movelab.tscn -- --realtest [--only sprint_tile,hop_tap] [--csv out.csv]
 ##   --real 0 turns CatPlayer.real_move off where the build has it (before / after)
+##   godot --path . res://movelab.tscn -- --show [--real 0] --write-movie out/zoom.avi --fixed-fps 30   (xvfb)
+##     films one run on the tile from above: gallop, hard right, throw it into reverse, stop
 ##
 ## rows (unit, band):
 ##   start_g_<surface>   mean push off a stand up to 3 m/s, in g. band = what the surface holds (mu), capped by the legs
@@ -43,6 +45,8 @@ var rows: Array = []         # [name, value, unit, lo, hi]
 var keep := {}               # values other rows need (flat sprint for the hill ratio)
 var _orb := 0.0
 var _hp0 := 0.0
+var show := false
+var cam: Camera3D
 
 
 func _ready() -> void:
@@ -54,8 +58,11 @@ func _ready() -> void:
 	var ps: Script = load("res://scripts/cat_player.gd")
 	if k >= 0 and ps.get("real_move") != null:
 		ps.set("real_move", args[k + 1] != "0")
+	show = "--show" in args
 	_build()
 	_scenarios()
+	if show:
+		scen = {"zoomies": [LANE.tile, 0.0, -30.0, 11.0, func(tt): return _go({"sprint": tt < 8.5, "turn_to": 0.0 if tt < 2.6 else (-PI * 0.5 if tt < 5.2 else PI * 0.5)}) if tt < 8.5 else {"move": Vector2.ZERO, "pitch": -0.1}, func(): pass]}
 	var only := []
 	k = args.find("--only")
 	if k >= 0:
@@ -65,6 +72,35 @@ func _ready() -> void:
 			names.append(n)
 	player = CatPlayer.new()
 	add_child(player)
+	if show:
+		player.set_third_person(true)
+		cam = Camera3D.new()
+		cam.fov = 50.0
+		add_child(cam)
+		cam.make_current()
+		var sun := DirectionalLight3D.new()
+		sun.rotation = Vector3(-1.0, 0.5, 0.0)
+		sun.shadow_enabled = true
+		sun.directional_shadow_max_distance = 30.0
+		add_child(sun)
+		var we := WorldEnvironment.new()
+		var env := Environment.new()
+		env.background_mode = Environment.BG_COLOR
+		env.background_color = Color(0.5, 0.58, 0.68)
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		env.ambient_light_color = Color(0.7, 0.72, 0.78)
+		env.ambient_light_energy = 0.7
+		we.environment = env
+		add_child(we)
+		var cl := CanvasLayer.new()
+		add_child(cl)
+		var cap := Label.new()
+		cap.position = Vector2(20, 14)
+		cap.add_theme_font_size_override("font_size", 28)
+		cap.add_theme_color_override("font_outline_color", Color.BLACK)
+		cap.add_theme_constant_override("outline_size", 8)
+		cap.text = ("real grip (tile holds 0.45 g)" if CatPlayer.real_move else "before (tile holds 1.4 g)") + "\ngallop, hard right, reverse, stop"
+		cl.add_child(cap)
 	_next.call_deferred()
 
 
@@ -81,6 +117,23 @@ func _box(pos: Vector3, size: Vector3, surface: String, rot := Vector3.ZERO) -> 
 	b.rotation = rot
 	b.set_meta("surface", surface)
 	add_child(b)
+	if show:
+		# checker tiles (1 m) so the slide reads on film
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = size
+		mi.mesh = bm
+		var img := Image.create(2, 2, false, Image.FORMAT_RGB8)
+		for i in 4:
+			img.set_pixel(i % 2, i / 2, Color(0.86, 0.87, 0.9) if (i % 2 + i / 2) % 2 == 0 else Color(0.62, 0.66, 0.72))
+		var mat := StandardMaterial3D.new()
+		mat.albedo_texture = ImageTexture.create_from_image(img)
+		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		mat.uv1_triplanar = true
+		mat.uv1_world_triplanar = true
+		mat.uv1_scale = Vector3(0.5, 0.5, 0.5)
+		mi.material_override = mat
+		b.add_child(mi)
 
 
 ## a ramp rising toward -z from (x, 0, z0): top face starts at the floor
@@ -183,6 +236,9 @@ func _physics_process(dt: float) -> void:
 			if float(b.steer) != 0.0 and hv.length() > 0.3:
 				_orb = _heading(hv) + float(b.steer)
 			b.erase("steer")
+		if b.has("turn_to"):
+			_orb = float(b.turn_to)
+			b.erase("turn_to")
 		if b.has("air_steer"):
 			_orb = float(b.air_steer) if (not player.is_on_floor() and t > 1.5) else (_orb if t > 1.6 else 0.0)
 			b.erase("air_steer")
@@ -197,6 +253,13 @@ func _physics_process(dt: float) -> void:
 		tr.jump.append(bool(b.get("jump", false)))
 	if t > float(s[3]):
 		_next()
+
+
+func _process(_dt: float) -> void:
+	if cam and player:
+		var p := player.global_position
+		cam.global_position = cam.global_position.lerp(p + Vector3(0, 7.5, 6.5), 0.12) if cam.global_position != Vector3.ZERO else p + Vector3(0, 7.5, 6.5)
+		cam.look_at(p + Vector3(0, 0.1, 0))
 
 
 # ---------------------------------------------------------------- measuring
