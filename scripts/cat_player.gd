@@ -1226,9 +1226,10 @@ func _physics_process(dt: float) -> void:
 	if is_on_floor() and not (mantling or clambering or climbing or want_crouch or charging):
 		var bump := _bump_dir()
 		if bump != Vector3.ZERO and wish_dir.dot(bump) > 0.4:
+			var v_keep := velocity
 			velocity = Vector3(hv.x, 0.0, hv.z).normalized() * maxf(hv.length(), wish_len * TROT_SPEED) if hv.length() > 0.05 else bump * wish_len * TROT_SPEED
 			if not climber.try_ledge(bump, true):
-				velocity = Vector3(hv.x, velocity.y, hv.z)
+				velocity = v_keep   # what the slide left, not the speed from before it hit the bump
 
 	# fell out of the world somehow: respawn
 	if global_position.y < -5.0:
