@@ -71,6 +71,10 @@ boot = **title screen** (`title_screen.gd`) over the live farm while the camera 
 - `scripts/toy_mouse.gd` prey toy
 - `scripts/paw_view.gd` first person front legs
 - `scripts/cat_player.gd` movement controller (`-- --preview --movetest` checks momentum + the pad, `--movecurve` dumps a speed csv)
+- `scripts/move_lab.gd` movement scoreboard: bot maneuvers on each surface, numbers printed next to a real cat's
+  (`godot --headless --fixed-fps 60 --path . res://movelab.tscn -- --realtest [--only a,b] [--csv out.csv]`, ~1 min)
+- grip: `CatPlayer.real_move` (default on) holds push, brake and turn to what the surface grips (`CatPlayer.MU` x g,
+  `GRIP_REAL` scales it all). `CAT_OFF=real_move` or `--real 0` in the labs = the old grip table
 - `scripts/cat_pad.gd` gamepad reader (deadzones, button map, `CatPad.sim` fake pad for tests)
 - `scripts/level.gd` living room gym + gait reference studio
 - `scripts/npc_cat.gd` wandering cats
