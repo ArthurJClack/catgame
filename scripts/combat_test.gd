@@ -14,6 +14,8 @@ func _ready() -> void:
 		_pshow.call_deferred()
 	elif "--landshow" in OS.get_cmdline_user_args():
 		_landshow.call_deferred()
+	elif "--reachshow" in OS.get_cmdline_user_args():
+		ReachShow.run.call_deferred(self)
 	elif "--commitshow" in OS.get_cmdline_user_args():
 		_commitshow.call_deferred()
 	else:
@@ -222,7 +224,7 @@ func _ctest() -> void:
 	_reset_cat(Vector3(0, 0.02, 2.0))
 	_face(Vector3(0, 0.02, -1.0))
 	bot.pitch = -0.15
-	await _ticks(3)
+	await _secs(0.5)                  # settled on all fours first (the last test's swats lunged it about)
 	bot.pounce = true
 	await _ticks(3)
 	var charge0: float = p.charge     # space was already held to get here: full from the start
@@ -253,8 +255,10 @@ func _ctest() -> void:
 	await _secs(0.4)
 	var drift := Vector2(p.global_position.x - settled.x, p.global_position.z - settled.z).length()
 	var miss := Vector2(settled.x - pred.x, settled.z - pred.z).length()
+	# (paws_off: which paws are mid swing at the launch depends on the gait phase the earlier tests left,
+	# worth ~1 cm either way; same bar as the ledge test K)
 	print("I free pounce: charge at aim start %.2f, aiming %s, launched %d, %s arc predicted %.2f m out, landed %.2f m out, miss %.4f m, flight off the line %.4f m, paws off their circles %.4f m, drift after landing %.4f m" % [charge0, str(aimed), c.pounces - n0, pkind, 2.0 - pred.z, 2.0 - land.z, miss, path_off, paws_off, drift])
-	ok = ok and charge0 > 0.99 and aimed and c.pounces - n0 == 1 and pkind == "free" and miss < 0.005 and path_off < 0.01 and paws_off < 0.01 and drift < 0.002 and 2.0 - land.z > 1.0
+	ok = ok and charge0 > 0.99 and aimed and c.pounces - n0 == 1 and pkind == "free" and miss < 0.005 and path_off < 0.01 and paws_off < 0.015 and drift < 0.002 and 2.0 - land.z > 1.0
 	# J: soft lock: rat a bit off the aim line, the pounce bends onto it and pins it
 	await _clear_rats()
 	_reset_cat(Vector3(0, 0.02, 1.8))
@@ -288,7 +292,7 @@ func _ctest() -> void:
 	_reset_cat(Vector3(0, 0.02, 1.6))
 	_face(Vector3(0, 0.1, 0.1))
 	bot.pitch = -0.1
-	await _ticks(3)
+	await _secs(0.5)
 	bot.pounce = true
 	await _secs(0.9)
 	pkind = c.pounce.kind
@@ -421,7 +425,8 @@ func _commit_test() -> bool:
 	bot.move = Vector2.ZERO
 	await _secs(0.5)
 	print("M swat at a trot: phases %s, speed %.2f -> %.2f m/s while the paw's out, body turned %.2f rad of 1.5 by the recovery" % [str(phases), v0, v_act, turned])
-	ok = ok and phases == ["wind", "active", "recover"] and v0 > 2.5 and v_act < 2.0 and turned < 0.45
+	# (the strike carries the trot into the lunge now, so it reaches: never faster than the lunge itself)
+	ok = ok and phases == ["wind", "active", "recover"] and v0 > 2.5 and v_act < float(CatCombat.MOVES.swat.lunge) + 0.4 and turned < 0.45
 	bot.yaw = p.yaw
 	# N: mash: a second click mid swat is buffered and comes out at the chain point
 	_reset_cat(Vector3(0, 0.02, 1.0))
@@ -581,7 +586,50 @@ func _commit_test() -> bool:
 	var gap1 := Vector2(p.global_position.x - r.global_position.x, p.global_position.z - r.global_position.z).length()
 	var near_side := gap1 - 0.16 * r.s
 	print("V lunge: open air %.2f m, at a rat %.2f -> %.2f m (near side %.2f m off), rat took %.1f, rig gather peak test %s" % [open_d, gap0, gap1, near_side, r.max_hp - r.hp, str(CatCombat.MOVES.swat.has("lunge"))])
-	ok = ok and open_d > 0.12 and open_d < 0.4 and gap1 < gap0 - 0.05 and near_side > CatCombat.LUNGE_STOP - 0.05 and r.max_hp - r.hp >= 1.0
+	ok = ok and open_d > 0.3 and open_d < 0.8 and gap1 < gap0 - 0.05 and near_side > CatCombat.LUNGE_STOP - 0.05 and r.max_hp - r.hp >= 1.0
+	# W: reach: a rat a metre out gets hit (the lunge + the strike's hitbox out in front), and on the
+	# move the hitbox rides along with the cat (a rat it trots onto during the strike still gets hit)
+	await _clear_rats()
+	r = _still_rat(PI)
+	r.hp = 9.0
+	r.max_hp = 9.0
+	_reset_cat(Vector3(0, 0.02, 1.0))
+	_face(r.global_position)
+	await _secs(0.3)
+	var far0 := Vector2(p.global_position.x - r.global_position.x, p.global_position.z - r.global_position.z).length()
+	_paws(true, false)
+	await _ticks(3)
+	_paws(false, false)
+	await _secs(0.5)
+	var far_dmg := r.max_hp - r.hp
+	await _clear_rats()
+	r = _still_rat(PI)
+	r.hp = 9.0
+	r.max_hp = 9.0
+	_reset_cat(Vector3(0, 0.02, 3.0))
+	_face(Vector3(0, 0.02, -6))
+	bot.move = Vector2(0, 1)
+	var fired := false
+	var at_fire := 0.0
+	var box_ahead := 0.0
+	for i in 400:
+		await get_tree().physics_frame
+		var g2 := Vector2(p.global_position.x - r.global_position.x, p.global_position.z - r.global_position.z).length()
+		if not fired and g2 < 1.3:
+			_paws(false, true)
+			fired = true
+			at_fire = g2
+		elif fired:
+			_paws(false, false)
+			if p._swat_live > 0.0:
+				box_ahead = maxf(box_ahead, -(p.swat_box() - p.global_position).dot(p.global_transform.basis.z))
+		if fired and (r.max_hp - r.hp > 0.0 or i > 300):
+			break
+	bot.move = Vector2.ZERO
+	var move_dmg := r.max_hp - r.hp
+	print("W reach: rat %.2f m out -> took %.1f / trotting in, swung at %.2f m -> took %.1f, hitbox %.2f m ahead of the cat" % [far0, far_dmg, at_fire, move_dmg, box_ahead])
+	ok = ok and far0 > 0.9 and far_dmg >= 1.0 and move_dmg >= 1.0 and box_ahead > 0.5
+	await _clear_rats()
 	return ok
 
 

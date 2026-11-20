@@ -52,6 +52,13 @@ var stretch := 0.0       # big front stretch, butt up
 var groom := 0.0         # sitting, licking a paw + face wipes
 var loaf := 0.0          # legs tucked under, eyes half shut
 var pin := 0.0           # forepaws slammed down together (pounce landing), decays by itself
+# souls dodge (cat_dash.gd): 0..1 weight, which kind (CatDash.Kind: dart, side, whirl, back),
+# progress through the flight 0..1, sideways direction (rig space x, -1..1) and the landing squat
+var dodge := 0.0
+var dodge_kind := 0
+var dodge_u := 0.0
+var dodge_lat := 0.0
+var dodge_land := 0.0
 ## a pounce's four landing spots (world, LF RF LH RH), the ones its aim circles show: in the air
 ## each paw reaches for its spot and the pin pose plants it exactly there. empty = none
 var pounce_spots: Array = []
@@ -193,6 +200,7 @@ var _squeeze_t := -1.0
 var _swat_t := -1.0
 var _swat_i := 1
 var _swat_target := Vector3.ZERO
+var _swat_local := Vector3.ZERO
 var _gait_setup := false
 
 # ---------------- spine, weight, head, jumps, life ----------------
@@ -817,6 +825,8 @@ func swat(side: int, target: Vector3) -> void:
 	_log(["s", side, target])
 	_swat_i = clampi(side, 0, 1)
 	_swat_target = target
+	# held in body space: the strike goes out in front of the cat and travels with it through the lunge
+	_swat_local = to_local(target)
 	_swat_t = 0.0
 
 
@@ -1289,6 +1299,8 @@ func animate(dt: float) -> void:
 	pelvis.rotation.x = -flex - air_flex + arch * 0.5 + sit_h * 0.25 + stretch * 0.1
 	# a rounded back is a shorter back: the hips slide up toward the chest
 	pelvis.position.z = pelvis_z + clampf(_flex_s + air_flex - arch, -0.45, 0.3) * 0.035
+	if dodge > 0.0:
+		_dodge_body()
 	# girdles follow their paws: the hip / shoulder on the reaching side goes forward with it,
 	# and the swing side drops a little
 	var sw := [0.0, 0.0, 0.0, 0.0]
@@ -1491,7 +1503,7 @@ func animate(dt: float) -> void:
 			heel += tr * 0.25 * charge
 
 		# air poses
-		var aw := _air_w * nc * fw
+		var aw := maxf(_air_w, dodge) * nc * fw
 		if aw > 0.0:
 			var af: Vector3
 			var arot: float
@@ -1543,6 +1555,10 @@ func animate(dt: float) -> void:
 				var hp := Vector3(hx, hy, (HOME[i] as Vector3).z + (-0.015 if front else 0.0))
 				af = af.lerp(hp, _hop_w)
 				arot = lerpf(arot, lerpf(0.12, -0.45, up_k) if front else lerpf(0.0, -0.5, up_k), _hop_w)
+			if dodge > 0.0:
+				var dl := _dodge_leg(i, side, front, home)
+				af = af.lerp(dl[0], dl[2])
+				arot = lerpf(arot, dl[1], dl[2])
 			var afw := yb * af
 			var troll := _tum_c if front else _tum_p
 			if troll != 0.0:
@@ -1629,7 +1645,7 @@ func animate(dt: float) -> void:
 			# swat: wind out to the side, whip across, recover
 			if _swat_t >= 0.0 and _swat_i == i:
 				var wind := Vector3(side * 0.105, BODY_H * 0.62, home.z - 0.07)
-				var strike := to_local(_swat_target)
+				var strike := _swat_local
 				var sw_p: Vector3
 				var sw_r: float
 				if _swat_t < 0.07:
@@ -1702,6 +1718,65 @@ func animate(dt: float) -> void:
 ## one end of the body (0 fore, 1 hind) for one frame: a mass on its legs.
 ## y: its height offset now, yt: where the paws under it would carry it standing still.
 ## fl / homes: paw spots and rest spots in rig space
+## one leg's dodge pose: [foot (rig space, unyawed), paw rotation, weight]. it hands over to
+## the landing reach (pounce_spots / land_known) for the end of the flight
+func _dodge_leg(i: int, side: float, front: bool, home: Vector3) -> Array:
+	var u := dodge_u
+	var land_w := smoothstep(0.55, 0.9, u) if land_known else 0.0
+	var w := dodge * (1.0 - land_w)
+	match dodge_kind:
+		0, 2:
+			# flat out: fore paws thrown well forward and low, hind legs trailing straight back off the push
+			if front:
+				return [Vector3(side * 0.03, 0.03, -0.31), 0.25, w]
+			return [Vector3(side * 0.045, 0.07, 0.33), -1.2, w * (1.0 - smoothstep(0.4, 0.75, u))]
+		1:
+			# stiff legged crab spring: all four straight down and splayed, the leading pair reaching out
+			var lead := side * dodge_lat > 0.0
+			var x := side * (0.055 if front else 0.06) + dodge_lat * (0.05 if lead else 0.015)
+			return [Vector3(x, -0.03, home.z + (-0.01 if front else 0.01)), 0.1, w]
+		3:
+			# fore paws up off the ground in front of the chest (guard), hind paws reaching back for the ground
+			if front:
+				var up := 1.0 - smoothstep(0.45, 0.9, u)
+				return [Vector3(side * 0.04, lerpf(0.0, 0.1, up), home.z - 0.07), lerpf(0.2, -0.7, up), w]
+			return [Vector3(side * 0.05, -0.03, home.z + 0.06), 0.0, w]
+	return [home, 0.0, 0.0]
+
+
+## dodge body pose, added on top of the normal air pose (the legs are in the air pose block)
+##   dart / whirl: flat out, spine stretched long off the push, gathers up for the landing
+##   side leap: the startled spring, back arched high, rolled a touch into the leap
+##   backstep: forelegs shove off, chest rears up, levels out as the hind paws reach back
+func _dodge_body() -> void:
+	var w := dodge * (1.0 - climb) * (1.0 - clamber)
+	var u := dodge_u
+	match dodge_kind:
+		0, 2:
+			var st := (1.0 - smoothstep(0.35, 0.8, u)) * w
+			var gth := smoothstep(0.55, 0.95, u) * w
+			chest.rotation.x += 0.2 * st - 0.12 * gth
+			pelvis.rotation.x -= 0.2 * st - 0.12 * gth
+			pelvis.position.z += 0.012 * st
+			pivot.rotation.x -= 0.06 * st
+			pivot.position.y -= 0.012 * st
+		1:
+			var ar := sin(PI * clampf(u * 1.15, 0.0, 1.0)) * w
+			chest.rotation.x -= 0.3 * ar
+			pelvis.rotation.x += 0.32 * ar
+			pelvis.position.z -= 0.01 * ar
+			pivot.position.y += 0.022 * ar
+			pivot.rotation.z -= dodge_lat * 0.14 * ar
+			# the spine bows round: chest and hips both swing toward the side it springs to
+			chest.rotation.y += dodge_lat * 0.12 * ar
+			pelvis.rotation.y -= dodge_lat * 0.12 * ar
+		3:
+			var rr := (1.0 - smoothstep(0.3, 0.85, u)) * w
+			pivot.rotation.x += 0.3 * rr
+			pivot.position.y += 0.015 * rr
+			chest.rotation.x -= 0.1 * rr
+
+
 func _girdle_phys(h: int, y: float, yt: float, fl: Array, homes: Array, glo: float, ghi: float, dt: float) -> float:
 	var full: float = (F_UP + F_LO + F_PA) if h == 0 else (H_TH + H_SH + H_MT)
 	var h0 := full * LEG_STAND

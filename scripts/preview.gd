@@ -1499,6 +1499,9 @@ func _dodge(p: CatPlayer, move: Vector2) -> Dictionary:
 	var ifr := 0.0
 	var pushed_at := -1.0
 	var hmax := 0.0
+	var was_air := false
+	var touch := Vector3.INF
+	var miss := -1.0
 	while t < 1.5:
 		await get_tree().physics_frame
 		var dt := get_physics_process_delta_time()
@@ -1509,13 +1512,20 @@ func _dodge(p: CatPlayer, move: Vector2) -> Dictionary:
 				pushed_at = t
 		if p.is_invulnerable():
 			ifr += dt
+		if was_air and p.dash.state != CatDash.AIR and touch == Vector3.INF:
+			touch = p.global_position
+			bot.move = Vector2.ZERO   # let go on touch down (a held a / d is a side hop of its own)
+			if p.dash.land_at != Vector3.INF:
+				miss = Vector2(touch.x - p.dash.land_at.x, touch.z - p.dash.land_at.z).length()
+		was_air = p.dash.state == CatDash.AIR
 		hmax = maxf(hmax, p.global_position.y - from.y)
 		if t > 0.2 and p.dash.state == CatDash.IDLE and p.dash.recover <= 0.0:
 			bot.move = Vector2.ZERO
 			if Vector2(p.velocity.x, p.velocity.z).length() < 0.15:
 				break
 	var d := p.global_position - from
-	return {"kind": p.dash.last_kind if p.dash.count > c0 else "none", "dist": Vector2(d.x, d.z).length(), "air": air, "iframes": ifr,
+	var slide := Vector2(p.global_position.x - touch.x, p.global_position.z - touch.z).length() if touch != Vector3.INF else 99.0
+	return {"slide": slide, "miss": miss, "kind": p.dash.last_kind if p.dash.count > c0 else "none", "dist": Vector2(d.x, d.z).length(), "air": air, "iframes": ifr,
 		"push_at": pushed_at, "h": hmax, "cost": s0 - p.stamina.value, "turn": rad_to_deg(wrapf(p.yaw - y0, -PI, PI)), "t": t,
 		"fwd": -d.dot(Vector3(sin(y0), 0, cos(y0))), "side": d.dot(Vector3(cos(y0), 0, -sin(y0)))}
 
@@ -1541,6 +1551,8 @@ func _run_dashtest() -> void:
 		p.orb_yaw = PI / 2
 		await _ticks(30)
 		var r := await _dodge(p, c[1])
+		print("%-10s -> slid %.3f m after touch down, %.3f m off the traced spot" % [c[0], r.slide, r.miss])
+		ok = ok and r.slide < 0.03 and r.miss >= 0.0 and r.miss < 0.05
 		print("%-10s -> %-9s dist %.2f m (fwd %+.2f side %+.2f)  air %.2f s  peak %.2f m  iframes %.2f s (push at %.2f s)  cost %.0f  body turned %+.0f deg  done in %.2f s" % [c[0], r.kind, r.dist, r.fwd, r.side, r.air, r.h, r.iframes, r.push_at, r.cost, r.turn, r.t])
 	# out of a gallop the dart carries the run
 	p.global_position = spot + Vector3(-30, 0, 0)
