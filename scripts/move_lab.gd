@@ -248,8 +248,10 @@ func _m_sprint(surf: String) -> void:
 			t10 = tr.t[i]
 			i10 = i
 			break
-	# from a stand at mu g fading with speed: ~1.8 s on good footing, a lot longer on smooth floors
-	_row("to10_" + surf, t10, "s", 1.6 / minf(mu, 1.0), 3.2 / minf(mu, 1.0))
+	# no quicker than the footing allows (10 m/s at mu g the whole way) or than the legs manage on
+	# good ground (~1.6 s), and not a lot slower than that either
+	var fast := maxf(1.6, 10.0 / (mu * 9.8))
+	_row("to10_" + surf, t10, "s", fast, fast * 2.2)
 	if i10 >= 0:
 		keep["sprint10_" + surf] = _path(0, i10)
 		keep["tr_" + surf] = [tr.t.duplicate(), tr.p.duplicate(), tr.v.duplicate()]
