@@ -2,7 +2,7 @@ extends Node3D
 ## climbing lab: the real CatPlayer (bot driven) climbs, grabs, hauls up and tops out on a
 ## course of fixtures, and every run is checked for jank as well as for doing the thing.
 ##   godot --headless --fixed-fps 60 --path . res://climblab.tscn -- --climbtest [--only box,trunk] [--dbg pop|snap|clip|trace]
-##   godot --path . res://climblab.tscn -- --show [--fp] [--only a,b] --write-movie out/f.png --fixed-fps 30   (xvfb)
+
 ## (only uses climbing / clambering / mantling, so it runs on old builds too for before / after)
 ##
 ## free climb runs (start with the claws already in, facing the thing):
@@ -238,6 +238,7 @@ func _next() -> void:
 	if player:
 		remove_child(player)
 		player.queue_free()
+	seed(hash(r))   # same dice every time (idle life, stop picks) so a run scores the same twice
 	player = CatPlayer.new()
 	add_child(player)
 	if show:

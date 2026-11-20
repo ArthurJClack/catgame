@@ -193,7 +193,8 @@ func _on(kind: String) -> bool:
 
 func pre(dt: float) -> void:
 	var spd: float = rig.speed_s
-	var grounded: bool = rig.on_floor and rig.climb < 0.1 and rig.clamber < 0.1
+	# (carried: a climb move has the body, cat_climb.gd. no stops or idle acts till it's back on its paws)
+	var grounded: bool = rig.on_floor and rig.climb < 0.1 and rig.clamber < 0.1 and rig.carried < 0.05 and not rig.on_wall
 	var busy: bool = rig.crouch > 0.2 or rig.charge > 0.05 or rig.claw_on or rig.is_swatting() or rig.scratch > 0.05 or rig.rear > 0.05 or rig.pin > 0.05 or rig.grip > 0.05
 	var calm: bool = grounded and not busy and spd < 0.12
 	stop.tick(dt, grounded, busy)
