@@ -102,8 +102,9 @@ var auto_step := true         # glide up roots / lips underfoot (run_assist.gd).
 static var smooth_steps := true
 ## speed changes and turns are pushed through the paws that are down (see the ground accel)
 static var paw_drive := true
-const DRIVE_MAX := 6.5
+const DRIVE_MAX := 7.0
 var _drive := 1.0
+var _drive_avg := 2.0
 ## where the visible cat (rig + camera) is relative to the capsule, world space. the capsule
 ## still moves in jumps where it has to (onto a step); the cat seen on screen walks across
 var _soft_off := Vector3.ZERO
@@ -890,6 +891,7 @@ func _physics_process(dt: float) -> void:
 		var cur := hv.length()
 		# momentum: what the legs can do depends on what's asked and how fast the body already goes
 		var accel: float
+		var speeding := false
 		if wish_len <= 0.01 and not want_crouch:
 			accel = COAST_DECEL + COAST_DRAG * cur
 		elif _brake_ask or (want_crouch and cur > STALK_SPEED + 0.3) or charging:
@@ -898,6 +900,7 @@ func _physics_process(dt: float) -> void:
 			accel = GAIT_DOWN_DECEL + GAIT_DOWN_DRAG * cur
 		else:
 			accel = minf(PUSH_ACCEL, PUSH_POWER / maxf(cur, 0.5))
+			speeding = true
 		var lat_ask := TURN_ASK
 		if paw_drive and not lock_face and rig and rig.gait:
 			# the body only speeds up, slows down or turns through paws that are on the ground:
@@ -906,8 +909,17 @@ func _physics_process(dt: float) -> void:
 			var down := 0.0
 			for pi in 4:
 				down += rig.gait.push(pi)
-			_drive = lerpf(_drive, clampf(down * 0.5, 0.15, 1.0), 1.0 - exp(-14.0 * dt))
-			accel = minf(accel, DRIVE_MAX) * _drive
+			# (measured against how many paws this gait has down on average: a gallop is in the
+			# air most of the time and makes its speed in the moments it isn't, so over a
+			# stride the cat gets about the same push, in surges. it never drops under 0.6: the
+			# test course and the game's tuned run ups assume the old average)
+			_drive_avg = lerpf(_drive_avg, down, 1.0 - exp(-2.5 * dt))
+			_drive = lerpf(_drive, 0.6 + 0.4 * clampf(down / maxf(_drive_avg, 0.15), 0.0, 2.2), 1.0 - exp(-30.0 * dt))
+			# slowing down keeps its tuned rates and only pulses a little with the paws
+			if speeding:
+				accel = minf(accel, DRIVE_MAX) * _drive
+			else:
+				accel *= lerpf(1.0, _drive, 0.35)
 			lat_ask *= _drive
 		if lock_face and wish_len > 0.01:
 			accel = maxf(accel, LOCK_ACCEL)
