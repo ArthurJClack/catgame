@@ -1287,8 +1287,8 @@ func animate(dt: float) -> void:
 	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y + soma.dip
 	base_y = lerpf(base_y, BODY_H * 0.4 + (_fgy + _hgy) * 0.5, (loaf_h + loaf_f) * 0.5)
 	pivot.position.y = base_y + hz * sin(ra)
-	pivot.position.z = -sit_h * 0.035 + hz * (1.0 - cos(ra)) - clamber * (1.0 - pull_e) * 0.15 + stretch * 0.03 + _iner.z
-	pivot.rotation.x = air_pitch + sit_h * 0.62 - charge * 0.05 + gait_pitch * (1.0 - sit_h) - stretch * 0.36 - pin * 0.24 + ra + _ipitch + (loaf_h - loaf_f) * 0.22
+	pivot.position.z = -sit_h * 0.035 + hz * (1.0 - cos(ra)) - clamber * (1.0 - pull_e) * 0.15 + stretch * 0.03 + _iner.z + soma.zoff
+	pivot.rotation.x = air_pitch + sit_h * 0.62 - charge * 0.05 + gait_pitch * (1.0 - sit_h) - stretch * 0.36 - pin * 0.24 + ra + _ipitch + (loaf_h - loaf_f) * 0.22 + soma.pitch
 	pivot.position.x = _cx + _iner.x + idle_x
 	pivot.rotation.y = yaw_off
 	# lean into turns at speed
@@ -1452,7 +1452,7 @@ func animate(dt: float) -> void:
 	pivot.rotation.z -= lat * 0.11 * _hop_w * _air_w
 	var hs := clampf(spd / 2.5, 0.0, 1.0)
 	var lp := to_local(ledge_world) if clamber > 0.0 else Vector3.ZERO
-	var claws := maxf(maxf(maxf(scramble, slip_claws), scratch), maxf(maxf(climb, clamber), slide))
+	var claws := maxf(maxf(maxf(scramble, maxf(slip_claws, soma.stop.claws)), scratch), maxf(maxf(climb, clamber), slide))
 	claws = maxf(claws, maxf(pin, _air_w * hs * clampf(rise + 0.8, 0.0, 1.0)))
 	claws_out = LowPoly.damp(claws_out, claws, 14.0, dt)
 	var land_l := rinv * land_point
@@ -2409,8 +2409,8 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 		var fi := float(i) / TAIL_N
 		if i >= TAIL_N - 4:
 			curl += 0.42 * qm
-		var a := _tail_p[0] + _tail_p[1] * i + curl + _tp[i]
-		var y := _tail_p[4] * i + sin(_t * _tail_p[3] * TAU - i * 0.55) * _tail_p[2] * lash * (0.3 + fi) + _ty[i]
+		var a := _tail_p[0] + _tail_p[1] * i + curl + _tp[i] + soma.stop.tail_p * (0.4 + 0.6 * fi)
+		var y := soma.stop.tail_y * fi + _tail_p[4] * i + sin(_t * _tail_p[3] * TAU - i * 0.55) * _tail_p[2] * lash * (0.3 + fi) + _ty[i]
 		var dir := pb * Vector3(sin(y) * cos(a), sin(a), cos(y) * cos(a))
 		var np := p + dir * TAIL_SEG
 		# the tail lies on the floor, it does not go through it
