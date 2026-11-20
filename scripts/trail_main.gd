@@ -240,7 +240,7 @@ func _physics_process(dt: float) -> void:
 		if run_test:
 			print("[trail] step up #%d %s at s=%.1f (%s)" % [steps, player.last_event, s, TrailLevel.section(s)])
 	_was_mantle = player.mantling
-	if not fl and _was_floor and player.velocity.y > 0.5 and not player.mantling:
+	if not fl and _was_floor and player.velocity.y > 0.5 and not player.climber.active():
 		jumps += 1
 		if run_test:
 			print("[trail] jump #%d at s=%.1f (%s) vy %.2f" % [jumps, s, TrailLevel.section(s), player.velocity.y])

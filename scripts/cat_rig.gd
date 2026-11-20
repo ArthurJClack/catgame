@@ -47,6 +47,13 @@ var slide_fx := CatSlide.new()
 var slide_out := false   # the slide is over and blending out: the paws go back to the ground early
 var clamber := 0.0       # hanging off a ledge by the forepaws
 var clamber_pull := 0.0  # 0..1 progress of hauling up over it
+var _cgv := [0.0, 0.0]   # girdle spring speeds while carried
+var _carry_on := false
+var on_wall := false     # on a wall / hanging / carried over an edge: the ground under the paws means
+                         # nothing to the girdles (and the capsule rising isn't a bump to soak up)
+var carried := 0.0       # >0: the climb (cat_climb.gd) is carrying the body over an edge / on a wall, and
+                         # a little after: the girdles follow the paws, no leg spring physics (it would
+                         # drop the body while every paw is off the ground, then fling it back up)
 var ledge_world := Vector3.ZERO # top of the ledge edge (world)
 var stretch := 0.0       # big front stretch, butt up
 var groom := 0.0         # sitting, licking a paw + face wipes
@@ -959,7 +966,8 @@ func animate(dt: float) -> void:
 			_land_v += _abs_imp * ((0.03 if inertia_on else 0.17) if phys else 0.42)
 	_launch = move_toward(_launch, 0.0, dt * 5.5)
 	var air_target := 1.0 if _air_timer > 0.03 else 0.0
-	_air_w = move_toward(_air_w, air_target, dt * (9.0 if air_target > _air_w else (8.0 if soft_pose and inertia_on else 14.0)))
+	# (catching a wall / an edge out of the air: the air pose eases out while it turns onto it)
+	_air_w = move_toward(_air_w, air_target, dt * (9.0 if air_target > _air_w else (8.0 if soft_pose and inertia_on else (5.0 if carried > 0.5 else 14.0))))
 	# _land_f / _land: how far (m) the chest / hips have sunk into the landing
 	_land_v += (-_land * 190.0 - _land_v * 19.0) * dt
 	_land += _land_v * dt
@@ -1111,7 +1119,7 @@ func animate(dt: float) -> void:
 		# (the part of the root's motion that is the body's own bounce, `inertia_y`, is real
 		# motion of the body: only steps of the capsule are taken out)
 		var ry := gx.origin.y - inertia_y
-		if not is_nan(_root_y_prev) and on_floor and _prev_floor_g and nc > 0.5 and slide < 0.02 and absf(ry - _root_y_prev) < 0.3:
+		if not is_nan(_root_y_prev) and on_floor and _prev_floor_g and nc > 0.5 and slide < 0.02 and not on_wall and absf(ry - _root_y_prev) < 0.3:
 			_fgy -= ry - _root_y_prev
 			_hgy -= ry - _root_y_prev
 			# the head's own "where I was" is kept in rig space too
@@ -1188,7 +1196,10 @@ func animate(dt: float) -> void:
 	var rvy := droot / dt if dt > 0.0 else 0.0
 	if absf(rvy) > 12.0:
 		rvy = 0.0   # moved by hand (a respawn, a test): not a speed the body has
-	if phys and use_planting and plantw > 0.5 and on_floor:
+	if phys and use_planting and plantw > 0.5 and on_floor and carried < 0.02:
+		if _carry_on:
+			_carry_on = false
+			_gv = [float(_cgv[0]), float(_cgv[1])]
 		if not _gv_rel:
 			# coming out of the air: from here the speeds are relative to the root again
 			_gv_rel = true
@@ -1198,7 +1209,11 @@ func animate(dt: float) -> void:
 			ys[h] = _girdle_phys(h, float(ys[h]), float(gy[h]), fl, homes, glo, ghi, dt)
 		_fgy = ys[0]
 		_hgy = ys[1]
-	elif phys and use_planting and climb < 0.3 and clamber < 0.3:
+	elif phys and use_planting and climb < 0.3 and clamber < 0.3 and carried < 0.02:
+		if _carry_on:
+			_carry_on = false
+			_gv = [float(_cgv[0]), float(_cgv[1])]
+			_gv_rel = true
 		# off the ground (or just touching down): the body still has its own speed. a jump
 		# starts with the legs shoving it after the take off over a few hundredths of a
 		# second (no harder than they can push), in the air it settles over its legs, and
@@ -1237,9 +1252,31 @@ func animate(dt: float) -> void:
 			ys2[h] = y
 		_fgy = ys2[0]
 		_hgy = ys2[1]
+	elif carried > 0.0 and phys:
+		# carried by the climb: each end follows its paws on a spring (paws planting at the end
+		# of a top out move the target in a step; an ease would jump to full speed after it)
+		if not _carry_on:
+			# picks up the speed each end already had on its legs relative to the root
+			_carry_on = true
+			# (out of the air the ends ride the root: no relative speed to carry over)
+			_cgv = [float(_gv[0]), float(_gv[1])] if _gv_rel else [0.0, 0.0]
+		_gv_rel = true
+		var tg := [0.0, 0.0]
+		if not on_wall:
+			tg = [clampf(float(gy[0]) + glead, glo, ghi) * plantw, clampf(float(gy[1]) + glead, glo, ghi) * plantw]
+		var cy := [_fgy, _hgy]
+		for h in 2:
+			var a: float = grate * grate * (float(tg[h]) - float(cy[h])) - 2.0 * grate * float(_cgv[h])
+			_cgv[h] = float(_cgv[h]) + a * dt
+			cy[h] = float(cy[h]) + float(_cgv[h]) * dt
+		_fgy = cy[0]
+		_hgy = cy[1]
+		_gv = [0.0, 0.0]
 	else:
 		_gv = [0.0, 0.0]
 		_gv_rel = true
+		_cgv = [0.0, 0.0]
+		_carry_on = false
 		_fgy = LowPoly.damp(_fgy, clampf(float(gy[0]) + glead, glo, ghi) * plantw, grate, dt)
 		_hgy = LowPoly.damp(_hgy, clampf(float(gy[1]) + glead, glo, ghi) * plantw, grate, dt)
 	_phys_ry = gx.origin.y
