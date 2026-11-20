@@ -193,11 +193,7 @@ var wall_normal := Vector3.ZERO
 var wall_collider: Object
 var wall_time := 10.0
 var last_kick_normal := Vector3.ZERO
-var mantling := false
-var mantle_t := 0.0
-var mantle_from := Vector3.ZERO
-var mantle_to := Vector3.ZERO
-var mantle_quick := 0.0     # >0: quick step hop, exit at this speed
+var mantle_quick := 0.0     # >0: quick step up (curb, low box), exits at this speed
 var land_dip := 0.0
 var _eye_bob := 0.0
 var land_dip_v := 0.0
@@ -248,15 +244,43 @@ var _dodge_land_t := 9.0      # time since a dodge touched down (rig landing pos
 var pounce_yaw := 0.0          # the body faces the flight the whole way (paw spots are laid out on it)
 var pounce_prey: Node = null   # what it's pouncing on: no collision with it till the paws are down
 var _spots_t := 0.0            # paw spots stay put this long after touch down (pin pose + gait)
-var clambering := false
-var clamber_phase := 0        # 0 grab, 1 hang, 2 pull
-var clamber_t := 0.0
-var clamber_from := Vector3.ZERO
-var clamber_hang := Vector3.ZERO
-var clamber_top := Vector3.ZERO
+# everything on the side of things (free climb, hanging off an edge, grab / haul / top out /
+# low ledge hop / curb step up / round a lip / push off) is cat_climb.gd. these flags are
+# read only views of it (the rig, paws, sounds, tests read them); setting one false resets it
+var climber: CatClimb
+var climbing: bool:
+	get: return climber != null and climber.is_climbing()
+	set(v):
+		if climber == null:
+			return
+		if v and not climber.is_climbing():
+			climber.cling(climb_n if climb_n != Vector3.ZERO else global_transform.basis.z)
+		elif not v and climber.is_climbing():
+			climber.reset()
+var clambering: bool:
+	get: return climber != null and climber.is_clambering()
+	set(v):
+		if not v and climber != null and climber.is_clambering():
+			climber.reset()
+var mantling: bool:
+	get: return climber != null and climber.is_mantling()
+	set(v):
+		if not v and climber != null and climber.is_mantling():
+			climber.reset()
+var clamber_phase: int:       # 0 grab, 1 hang, 2 pull
+	get:
+		if climber == null or climber.mode == CatClimb.HANG:
+			return 1
+		return 0 if climber.kind == "grab" else 2
+var clamber_t: float:         # hang: time hanging. pull: 0..0.55 progress of the haul
+	get:
+		if climber == null:
+			return 0.0
+		return climber.hang_t if climber.mode == CatClimb.HANG else climber.progress() * 0.55
+var clamber_climb: bool:      # this clamber started from a climb: w hauls up, not camera fwd
+	get: return climber != null and climber.from_climb
 var ledge_point := Vector3.ZERO
 var ledge_n := Vector3.ZERO
-var climbing := false
 var climb_n := Vector3.ZERO
 var climb_cool := 0.0
 var climb_face := Vector3.FORWARD   # smoothed climb_n the rig turns with (corners don't pop)
@@ -266,7 +290,6 @@ var climb_lunge_t := 0.0
 var climb_lunge_dir := Vector3.UP
 var climb_wrap_t := 0.0             # pause after swinging round an edge (thin posts don't spin)
 var climb_mv := Vector2.ZERO        # raw move input while on a wall (up = up, whatever the camera)
-var clamber_climb := false          # this clamber started from a climb: w hauls up, not camera fwd
 var scratching := false
 var scratch_n := Vector3.ZERO
 var scratch_t := 0.0
@@ -276,6 +299,8 @@ var w_face := 0.0
 var w_climb := 0.0
 var _w_climb_v := 0.0
 var _w_clamber_v := 0.0
+var _w_climb_m := 0.0     # (the blends go through a smoothing stage first, then the spring: the
+var _w_clamber_m := 0.0   #  body starts turning onto / off a wall without a kick)
 var _w_slide_v := 0.0
 var w_clamber := 0.0
 var w_scratch := 0.0
@@ -383,6 +408,7 @@ var _marks: Array[Node3D] = []
 
 
 func _ready() -> void:
+	climber = CatClimb.new(self)
 	# debugging: CAT_OFF=soft_air,wall_brake turns named biomechanics switches off in any scene / test
 	if OS.has_environment("CAT_OFF"):
 		for nm in OS.get_environment("CAT_OFF").split(","):
@@ -865,22 +891,13 @@ func _physics_process(dt: float) -> void:
 	var wish_len := minf(wish.length(), 1.0)
 	var wish_dir := wish.normalized() if wish.length() > 0.01 else Vector3.ZERO
 
-	if mantling or clambering or climbing or scratching:
+	if climber.active() or scratching:
 		dash.cancel()
 	if climbing and wish_dir.length() > 0.0:
 		stamina.drain(CatStamina.CLIMB, dt)
-	if climbing or clambering:
+	if climber.active():
 		climb_mv = mv
-	if mantling:
-		_mantle_step(dt)
-		_post(dt, inp)
-		return
-	if clambering:
-		_clamber_step(dt, wish_dir, jump_pressed, want_crouch)
-		_post(dt, inp)
-		return
-	if climbing:
-		_climb_step(dt, mv, wish_dir, jump_pressed, want_crouch)
+		climber.step(dt, mv, wish_dir, jump_pressed, want_crouch)
 		_post(dt, inp)
 		return
 	if scratching:
@@ -1197,20 +1214,20 @@ func _physics_process(dt: float) -> void:
 			leap_lock = false
 			# rough surface: sink the claws in and climb. otherwise go for the ledge
 			if _is_climbable(wall_collider) and climb_cool <= 0.0 and stamina.can_run() and wish_dir.dot(into) > 0.4 and not is_on_floor():
-				_start_climb(wall_normal)
+				climber.cling(wall_normal)
 			else:
-				_try_ledge(into)
+				climber.try_ledge(into)
 		elif pushing and is_on_floor() and _is_climbable(wall_collider) and jump_pressed and climb_cool <= 0.0 and stamina.can_run():
-			_start_climb(wall_normal)
+			climber.cling(wall_normal)
 
 	# small stuff up to chest height (curbs, steps, rocks, logs): walking into it the cat just steps
 	# up onto it, forepaws first then the hind legs, no leap. anything taller needs a jump
 	if is_on_floor() and not (mantling or clambering or climbing or want_crouch or charging):
 		var bump := _bump_dir()
 		if bump != Vector3.ZERO and wish_dir.dot(bump) > 0.4:
-			var li := _ledge_info(bump, global_position, STEP_MOUNT)
-			if not li.is_empty() and _try_ledge(bump):
-				mantle_quick = maxf(1.5, maxf(hv.length(), wish_len * TROT_SPEED))
+			velocity = Vector3(hv.x, 0.0, hv.z).normalized() * maxf(hv.length(), wish_len * TROT_SPEED) if hv.length() > 0.05 else bump * wish_len * TROT_SPEED
+			if not climber.try_ledge(bump, true):
+				velocity = Vector3(hv.x, velocity.y, hv.z)
 
 	# fell out of the world somehow: respawn
 	if global_position.y < -5.0:
@@ -1236,9 +1253,13 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	if soft_air:
 		# (the body turns onto / off the wall like a mass: it starts turning from rest and
 		# stops without a jerk, where a plain ease starts at full speed)
-		_w_climb_v += (17.0 * 17.0 * ((1.0 if climbing else 0.0) - w_climb) - 34.0 * _w_climb_v) * dt
+		# (a top out from a climb tells it how far round the body is: it tips over the edge
+		# with the haul, see CatClimb.climb_pose)
+		_w_climb_m = LowPoly.damp(_w_climb_m, climber.climb_pose(), 22.0, dt)
+		_w_climb_v += (17.0 * 17.0 * (_w_climb_m - w_climb) - 34.0 * _w_climb_v) * dt
 		w_climb = clampf(w_climb + _w_climb_v * dt, 0.0, 1.0)
-		_w_clamber_v += (22.0 * 22.0 * ((1.0 if clambering else 0.0) - w_clamber) - 44.0 * _w_clamber_v) * dt
+		_w_clamber_m = LowPoly.damp(_w_clamber_m, 1.0 if clambering else 0.0, 26.0, dt)
+		_w_clamber_v += (22.0 * 22.0 * (_w_clamber_m - w_clamber) - 44.0 * _w_clamber_v) * dt
 		w_clamber = clampf(w_clamber + _w_clamber_v * dt, 0.0, 1.0)
 	else:
 		w_climb = LowPoly.damp(w_climb, 1.0 if climbing else 0.0, 12.0, dt)
@@ -1287,7 +1308,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	cam.fov = LowPoly.damp(cam.fov, fov_base + clampf((hspd - 3.0) * 1.4, 0.0, 14.0), 5.0, dt)
 
 	rig.drive_velocity = velocity
-	rig.on_floor = is_on_floor() or mantling or clambering or climbing or scratching
+	rig.on_floor = (is_on_floor() and not climber.active()) or climber.rig_grounded() or scratching
 	var crouch_t := maxf(maxf(crouch_amt * (1.0 - charge), dash.gather * 0.85), combat.gather_w())
 	# (legs open out of a gather over a few hundredths of a second, they don't switch)
 	# dodge: the rig's own air pose per kind (stretched dart, arched side spring, rearing backstep)
@@ -1338,6 +1359,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	if stamina and stamina.winded:
 		rig.soma.exertion = maxf(rig.soma.exertion, 0.9)   # ran the bar dry: the cat is visibly blown
 	rig.climb = w_climb
+	rig.carried = 1.0 if climber.active() else move_toward(rig.carried, 0.0, dt * 2.0)
+	rig.on_wall = climber.active() and climber.kind != "step"
 	rig.kick_paw_w = clampf(w_kick * 1.6 - 0.25, 0.0, 1.0)
 	rig.kick_w = w_kick
 	rig.clamber = w_clamber
@@ -2001,7 +2024,7 @@ func _is_climbable(o: Object) -> bool:
 	var nd := o as Node
 	if nd.is_in_group("climbable"):
 		return true
-	return not FreeClimb.off and nd.has_meta("surface") and CLIMB_SURFACES.has(str(nd.get_meta("surface")))
+	return nd.has_meta("surface") and CLIMB_SURFACES.has(str(nd.get_meta("surface")))
 
 
 func _ray(from: Vector3, to: Vector3) -> Dictionary:
@@ -2148,119 +2171,6 @@ func _ledge_info(into: Vector3, feet: Vector3, max_h: float) -> Dictionary:
 	return {"top": hit.position, "edge": edge, "h": ledge}
 
 
-func _try_ledge(into: Vector3) -> bool:
-	if climb_cool > 0.0:
-		return false
-	var li := _ledge_info(into, global_position, CLAMBER_MAX)
-	if li.is_empty():
-		return false
-	var h: float = li.h
-	var top: Vector3 = li.top
-	var edge: Vector3 = li.edge
-	var onto := Vector3(edge.x, top.y + 0.02, edge.z) + into * (RADIUS + 0.07)
-	if not _fits(onto):
-		return false
-	if h <= MANTLE_MAX:
-		# low: hook a paw over and hop straight up
-		mantling = true
-		mantle_t = 0.0
-		clamber_climb = climbing
-		mantle_from = global_position
-		mantle_to = onto
-		paws.mantle()
-		_event("mantle %.2fm" % h)
-		return true
-	_start_clamber(edge, -into, onto)
-	return true
-
-
-func _try_lip(into: Vector3) -> bool:
-	var feet := global_position
-	var from := feet + Vector3.UP * 0.75 + into * (RADIUS + 0.06)
-	if _point_blocked(from):
-		return false
-	var hit := _ray(from, from + Vector3.DOWN * 0.7)
-	if hit.is_empty() or hit.normal.y < 0.7:
-		return false
-	var top: Vector3 = hit.position
-	# find the outer edge of the overhang by looking back in from outside
-	var n := -into
-	var y := top.y - 0.015
-	var outer := _ray(Vector3(feet.x, y, feet.z) + n * 0.5, Vector3(feet.x, y, feet.z) - n * 0.05)
-	if outer.is_empty():
-		return false
-	var edge := Vector3(outer.position.x, top.y, outer.position.z)
-	var onto := Vector3(edge.x, top.y + 0.02, edge.z) + into * (RADIUS + 0.06)
-	if not _fits(onto):
-		onto = Vector3(top.x, top.y + 0.02, top.z)
-		if not _fits(onto):
-			return false
-	_start_clamber(edge, n, onto)
-	return true
-
-
-func _start_clamber(edge: Vector3, n: Vector3, onto: Vector3) -> void:
-	clambering = true
-	clamber_climb = climbing
-	clamber_phase = 0
-	clamber_t = 0.0
-	clamber_from = global_position
-	ledge_point = edge
-	ledge_n = n
-	clamber_hang = Vector3(edge.x, edge.y - HANG, edge.z) + n * (RADIUS + 0.012)
-	clamber_top = onto
-	velocity = Vector3.ZERO
-	pounce_air = false
-	leap_lock = false
-	stamina.spend(CatStamina.CLAMBER)
-	_event("grab (%.2fm)" % (edge.y - global_position.y))
-
-
-func _clamber_step(dt: float, wish_dir: Vector3, jump_pressed: bool, want_crouch: bool) -> void:
-	clamber_t += dt
-	velocity = Vector3.ZERO
-	match clamber_phase:
-		0:
-			# snap onto the edge: forepaws hook, body swings in against the wall
-			var u := clampf(clamber_t / 0.1, 0.0, 1.0)
-			global_position = clamber_from.lerp(clamber_hang, 1.0 - (1.0 - u) * (1.0 - u))
-			if u >= 1.0:
-				clamber_phase = 1
-				clamber_t = 0.0
-				land_dip_v -= 0.35
-		1:
-			global_position = clamber_hang
-			var into := -ledge_n
-			if clamber_climb:
-				# came off a climb: the camera can be anywhere round a trunk, w / s mean up / down
-				wish_dir = into * climb_mv.y
-			if want_crouch or wish_dir.dot(ledge_n) > 0.5:
-				clambering = false
-				velocity = ledge_n * 0.8 + Vector3.DOWN * 0.3
-				climb_cool = 0.4
-				_event("let go")
-			elif clamber_t > 0.14 and (wish_dir.dot(into) > 0.3 or jump_pressed):
-				clamber_phase = 2
-				clamber_t = 0.0
-				paws.mantle()
-				_event("haul up")
-		2:
-			# up first (hind paws scrabbling), then forward onto the top
-			var u := clampf(clamber_t / 0.55, 0.0, 1.0)
-			var up_t := smoothstep(0.0, 0.7, u)
-			var fw_t := smoothstep(0.5, 1.0, u)
-			var p := clamber_hang
-			p.y = lerpf(clamber_hang.y, clamber_top.y, 1.0 - pow(1.0 - up_t, 2.0))
-			p.x = lerpf(clamber_hang.x, clamber_top.x, fw_t)
-			p.z = lerpf(clamber_hang.z, clamber_top.z, fw_t)
-			global_position = p
-			if u >= 1.0:
-				clambering = false
-				velocity = -ledge_n * 0.4
-				climb_cool = 0.4
-				_event("up")
-
-
 func _point_blocked(p: Vector3) -> bool:
 	var q := PhysicsPointQueryParameters3D.new()
 	q.position = p
@@ -2279,89 +2189,11 @@ func _fits(feet: Vector3) -> bool:
 	return get_world_3d().direct_space_state.intersect_shape(params, 1).is_empty()
 
 
-func _mantle_step(dt: float) -> void:
-	# a step up is quicker the faster the cat comes in, so a run doesn't stall on a curb
-	mantle_t += dt / (clampf(0.42 / mantle_quick, 0.08, 0.14) if mantle_quick > 0.0 else 0.22)
-	var t := minf(mantle_t, 1.0)
-	var up_t := clampf(t / 0.65, 0.0, 1.0)
-	var fw_t := clampf((t - 0.35) / 0.65, 0.0, 1.0)
-	var p := mantle_from
-	p.y = lerpf(mantle_from.y, mantle_to.y, 1.0 - pow(1.0 - up_t, 2.0))
-	p.x = lerpf(mantle_from.x, mantle_to.x, fw_t)
-	p.z = lerpf(mantle_from.z, mantle_to.z, fw_t)
-	global_position = p
-	velocity = Vector3.ZERO
-	if t >= 1.0:
-		mantling = false
-		var fwd := -global_transform.basis.z
-		velocity = fwd * maxf(1.2, mantle_quick)   # keeps the pace it came in at
-		if clamber_climb:
-			velocity = Vector3.ZERO   # topped out a climb: stand on it, don't run off a thin top
-		mantle_quick = 0.0
-
-
 # ------------------------------------------------------------------ climbing
 
+## claws into a grippable surface with normal n (see cat_climb.gd)
 func _start_climb(n: Vector3) -> void:
-	climbing = true
-	climb_n = n
-	velocity = Vector3.ZERO
-	leap_lock = false
-	pounce_air = false
-	charging = false
-	FreeClimb.start(self, n)
-	_event("claws in, climbing")
-
-
-func _climb_step(dt: float, mv: Vector2, wish_dir: Vector3, jump_pressed: bool, want_crouch: bool) -> void:
-	if not FreeClimb.off:
-		FreeClimb.step(self, dt, mv, wish_dir, jump_pressed, want_crouch)
-		return
-	var into := -climb_n
-	var c := global_position + Vector3.UP * 0.12
-	var hit := _ray(c, c + into * (RADIUS + 0.2))
-	if hit.is_empty() or not _is_climbable(hit.collider):
-		# ran out of wall: haul over the top if there is one, else push off it
-		climbing = false
-		climb_cool = 0.3
-		if not _try_ledge(into):
-			velocity = Vector3.UP * 1.6 + into * 0.8
-		return
-	climb_n = Vector3(hit.normal.x, 0, hit.normal.z).normalized()
-	if jump_pressed:
-		# kick off the wall, backwards and up (aim with the mouse)
-		climbing = false
-		climb_cool = 0.35
-		var away := climb_n * KICK_OUT + Vector3.UP * KICK_UP * 0.8 + wish_dir * 0.8
-		velocity = away
-		jumped_this_air = true
-		kicks_left = maxi(kicks_left - 1, 0)
-		_event("leap off")
-		return
-	if want_crouch:
-		climbing = false
-		climb_cool = 0.4
-		velocity = climb_n * 0.6
-		_event("let go")
-		return
-	# W climbs up (in bursts, like the real thing), S backs down slowly, A/D shuffle sideways
-	var along := global_transform.basis.x
-	along = (along - climb_n * along.dot(climb_n)).normalized()
-	var burst := 0.55 + 0.45 * maxf(0.0, sin(rig.phase * TAU + 0.6))
-	var up_v := (CLIMB_SPEED * burst if mv.y > 0.0 else 0.45) * mv.y
-	velocity = Vector3.UP * up_v + along * mv.x * 0.45
-	# hug the surface
-	var dist: float = (hit.position - c).length()
-	velocity += into * clampf((dist - (RADIUS + 0.01)) * 12.0, -1.0, 1.0)
-	move_and_slide()
-	if is_on_floor() and mv.y < 0.0:
-		climbing = false
-		climb_cool = 0.4
-		_event("down")
-	if is_on_ceiling() and mv.y > 0.0:
-		# bumped into an overhang (a perch / platform): reach around the lip and haul up
-		if _try_lip(into):
-			climbing = false
+	climber.cling(n)
 
 
 # ------------------------------------------------------------------ scratching

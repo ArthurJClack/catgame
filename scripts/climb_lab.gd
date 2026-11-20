@@ -42,6 +42,7 @@ const STOP_OK := ["ceiling", "side", "box", "inside"]   # runs where standing st
 var player: CatPlayer
 var cam: Camera3D
 var show := false
+var fp := false
 var dbg := ""
 var runs: Array = []
 var ri := -1
@@ -87,11 +88,7 @@ func _ready() -> void:
 		if only.is_empty() or r in only:
 			runs.append(r)
 	_build()
-	player = CatPlayer.new()
-	add_child(player)
-	var fp := "--fp" in args
-	if show:
-		player.set_third_person(not fp)
+	fp = "--fp" in args
 	if show and not fp:
 		cam = Camera3D.new()
 		cam.fov = 45.0
@@ -237,12 +234,22 @@ func _next() -> void:
 		get_tree().quit()
 		return
 	var r: String = runs[ri]
+	# a fresh cat every run (nothing carried over from the last one)
+	if player:
+		remove_child(player)
+		player.queue_free()
+	player = CatPlayer.new()
+	add_child(player)
+	if show:
+		player.set_third_person(not fp)
+		if cam:
+			cam.make_current()
 	t = 0.0
 	_prev = {}
 	_ph = {}
 	m = {"turn": 0.0, "prev_n": Vector3.ZERO, "max_y": 0.0, "min_y": 99.0, "off_t": -1.0, "on_t": -1.0, "lunge": false, "dist_err": 0.0, "end_climb": false,
 		"pop": 0, "pop_max": 0.0, "pop_what": "", "snap": 0, "snap_max": 0.0, "clip": 0, "clip_max": 0.0, "clip_what": "", "stuck": 0, "stuck_what": "",
-		"still_t": 0.0, "still_from": Vector3.INF, "move_t": 0.0, "grab_t": 9.0, "grab_v": 0.0, "regrab": false, "was_wall": false, "ev": [], "speed_after": 0.0, "vmax": 0.0}
+		"kick_t": 9.0, "hop_t": 9.0, "still_t": 0.0, "still_from": Vector3.INF, "move_t": 0.0, "grab_t": 9.0, "grab_v": 0.0, "regrab": false, "was_wall": false, "ev": [], "speed_after": 0.0, "vmax": 0.0}
 	player.bot = {"move": Vector2.ZERO, "yaw": 0.0, "pitch": -0.1}
 	player.climb_cool = 0.0
 	player.mantling = false
@@ -397,6 +404,12 @@ func _physics_process(dt: float) -> void:
 		m.grab_t = 0.0
 		m.grab_v = _ph.get("v", Vector3.ZERO).length()
 	m.grab_t += dt
+	m.kick_t += dt
+	m.hop_t += dt
+	if player.last_event == "hop" and player.last_event_t <= dt * 1.5:
+		m.hop_t = 0.0
+	if player.last_event == "leap off" and player.last_event_t <= dt * 1.5:
+		m.kick_t = 0.0
 	m.was_wall = on
 	if not on and player.is_on_floor() and player.global_position.y > 0.1:
 		m.speed_after = maxf(m.speed_after, Vector2(player.velocity.x, player.velocity.z).length())
@@ -505,7 +518,7 @@ func _process(dt: float) -> void:
 				if dbg == "clip":
 					print("  clip %s t=%.2f" % [pn, t])
 				break
-	if not _prev.is_empty() and _prev.has("dt") and t > 0.1:
+	if not _prev.is_empty() and _prev.has("dt") and t > 0.25:   # (the lab sets the cat straight onto the wall)
 		for key in PARTS:
 			var v: Vector3 = ((cur[key] as Vector3) - (_prev[key] as Vector3)) / dt
 			cur["v" + key] = v
@@ -515,8 +528,14 @@ func _process(dt: float) -> void:
 				# grabbing on out of a jump: the forelegs soak up the incoming speed over ~12 cm
 				if m.grab_t < 0.25:
 					lim = maxf(lim, m.grab_v * m.grab_v / (2.0 * 0.12) / 60.0 * 1.3)
+				# the jump onto the wall leaving the floor is a take off: the gait's business (biolab)
+				if m.on_t < 0.0 and m.hop_t < 0.15:
+					lim = maxf(lim, 4.0)
+				# kicking off: the hind legs shove the body away (a take off, like a jump's)
+				if m.kick_t < 0.3:
+					lim = maxf(lim, 2.4)
 				# landing on the floor after letting go / kicking off is the gait's business (biolab)
-				if player.is_on_floor() and not _on_wall() and m.off_t >= 0.0 and t - m.off_t < 0.6:
+				if player.is_on_floor() and not _on_wall() and m.off_t >= 0.0 and t - m.off_t < 1.2:
 					lim = maxf(lim, 4.0)
 				if dv > lim:
 					m.pop += 1
@@ -525,6 +544,11 @@ func _process(dt: float) -> void:
 						m.pop_what = "%s %.1f m/s @%.2fs %s" % [key, dv, t, player.last_event]
 					if dbg == "pop":
 						print("  pop %s dv=%.1f lim=%.1f t=%.2f climb %s clamb %s mant %s floor %s ev %s" % [key, dv, lim, t, player.climbing, player.clambering, player.mantling, player.is_on_floor(), player.last_event])
+	if dbg == "rig2":
+		print("  t=%.3f fgy %.3f hgy %.3f landf %.3f land %.3f piv %s pivrot %s chest %s pelv %s air %.2f cl %.2f iner %s" % [t, rig._fgy, rig._hgy, rig._land_f, rig._land, rig.pivot.position.snapped(Vector3.ONE * 0.001), rig.pivot.rotation.snapped(Vector3.ONE * 0.01), rig.chest.position.snapped(Vector3.ONE * 0.001), rig.pelvis.position.snapped(Vector3.ONE * 0.001), rig._air_w, rig.climb, str(rig._iner) if "_iner" in rig else ""])
+	if dbg == "rig":
+		var rg := rig.global_position
+		print("  t=%.3f cap %s root %s chest-root %s pelv-root %s clamber %.2f pull %.2f climb %.2f onfl %s air %.2f lift %.3f soft %s ev %s" % [t, player.global_position.snapped(Vector3.ONE * 0.001), rg.snapped(Vector3.ONE * 0.001), (rig.chest.global_position - rg).snapped(Vector3.ONE * 0.001), (rig.pelvis.global_position - rg).snapped(Vector3.ONE * 0.001), rig.clamber, rig.clamber_pull, rig.climb, rig.on_floor, rig._air_w, player._lift, player._soft_off.snapped(Vector3.ONE * 0.001), player.last_event])
 	cur["dt"] = dt
 	_prev = cur
 
