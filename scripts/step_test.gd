@@ -101,7 +101,9 @@ func _physics_process(dt: float) -> void:
 	t += dt
 	if t < 0.05:
 		return
-	peak_vy = maxf(peak_vy, player.velocity.y)
+	if not player.mantling:
+		# (the step up move itself rises at the speed it lifts the body: that's a mount, not a launch)
+		peak_vy = maxf(peak_vy, player.velocity.y)
 	if player.mantling and not _was_m:
 		mounts += 1
 	_was_m = player.mantling

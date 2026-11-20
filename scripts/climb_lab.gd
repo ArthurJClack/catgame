@@ -290,7 +290,8 @@ func _next() -> void:
 	player.bot["yaw"] = player.yaw
 	m.prev_n = player.climb_n
 	if caption:
-		caption.text = {"box": "round a square trunk", "trunk": "round a tree trunk", "inside": "into an inside corner", "post": "round a thin post, onto the top",
+		var tag := OS.get_environment("CL_TAG")
+		caption.text = (tag + "  -  " if tag != "" else "") + {"box": "round a square trunk", "trunk": "round a tree trunk", "inside": "into an inside corner", "post": "round a thin post, onto the top",
 			"run_up": "jump on, climb, top out", "grab": "grab a ledge, haul up", "lip": "round an overhanging shelf", "ceiling": "top with no headroom",
 			"corner": "over the top corner", "mantle": "onto a low box at a trot"}.get(r, r)
 
