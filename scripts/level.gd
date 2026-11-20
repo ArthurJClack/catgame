@@ -367,11 +367,11 @@ static func _planks(lv: Node3D) -> void:
 			if x1 - x0 > 0.05:
 				var tone := rng.randf_range(-0.07, 0.07)
 				var c := Color(C_FLOOR.r + tone, C_FLOOR.g + tone * 0.8, C_FLOOR.b + tone * 0.6)
-				box(lv, Vector3((x0 + x1) * 0.5, -0.004, z + w * 0.5), Vector3(x1 - x0 - 0.006, 0.008, w - 0.006), c, false)
+				box(lv, Vector3((x0 + x1) * 0.5, -0.0025, z + w * 0.5), Vector3(x1 - x0 - 0.006, 0.008, w - 0.006), c, false)
 			x += l
 		z += w
 	# dark gaps between planks
-	box(lv, Vector3(0, -0.009, 0), Vector3(10.4, 0.004, 8.4), C_FLOOR.darkened(0.45), false)
+	box(lv, Vector3(0, -0.0075, 0), Vector3(10.4, 0.004, 8.4), C_FLOOR.darkened(0.45), false)
 
 
 static func plant(parent: Node3D, pos: Vector3, h: float) -> void:
