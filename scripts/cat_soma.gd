@@ -28,6 +28,8 @@ var auto_sit := 0.0
 var auto_groom := 0.0
 var auto_loaf := 0.0
 var auto_stretch := 0.0
+var pitch := 0.0      # body pitch (rad, + = nose up): how it stops (cat_stop.gd)
+var zoff := 0.0       # body fore / aft (m)
 var rise_rate := 1.8  # how fast the cat gets up out of a sit (it scrambles up if told to move)
 
 # ---- state other things may read ----
@@ -35,6 +37,8 @@ var exertion := 0.0   # 0 rested .. 1 blown
 var startle := 0.0    # 0..1, fades over a few seconds
 var wet: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var act_name := ""    # the timed act that is playing ("" = none)
+## how it comes to a stop: a different stop every time (skid, paw lift, look round, ...)
+var stop := CatStop.new()
 var breath_hz := 0.42
 
 var _act_t := 0.0
@@ -93,6 +97,7 @@ const ACT_DUR := {"sniff": 1.5, "tilt": 1.4, "yawn": 2.1, "shake": 1.05, "blink"
 
 func setup(r: CatRig) -> void:
 	rig = r
+	stop.setup(self)
 	var gi: float = rig.S_.girth
 	var ln: float = rig.S_.len
 	# the primordial pouch: the loose flap of belly skin in front of the hind legs
@@ -125,6 +130,12 @@ func act(kind: String, arg := 0.0) -> void:
 		return
 	rig._log(["a", kind, arg])
 	match kind:
+		"stop":
+			stop.begin(arg)
+			return
+		"brake":
+			stop.begin_brake(arg)
+			return
 		"sit":
 			_rest = true
 			_rest_t = 0.0
@@ -185,6 +196,7 @@ func pre(dt: float) -> void:
 	var grounded: bool = rig.on_floor and rig.climb < 0.1 and rig.clamber < 0.1
 	var busy: bool = rig.crouch > 0.2 or rig.charge > 0.05 or rig.claw_on or rig.is_swatting() or rig.scratch > 0.05 or rig.rear > 0.05 or rig.pin > 0.05 or rig.grip > 0.05
 	var calm: bool = grounded and not busy and spd < 0.12
+	stop.tick(dt, grounded, busy)
 
 	# ---- exertion: sprinting and climbing build it up, standing around pays it back
 	var work := smoothstep(2.4, 9.0, spd) * 0.11 + rig.climb * 0.05
@@ -261,6 +273,13 @@ func pre(dt: float) -> void:
 	dip = -0.03 * flinch
 	if _on("yawn"):
 		dip -= 0.004 * _env(0.3, 0.3)
+	# ---- how it stops
+	dip += stop.dip
+	pitch = stop.pitch
+	zoff = stop.zoff
+	roll_c += stop.roll
+	for i in 4:
+		paw_off[i] += stop.paw[i]
 
 	# ---- what to do next, when nothing is going on
 	if rig.remote_life or not rig.idle_life:
@@ -275,7 +294,7 @@ func pre(dt: float) -> void:
 				_next_act = randf_range(4.0, 9.0)
 				act("sniff")
 		return
-	if act_name != "" or auto_groom > 0.05:
+	if act_name != "" or auto_groom > 0.05 or stop.kind != "":
 		return
 	if _wet_any > 0.3 and still_t > 0.5:
 		var wi := 0
@@ -349,12 +368,13 @@ func post(dt: float) -> void:
 	# ---------- breathing ----------
 	# ~25 breaths a minute at rest, slower lying down, up to ~2.3 a second after a long sprint.
 	# the wave runs back along the body: ribs first, then the flanks
-	var hz := lerpf(0.42, 2.3, smoothstep(0.05, 1.0, exertion)) * lerpf(1.0, 0.72, rig._loaf_s)
+	var ex := maxf(exertion, stop.breath)
+	var hz := lerpf(0.42, 2.3, smoothstep(0.05, 1.0, ex)) * lerpf(1.0, 0.72, rig._loaf_s)
 	if sniff > 0.0:
 		hz = maxf(hz, 5.5)   # sniffing is a string of quick shallow breaths
 	breath_hz = hz
 	_br_ph = fposmod(_br_ph + hz * TAU * dt, TAU)
-	var amp := lerpf(0.011, 0.034, exertion) * lerpf(1.0, 1.5, rig._loaf_s) * (1.0 - 0.6 * sniff)
+	var amp := lerpf(0.011, 0.034, ex) * lerpf(1.0, 1.5, rig._loaf_s) * (1.0 - 0.6 * sniff)
 	var b0 := sin(_br_ph) * amp + yawn * 0.035
 	rig.chest.scale = Vector3(1.0 + b0, 1.0 + b0 * 0.8, 1.0)
 	# panting: only when really blown, mouth a little open
@@ -445,6 +465,11 @@ func post(dt: float) -> void:
 	var fl := smoothstep(0.0, 0.05, _st_age) * exp(-_st_age * 3.0) * startle_gain()
 	np_ += 0.22 * fl
 	hp -= 0.12 * fl
+	np_ += stop.neck_p
+	hp += stop.head_p
+	hy += stop.head_y
+	hr += stop.head_r
+	rig.neck.rotation.y += stop.neck_y
 	rig.neck.rotation.x += np_ + _lock_pitch * 0.4 * _lock_w
 	rig.neck.rotation.y += _lock_yaw * 0.45 * _lock_w
 	rig.head.rotation.x += hp + _lock_pitch * 0.6 * _lock_w
