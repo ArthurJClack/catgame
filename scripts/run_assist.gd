@@ -74,6 +74,9 @@ static func step_onto(p: CharacterBody3D, hv: Vector3, dt: float) -> Vector3:
 		return Vector3.ZERO
 	if col.get_normal().y > 0.72:
 		return Vector3.ZERO
+	# loose props (a lantern, a bag, a ball) get pushed or swatted, not climbed onto like a step
+	if col.get_collider() is RigidBody3D:
+		return Vector3.ZERO
 	var lim := CatPlayer.STEP_MOUNT
 	if p.test_move(xf, Vector3.UP * lim, null, 0.001):
 		step_up(p, hv_up, dt)
@@ -96,7 +99,7 @@ static func step_onto(p: CharacterBody3D, hv: Vector3, dt: float) -> Vector3:
 		if not p.test_move(over, Vector3.DOWN * (lim + 0.03), down, 0.001):
 			continue
 		var rise := over.origin.y + down.get_travel().y - xf.origin.y
-		if down.get_normal().y < 0.93 or rise < 0.004 or rise > lim:
+		if down.get_normal().y < 0.93 or rise < 0.004 or rise > lim or down.get_collider() is RigidBody3D:
 			continue
 		# the nearest spot that still stands flat: try closer ones only while they do
 		var best_s := s
