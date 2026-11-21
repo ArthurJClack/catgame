@@ -2548,6 +2548,15 @@ func _leap() -> void:
 	_event("leap (%s %.1fm)" % [aim_kind, aim_point.y - global_position.y])
 
 
+## falls only cost health where health matters (the rat pit sets fall_damage) and for bots
+## (labs + tests measure it). everywhere else a fall past LAND_HARD is a stumble
+var fall_damage := false
+
+
+func fall_hurts() -> bool:
+	return fall_damage or not bot.is_empty()
+
+
 func _on_land() -> void:
 	var dodge_land := dash.state == CatDash.AIR
 	dash.on_land()
@@ -2557,8 +2566,9 @@ func _on_land() -> void:
 	last_impact = impact
 	if real_move and impact > LAND_FREE:
 		var set_up := stick_armed and (pounce_air or dodge_land)
-		if impact > LAND_HARD:
-			health.fall(lerpf(FALL_DMG_MIN, FALL_DMG_MAX, clampf((impact - LAND_HARD) / (FALL_TERMINAL - LAND_HARD), 0.0, 1.0)))
+		var over := clampf((impact - LAND_HARD) / (FALL_TERMINAL - LAND_HARD), 0.0, 1.0)
+		if impact > LAND_HARD and fall_hurts():
+			health.fall(lerpf(FALL_DMG_MIN, FALL_DMG_MAX, over))
 		if not set_up or impact > LAND_HARD:
 			var hard := clampf((impact - LAND_SOFT) / (LAND_HARD - LAND_SOFT), 0.0, 1.0)
 			var keep_v := LAND_KEEP_SOFT if impact <= LAND_SOFT else lerpf(LAND_KEEP_SOFT, LAND_KEEP_HARD, hard)
@@ -2566,6 +2576,14 @@ func _on_land() -> void:
 			velocity.z *= keep_v
 			land_rec = LAND_REC_SOFT if impact <= LAND_SOFT else lerpf(LAND_REC_SOFT, LAND_REC_MAX, hard)
 			_event("landed hard (%.1f m/s)" % impact if impact > LAND_SOFT else "soft landing")
+			if impact > LAND_HARD and not fall_hurts():
+				# outside the rat pit a big fall costs time, not health: the cat stumbles, sits low
+				# a beat longer and has to start its run again (simplify pass 2026-11-21)
+				velocity.x *= 0.4
+				velocity.z *= 0.4
+				land_rec = LAND_REC_MAX + lerpf(0.25, 0.6, over)
+				land_dip_v -= 0.4
+				_event("stumbled (%.1f m/s)" % impact)
 	if stick_armed and (pounce_air or dodge_land):
 		# stuck it: four paws down and the body stops right there, no skid, no steps after
 		land_stick = 0.3 if pounce_air else CatDash.STICK
