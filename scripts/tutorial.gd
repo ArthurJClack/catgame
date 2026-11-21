@@ -20,13 +20,13 @@ const STEPS := [
 	["move", "{forward} {left} {back} {right}  to walk around", "left stick to walk around"],
 	["look", "move the mouse to look", "right stick to look"],
 	["run", "hold {run} to run, double tap it and hold for a full gallop", "click L3 to run, again to gallop"],
-	["hop", "tap {jump} to hop. hold it a bit longer to hop higher", "tap A to hop, hold for higher"],
-	["leap", "hold {aim}, look at a spot (the ring), let go: the cat leaps exactly there", "hold LB, aim the ring, let go to leap"],
+	["hop", "tap {jump} to hop", "tap A to hop"],
+	["pounce", "hold {jump}: the cat crouches and shows where it'll land. let go to leap there (onto prey = a pounce)", "hold A: aim where to land, let go to leap (onto prey = a pounce)"],
 	["climb", "jump at the cat tree, a fence or a tree trunk holding {forward} to climb it", "jump at a cat tree or trunk holding forward to climb"],
-	["swat", "{paw_l} / {paw_r} swat with your left / right paw", "LT / RT swat with your paws"],
-	["pounce", "hold {jump} until the cat crouches, aim the dotted line, let go: pounce", "hold A until it crouches, let go to pounce"],
-	["meow", "{meow} meow", ""],
-	["explore", "that's the basics. esc opens the menu, the gaps in the yard fence lead out to other places", "start opens the menu. the gaps in the yard fence lead out to other places"],
+	["swat", "{swat} swat (hold it to hook things with your claws)", "RT swat (hold to hook with your claws)"],
+	["scratch", "{interact} at a post or the cat tree: scratch. it also drops whatever's in your mouth", "hold X at a post or the cat tree: scratch. X also drops what's in your mouth"],
+	["meow", "{meow} meow", "Y meow"],
+	["explore", "that's it. esc opens the menu, the gaps in the yard fence lead out to other places", "start opens the menu. the gaps in the yard fence lead out to other places"],
 ]
 
 static var force := false
@@ -182,9 +182,6 @@ func _refresh_text() -> void:
 
 
 func _next(i: int) -> void:
-	# a pad has no meow key: skip it there
-	while i < STEPS.size() and STEPS[i][0] == "meow" and CatPad.last_used_pad and CatPad.connected():
-		i += 1
 	idx = i
 	_t = 0.0
 	_done_t = -1.0
@@ -264,8 +261,8 @@ func _check(dt: float) -> bool:
 			if hop:
 				_hops += 1
 			return _hops >= 1
-		"leap":
-			return p.leaps > _leaps0
+		"scratch":
+			return p.scratching
 		"climb":
 			return p.climbing
 		"swat":
@@ -273,7 +270,7 @@ func _check(dt: float) -> bool:
 		"pounce":
 			return p.combat != null and p.combat.pounces > _pounces0
 		"meow":
-			if CatKeys.down("meow"):
+			if CatKeys.down("meow") or (CatPad.connected() and CatPad.btn(JOY_BUTTON_Y)):
 				_meowed = true
 			return _meowed
 	return false

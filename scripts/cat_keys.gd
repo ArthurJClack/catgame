@@ -6,27 +6,27 @@ extends RefCounted
 ## saves them to user://settings.cfg. the gamepad map lives in cat_pad.gd and isn't touched.
 
 const ACTIONS := [
-	# [id, label]
+	# [id, label]. kept short on purpose (simplify pass 2026-11-21): one leap on space,
+	# one swat button, e does whatever fits (scratch / drop), crouch is the slow sneak
 	["forward", "move forward"],
 	["back", "move back"],
-	["left", "move left / side hop"],
-	["right", "move right / side hop"],
+	["left", "move left"],
+	["right", "move right"],
 	["run", "run (double tap = gallop)"],
-	["walk", "walk (hold)"],
-	["walk_toggle", "walk toggle"],
-	["crouch", "crouch / stalk"],
-	["jump", "hop / pounce (hold)"],
-	["paw_l", "left paw"],
-	["paw_r", "right paw"],
-	["grab", "grab"],
-	["aim", "aim leap"],
+	["crouch", "crouch / sneak"],
+	["jump", "hop (tap) / leap + pounce (hold, aim, let go)"],
+	["swat", "swat (hold = hook with your claws)"],
+	["grab", "grab / hold in your mouth"],
+	["interact", "scratch / drop (whatever's in front)"],
 	["dash", "dodge"],
-	["scratch", "scratch"],
-	["drop", "drop what's in your mouth"],
-	["lock_on", "lock on"],
-	["toggle_view", "switch view"],
 	["meow", "meow"],
+	["toggle_view", "first / third person"],
+	["lock_on", "lock on (rat pit)"],
 ]
+
+## bump when the default layout changes: older saved binds are dropped so nobody keeps a
+## half old layout (v2 = simplify pass: swat / grab on the mouse, e interact, no aim key)
+const VERSION := 2
 
 const DEFAULTS := {
 	"forward": [{"k": KEY_W}],
@@ -34,20 +34,15 @@ const DEFAULTS := {
 	"left": [{"k": KEY_A}],
 	"right": [{"k": KEY_D}],
 	"run": [{"k": KEY_SHIFT}],
-	"walk": [{"k": KEY_X}],
-	"walk_toggle": [{"k": KEY_CAPSLOCK}],
 	"crouch": [{"k": KEY_CTRL}, {"k": KEY_C}],
 	"jump": [{"k": KEY_SPACE}],
-	"paw_l": [{"m": MOUSE_BUTTON_LEFT}],
-	"paw_r": [{"m": MOUSE_BUTTON_RIGHT}],
-	"grab": [{"k": KEY_G}, {"m": MOUSE_BUTTON_XBUTTON2}],
-	"aim": [{"k": KEY_Q}, {"m": MOUSE_BUTTON_MIDDLE}],
+	"swat": [{"m": MOUSE_BUTTON_LEFT}],
+	"grab": [{"m": MOUSE_BUTTON_RIGHT}, {"k": KEY_G}],
+	"interact": [{"k": KEY_E}, {"k": KEY_F}],
 	"dash": [{"k": KEY_ALT}, {"m": MOUSE_BUTTON_XBUTTON1}],
-	"scratch": [{"k": KEY_F}],
-	"drop": [{"k": KEY_E}],
-	"lock_on": [{"k": KEY_TAB}],
-	"toggle_view": [{"k": KEY_V}],
 	"meow": [{"k": KEY_N}],
+	"toggle_view": [{"k": KEY_V}],
+	"lock_on": [{"k": KEY_TAB}],
 }
 
 ## keys the game keeps for itself (menus, level keys): can't be bound
@@ -157,11 +152,15 @@ static func describe(action: String) -> String:
 
 static func to_dict() -> Dictionary:
 	_ensure()
-	return map.duplicate(true)
+	var d := map.duplicate(true)
+	d["_v"] = VERSION
+	return d
 
 
 static func from_dict(d: Dictionary) -> void:
 	reset()
+	if int(d.get("_v", 1)) != VERSION:
+		return      # saved with an older layout: start from the new defaults
 	for a in d:
 		if not DEFAULTS.has(a) or not d[a] is Array:
 			continue

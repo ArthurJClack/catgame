@@ -153,7 +153,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the trail: roots, logs, a rock garden, stone steps, drop offs, a creek. run it (shift canter, double tap shift gallop)\nthe cat glides over roots + branches and steps up onto low stuff by itself. space to jump logs, rocks and the creek\nr restart · t next section · b auto step on/off · 1-8 swap cat · v camera · h hide help · f5 back to the house"
+	help_label.text = "the trail: roots, logs, a rock garden, stone steps, drop offs, a creek. run it (shift run, double tap shift gallop)\nthe cat glides over roots + branches and steps up onto low stuff by itself. space to jump logs, rocks and the creek\nr restart · h hide help · f5 back to the farm"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)
@@ -177,6 +177,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if player == null or run_bot or not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var k: int = event.physical_keycode
+	if DevKeys.blocked(k):
+		return
 	if k >= KEY_1 and k <= KEY_8:
 		var order: Array = CatRig.STYLE_ORDER
 		if k - KEY_1 < order.size():

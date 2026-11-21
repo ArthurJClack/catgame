@@ -109,9 +109,15 @@ func _run() -> void:
 	_key(KEY_SPACE, true)
 	await _game(0.1)
 	_key(KEY_SPACE, false)
-	_ok(await _on("leap"), "a hop ticks off hop")
-	p.leaps += 1
-	_ok(await _on("climb"), "a leap ticks off leap")
+	_ok(await _on("pounce"), "a hop ticks off hop")
+	# the cards follow rebinds
+	CatKeys.set_bind("jump", 0, {"k": KEY_J})
+	await process_frame
+	await process_frame
+	_ok("j" in _tut()._label.text, "a rebound key shows on the card")
+	CatKeys.reset()
+	p.combat.pounces += 1
+	_ok(await _on("climb"), "a pounce (hold space leap) ticks off pounce")
 	for i in 4:
 		p.climbing = true    # (the controller drops it again with no wall: hold it a few frames)
 		await process_frame
@@ -121,15 +127,12 @@ func _run() -> void:
 	_mouse(MOUSE_BUTTON_LEFT, true)
 	await _game(0.1)
 	_mouse(MOUSE_BUTTON_LEFT, false)
-	_ok(await _on("pounce"), "a swat ticks off swat")
-	# the cards follow rebinds
-	CatKeys.set_bind("jump", 0, {"k": KEY_J})
-	await process_frame
-	await process_frame
-	_ok("j" in _tut()._label.text, "a rebound key shows on the card")
-	CatKeys.reset()
-	p.combat.pounces += 1
-	_ok(await _on("meow"), "a pounce ticks off pounce")
+	_ok(await _on("scratch"), "a swat ticks off swat")
+	for i in 4:
+		p.scratching = true
+		await process_frame
+	p.scratching = false
+	_ok(await _on("meow"), "scratching ticks off scratch")
 	_key(KEY_N, true)
 	await _game(0.1)
 	_key(KEY_N, false)
