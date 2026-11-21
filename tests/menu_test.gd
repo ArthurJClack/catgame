@@ -115,7 +115,7 @@ func _run() -> void:
 		fb.pressed.emit()
 		await process_frame
 		await _tap(KEY_ESCAPE)
-	_ok(menu.is_open and CatKeys.binds("scratch")[0].get("k", -1) == KEY_F, "esc cancels a rebind, menu stays open")
+	_ok(menu.is_open and CatKeys.binds("interact")[1].get("k", -1) == KEY_F, "esc cancels a rebind, menu stays open")
 	_ok(CatKeys.from_event(_ev(KEY_F5)).is_empty(), "reserved keys can't be bound")
 
 	# --- settings

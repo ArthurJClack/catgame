@@ -204,6 +204,7 @@ func show_page(p: String) -> void:
 		"settings": _page_settings()
 		"controls": _page_controls()
 		"achievements": _page_achievements()
+		"puzzles": _page_puzzles()
 
 
 func _button(parent: Node, text: String, fn: Callable) -> Button:
@@ -225,6 +226,7 @@ func _page_main() -> void:
 		_button(_body, txt, func(): Save.save_now(); show_page("main"))
 	_button(_body, "settings", show_page.bind("settings"))
 	_button(_body, "controls", show_page.bind("controls"))
+	_button(_body, "cat puzzles (%d / %d)" % [Puzzles.count_solved(), Puzzles.LIST.size()], show_page.bind("puzzles"))
 	var ach = Save.achievements
 	if ach:
 		_button(_body, "achievements (%d / %d)" % [ach.count(), Achievements.LIST.size()], show_page.bind("achievements"))
@@ -345,6 +347,32 @@ func _option(text: String, key: String, labels: Array, values: Array) -> Control
 	return o
 
 
+const COAT_NAMES := {"block_black": "black", "block": "tabby", "block_tux": "tuxedo", "block_lean": "lean blue",
+	"block_bob": "bobtail", "stepped": "fluffy", "stepped_coon": "maine coon", "stepped_persian": "persian",
+	"stepped_smoke": "smoke"}
+
+
+## coat picker (used to be the 1-9 keys, which are dev only now)
+func _cat_picker() -> void:
+	var h := _row("coat")
+	var o := OptionButton.new()
+	o.custom_minimum_size = Vector2(160, 32)
+	var cat := local_cat()
+	var cur: String = cat.style if cat and "style" in cat else ""
+	for i in CatRig.STYLE_ORDER.size():
+		var st: String = CatRig.STYLE_ORDER[i]
+		o.add_item(COAT_NAMES.get(st, st), i)
+		if st == cur:
+			o.selected = i
+	o.item_selected.connect(func(i):
+		var st: String = CatRig.STYLE_ORDER[i]
+		Engine.set_meta("cat_style", st)
+		var c := local_cat()
+		if c:
+			c.set_style(st))
+	h.add_child(o)
+
+
 func _apply() -> void:
 	GameSettings.apply_all(get_tree())
 	if CatVR.body and is_instance_valid(CatVR.body):
@@ -362,11 +390,14 @@ func _page_settings() -> void:
 	_slider("master volume", "master", 0.0, 1.0, 0.05, _pct)
 	_slider("world / ambience", "ambience", 0.0, 1.0, 0.05, _pct)
 	_slider("cat + effects", "sfx", 0.0, 1.0, 0.05, _pct)
+	_section("your cat")
+	_cat_picker()
 	_section("mouse + camera")
 	_slider("mouse sensitivity", "sens", 0.2, 3.0, 0.05, func(x): return "%.2fx" % x)
 	_check("invert look up / down", "invert_y")
 	_slider("field of view", "fov", 60.0, 110.0, 1.0, func(x): return "%d°" % roundi(x))
 	_check("head bob (first person)", "head_bob")
+	_check("photo cam (v also cycles a free orbit camera)", "photo_cam")
 	_section("display")
 	if not OS.has_feature("web"):
 		_check("fullscreen", "fullscreen")
@@ -467,14 +498,14 @@ func _page_controls() -> void:
 	pad.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	pad.custom_minimum_size.x = PANEL_W - 30
 	pad.add_theme_font_size_override("font_size", 13)
-	pad.text = "left stick move (tilt = speed), right stick look, L3 run / gallop, A hop / pounce, B dodge, X scratch, Y grab, LT / RT paws, LB aim leap, RB crouch, R3 lock on, d-pad down drop, up walk, left view, start = this menu"
+	pad.text = "left stick move (tilt = speed), right stick look, L3 run / gallop, A hop (tap) / leap + pounce (hold), B dodge, X scratch / drop, Y meow, RT swat, LT grab, RB crouch / sneak, R3 lock on (rat pit), d-pad left first / third person, start = this menu"
 	_scroll_box.add_child(pad)
 	_section("other keys")
 	var other := Label.new()
 	other.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	other.custom_minimum_size.x = PANEL_W - 30
 	other.add_theme_font_size_override("font_size", 13)
-	other.text = "esc menu, m online lobby, 1-9 coats, f5 back to the farm, r restart (pit / trail), f9 update, mouse wheel zoom (orbit view)"
+	other.text = "esc menu, h help, m online lobby, f5 back to the farm, r restart (pit / trail / city), f9 update. coats are in settings"
 	_scroll_box.add_child(other)
 	_scroll_box = null
 	var h2 := HBoxContainer.new()
@@ -509,6 +540,46 @@ func _page_achievements() -> void:
 		v.add_child(t)
 		var d := Label.new()
 		d.text = (a[1] + ("  ·  " + str(ach.data()[id]) if got else "")) if (got or not a[2]) else "a secret"
+		d.add_theme_font_size_override("font_size", 12)
+		d.add_theme_color_override("font_color", Color(0.6, 0.6, 0.64))
+		v.add_child(d)
+		h.add_child(v)
+		_scroll_box.add_child(h)
+	_scroll_box = null
+	var b := _button(_body, "back", show_page.bind("main"))
+	b.grab_focus.call_deferred()
+
+
+## found tally: solved puzzles show their name, the rest only where to look. the hint line is
+## the one place the game tells you how to find them (the world itself stays wordless)
+func _page_puzzles() -> void:
+	_title.text = "cat puzzles  %d / %d" % [Puzzles.count_solved(), Puzzles.LIST.size()]
+	var hint := Label.new()
+	hint.text = "stuck? crouch and keep still for a moment: the cat notices things nearby."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.custom_minimum_size.x = PANEL_W
+	hint.add_theme_font_size_override("font_size", 13)
+	hint.add_theme_color_override("font_color", Color(0.65, 0.66, 0.7))
+	_body.add_child(hint)
+	_scroll()
+	for id in Puzzles.LIST:
+		var a: Array = Puzzles.LIST[id]
+		var got := int(Puzzles.solved.get(id, 0)) > 0
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 12)
+		var mark := Achievements.PawIcon.new()
+		mark.lit = got
+		mark.custom_minimum_size = Vector2(26, 26)
+		mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(mark)
+		var v := VBoxContainer.new()
+		var t := Label.new()
+		t.text = a[0] if got else "???"
+		t.add_theme_font_size_override("font_size", 17)
+		t.add_theme_color_override("font_color", Color(0.95, 0.78, 0.2) if got else Color(0.75, 0.75, 0.78))
+		v.add_child(t)
+		var d := Label.new()
+		d.text = a[1]
 		d.add_theme_font_size_override("font_size", 12)
 		d.add_theme_color_override("font_color", Color(0.6, 0.6, 0.64))
 		v.add_child(d)

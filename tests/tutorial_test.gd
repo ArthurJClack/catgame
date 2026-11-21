@@ -98,30 +98,29 @@ func _run() -> void:
 	for i in 20:
 		p.orb_yaw += 0.12
 		await physics_frame
-	_ok(await _on("run"), "looking around ticks off look")
-	_key(KEY_W, true)
-	_key(KEY_SHIFT, true)
-	await _game(1.8)
-	_key(KEY_SHIFT, false)
-	_key(KEY_W, false)
-	_ok(await _on("hop"), "running ticks off run")
+	_ok(await _on("sense"), "looking around ticks off look")
+	var z = current_scene.get_node_or_null("Puzzles")
+	_ok(z != null and z.sense != null, "farm has the cat sense")
+	_key(KEY_CTRL, true)      # crouch + keep still
+	_ok(await _on("hop"), "sensing ticks off sense")
+	_key(KEY_CTRL, false)
+	var yard := Vector3(6.0, 0.05, 10.0)   # out in the yard, far from the kitchen
+	p.global_position = yard
+	p._phys_curr = yard
+	p.velocity = Vector3.ZERO
 	await _game(0.8)
 	_key(KEY_SPACE, true)
 	await _game(0.1)
 	_key(KEY_SPACE, false)
-	_ok(await _on("leap"), "a hop ticks off hop")
-	p.leaps += 1
-	_ok(await _on("climb"), "a leap ticks off leap")
-	for i in 4:
-		p.climbing = true    # (the controller drops it again with no wall: hold it a few frames)
-		await process_frame
-	p.climbing = false
-	_ok(await _on("swat"), "climbing ticks off climb")
+	_ok(await _on("pounce"), "a hop ticks off hop")
+	# the leap card waits for the kitchen (out on the patio it's hidden)
 	await _game(0.5)
-	_mouse(MOUSE_BUTTON_LEFT, true)
-	await _game(0.1)
-	_mouse(MOUSE_BUTTON_LEFT, false)
-	_ok(await _on("pounce"), "a swat ticks off swat")
+	_ok(_tut()._card.modulate.a == 0.0 and _tut()._t == 0.0, "leap card waits for its moment")
+	var at := Vector3(2.0, 0.05, -1.5)    # in the kitchen, a couple of metres from the counters
+	p.global_position = at
+	p._phys_curr = at
+	p.velocity = Vector3.ZERO
+	_ok(await _game(1.0, func(): return _tut()._t > 0.0), "in the kitchen the leap card comes up")
 	# the cards follow rebinds
 	CatKeys.set_bind("jump", 0, {"k": KEY_J})
 	await process_frame
@@ -129,11 +128,43 @@ func _run() -> void:
 	_ok("j" in _tut()._label.text, "a rebound key shows on the card")
 	CatKeys.reset()
 	p.combat.pounces += 1
-	_ok(await _on("meow"), "a pounce ticks off pounce")
+	_ok(await _on("swat"), "a pounce (hold space leap) ticks off pounce")
+	_tut()._gate_t = Tutorial.GATE_MAX
+	await _game(0.5)
+	_mouse(MOUSE_BUTTON_LEFT, true)
+	await _game(0.1)
+	_mouse(MOUSE_BUTTON_LEFT, false)
+	_ok(await _on("climb"), "a swat ticks off swat")
+	_tut()._gate_t = Tutorial.GATE_MAX
+	await _game(0.3)
+	for i in 4:
+		p.climbing = true    # (the controller drops it again with no wall: hold it a few frames)
+		await process_frame
+	p.climbing = false
+	_ok(await _on("scratch"), "climbing ticks off climb")
+	_tut()._gate_t = Tutorial.GATE_MAX
+	await _game(0.3)
+	for i in 4:
+		p.scratching = true
+		await process_frame
+	p.scratching = false
+	_ok(await _on("run"), "scratching ticks off scratch")
+	_tut()._gate_t = Tutorial.GATE_MAX
+	_key(KEY_W, true)
+	_key(KEY_SHIFT, true)
+	await _game(1.8)
+	_key(KEY_SHIFT, false)
+	_key(KEY_W, false)
+	_ok(await _on("meow"), "running ticks off run")
+	await _game(0.5)
+	_ok(_tut()._t == 0.0, "meow card waits for the treat bag")
+	Puzzles.solved["knock_it_off"] = 1
+	_ok(await _game(1.0, func(): return _tut()._t > 0.0), "bag down: the meow card comes up")
 	_key(KEY_N, true)
 	await _game(0.1)
 	_key(KEY_N, false)
 	_ok(await _on("explore"), "a meow ticks off meow")
+	Puzzles.solved.erase("knock_it_off")
 	_ok(await _game(12.0, func(): return _tut() == null), "explore card goes away by itself, tutorial over")
 	_ok(save.data.tutorial.get("done", false) == true, "done is saved")
 	_ok(not Tutorial.should_run(), "and it won't start again")

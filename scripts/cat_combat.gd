@@ -373,7 +373,8 @@ func _paw_step(i: int, dt: float, held: bool) -> void:
 			_swat(i)
 		if mode[i] == NONE and age[i] >= HOLD_T:
 			var t: Dictionary = p._paw_target(p.SWAT_RANGE, 0.5)
-			if not t.is_empty() and t.get("prey") != null and t.prey != p.carried:
+			# rakes are a rat pit thing: elsewhere a held paw always hooks (claw hold)
+			if not t.is_empty() and t.get("prey") != null and t.prey != p.carried and p.combat_on():
 				mode[i] = RAKE
 				rake_t[i] = RAKE_EVERY   # first rake right away
 			else:

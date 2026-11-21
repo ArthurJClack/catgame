@@ -98,6 +98,8 @@ func _ready() -> void:
 		_make_cam()
 	elif not OS.has_feature("web"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if si < 0 and not (tour or test):
+		Puzzles.city(self, player, _ground(START + Vector3(3.0, 0, -1.4), 0.0))   # the warm vent (puzzle_more.gd)
 
 
 func _ground(p: Vector3, up := 0.0) -> Vector3:
@@ -221,7 +223,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the city: pioneer square at night (real osm map from secret, cars from shitbox rally). you're a cat: curbs are steps, cars are climbing frames\nhop onto hoods + roofs, alley dumpsters and crates go higher, hide under cars from the rain\nr back to the start · t next spot · 1-9 swap cat · v camera · h hide help · f5 or the farm sign = back to the farm\nmap data (c) openstreetmap contributors, odbl"
+	help_label.text = "the city: pioneer square at night (real osm map from secret, cars from shitbox rally). you're a cat: curbs are steps, cars are climbing frames\nhop onto hoods + roofs, alley dumpsters and crates go higher, hide under cars from the rain\nr back to the start · h hide help · f5 or the farm sign = back to the farm\nmap data (c) openstreetmap contributors, odbl"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)
@@ -255,6 +257,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if player == null or tour or test or not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var k: int = event.physical_keycode
+	if DevKeys.blocked(k):
+		return
 	if k >= KEY_1 and k <= KEY_9:
 		var order: Array = CatRig.STYLE_ORDER
 		if k - KEY_1 < order.size():

@@ -139,7 +139,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -132
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "w/s move · a/d side hop · shift canter (double tap = gallop) · c stalk · space hop / wall kick · alt or mouse4 dodge · q or mmb aimed leap · rmb claws · f scratch · v camera\n1-7 teleport: hall, crate stairs, rack, wall kick shaft, office, containers, crane · r respawn\nf1 psx filter · f2 pixel size · f3 vertex wobble · h hide help\ntry: kick up the shaft by the east wall into the duct, walk the i-beams, climb the crane leg"
+	help_label.text = "wasd move · shift run (double tap = gallop) · ctrl / c sneak · space hop, hold = leap · mouse1 swat · e scratch · alt dodge · v camera\nr respawn · h hide help · f5 back to the farm\ntry: kick up the shaft by the east wall into the duct, walk the i-beams, climb the crane leg"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -171,6 +171,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var k: int = event.physical_keycode
+	if DevKeys.blocked(k):
+		return
 	if k >= KEY_1 and k <= KEY_7:
 		var pts: Array = info.points
 		var i := k - KEY_1

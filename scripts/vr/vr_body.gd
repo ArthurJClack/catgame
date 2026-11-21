@@ -12,8 +12,9 @@ extends Node3D
 ##   reads twice as big, a real metre of hand movement is half a game metre.
 ## - controllers: left stick moves (head relative, tilt = speed like a pad), click it = run
 ##   (again at full tilt = gallop). right stick turns (snap or smooth), pull it back = crouch.
-##   triggers = left / right paw, grips = aim (left) / grab (right), A jump (hold = pounce),
-##   B dodge, X scratch, Y drop (hold Y or press menu = pause menu), right stick click = lock on.
+##   triggers = left / right paw, either grip = grab, A hop (hold = leap / pounce), B dodge,
+##   X interact (scratch / drop), Y meow (hold Y or press menu = pause menu), right stick click =
+##   lock on (rat pit).
 ## - your hands are the forepaws: raise a hand to chest height and that paw leaves the ground
 ##   and follows it (cat_rig.vr_paw); a fast swing of a raised hand is a swat on that side.
 ## - every 2d screen (hud, menus, title, tutorial cards...) is redirected into a SubViewport shown
@@ -59,6 +60,7 @@ var paw_w := [0.0, 0.0]
 var paw_target := [Vector3.INF, Vector3.INF]
 var hand_speed := [0.0, 0.0]
 var swings := 0                   # swats thrown by swinging (tests)
+var meows := 0                    # Y taps (tests)
 var haptics: Array = []           # [hand, amp, dur] (sim only: tests read it)
 var pointer_px := Vector2(-1, -1) # where the laser is on the 2d screen (viewport px), -1 = off it
 var hud_vp: SubViewport
@@ -80,7 +82,6 @@ var _l3_prev := false
 var _trig := [false, false]
 var _y_t := -1.0
 var _y_menu_done := false
-var _drop_t := 0.0
 var _menu_prev := false
 var _b_prev := false
 var _click_prev := false
@@ -285,6 +286,8 @@ func read_input() -> Dictionary:
 	for k in 2:
 		_trig[k] = _axis(k, "trigger") > (0.35 if _trig[k] else 0.6)
 	var rs := _stick(1)
+	# same human level keys as the keyboard / pad (cat_player._human_buttons turns them into
+	# actions), plus each hand's own paw
 	return {
 		"move": mv,
 		"canter": _run == 1,
@@ -292,18 +295,16 @@ func read_input() -> Dictionary:
 		"crouch": rs.y < -0.65 and absf(rs.x) < 0.5,
 		"jump": _btn(1, "ax_button"),
 		"dash": _btn(1, "by_button"),
-		"scratch": _btn(0, "ax_button"),
-		"drop": _drop_t > 0.0,
-		"paw_l": _trig[0] or _swing_t[0] > 0.0,
-		"paw_r": _trig[1] or _swing_t[1] > 0.0,
-		"aim": _axis(0, "grip") > 0.6,
-		"grab": _axis(1, "grip") > 0.6,
+		"interact": _btn(0, "ax_button"),
+		"grab": _axis(0, "grip") > 0.6 or _axis(1, "grip") > 0.6,
 		"lock_on": _btn(1, "primary_click"),
+		"vr_paw_l": _trig[0] or _swing_t[0] > 0.0,
+		"vr_paw_r": _trig[1] or _swing_t[1] > 0.0,
 	}
 
 
 func _buttons(dt: float) -> void:
-	# Y: tap = drop what's in your mouth, hold = pause menu (not every controller has a menu button)
+	# Y: tap = meow, hold = pause menu (not every controller has a menu button)
 	var y := _btn(0, "by_button")
 	if y:
 		_y_t = 0.0 if _y_t < 0.0 else _y_t + dt
@@ -312,10 +313,9 @@ func _buttons(dt: float) -> void:
 			_esc()
 	else:
 		if _y_t >= 0.0 and _y_t < 0.7 and not menu_mode:
-			_drop_t = 0.15
+			meow()
 		_y_t = -1.0
 		_y_menu_done = false
-	_drop_t = maxf(_drop_t - dt, 0.0)
 	var m := _btn(0, "menu_button")
 	if m and not _menu_prev:
 		_esc()
@@ -325,6 +325,17 @@ func _buttons(dt: float) -> void:
 	if menu_mode and b and not _b_prev:
 		_esc()
 	_b_prev = b
+
+
+func meow() -> void:
+	meows += 1
+	if player == null:
+		return
+	for c in player.get_children():
+		if c.has_method("meow"):
+			if float(c.get("_meow_cool")) <= 0.0:
+				c.meow()
+			return
 
 
 ## the pause menu listens for esc (game_menu.gd): open / back / close it the same way

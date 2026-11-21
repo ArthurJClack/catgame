@@ -232,13 +232,16 @@ func _run() -> void:
 	# buttons map to the cat's input
 	b.sim_in[1] = {"ax_button": true, "grip": 1.0}
 	var inp := b.read_input()
-	_ok(inp.jump and inp.grab, "A = jump, right grip = grab")
+	_ok(inp.jump and inp.grab, "A = hop / leap, grip = grab")
 	b.sim_in[1] = {}
+	b.sim_in[0] = {"ax_button": true}
+	_ok(b.read_input().interact, "X = interact (scratch / drop)")
 	b.sim_in[0] = {"by_button": true}
+	var mw := b.meows
 	await _frames(2)
 	b.sim_in[0] = {}
 	await _frames(1)
-	_ok(b.read_input().drop, "tap Y = drop")
+	_ok(b.meows == mw + 1 and not gm.is_open, "tap Y = meow")
 	await _wait(0.3)
 
 	await _shot("vr_hud.png")

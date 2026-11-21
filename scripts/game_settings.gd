@@ -22,6 +22,7 @@ const DEFAULTS := {
 	"quality": 2,         # 0 low, 1 medium, 2 high
 	"show_fps": false,
 	"hints": true,        # tutorial hint cards on the farm (tutorial.gd)
+	"photo_cam": false,   # true = v also cycles the free orbit camera (photo mode)
 	"vr": false,          # play in vr (vr/cat_vr.gd): the game restarts itself with OpenXR on
 	"vr_turn": 0,         # 0 snap turn, 1 smooth turn (right stick)
 	"vr_snap": 30.0,      # degrees per snap
@@ -181,6 +182,9 @@ static func apply_player(p: Node) -> void:
 	cp.invert_y = g("invert_y")
 	cp.fov_base = float(g("fov"))
 	cp.calm_cam = not g("head_bob")
+	cp.orbit_in_cycle = g("photo_cam")
+	if not cp.orbit_in_cycle and cp.view_mode == 2:
+		cp.set_view(0)
 
 
 ## everything, on the whole running tree

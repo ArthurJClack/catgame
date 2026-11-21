@@ -110,6 +110,7 @@ var _sc_ground_t := 0.0
 var _sc_last := Vector3.ZERO
 var third_person := false
 var view_mode := 0            # 0 first person, 1 third person (behind), 2 orbit
+var orbit_in_cycle := false   # v only flips first / third person unless the photo cam setting is on
 var orb_yaw := 0.0            # where you're looking (all views). the body (yaw) turns to run where you steer
 var orb_pitch := -0.35        # orbit view pitch (first/third person use pitch)
 var orb_dist := 1.4
@@ -165,6 +166,24 @@ const RUN_HOP := 0.3          # share of the hop height left at a full gallop
 const STAND_PUSH := 1.2       # a standing hop with the stick held goes toward it (m/s)
 const AIR_NUDGE := 1.5
 const AIR_BUDGET := 0.5
+## movement plan phase 4 (real_move): coming down costs what the fall was worth. a cat lands on
+## its forelegs and folds: up to LAND_FREE m/s (a ~1 m drop) is nothing, up to LAND_SOFT (~2.5 m)
+## the legs give for a moment and it keeps most of its run, up to LAND_HARD (~6 m) it lands in a
+## deep crouch and needs LAND_REC_MAX s before it can spring or sprint again, and past that it
+## is hurt, more the faster it was falling (FALL_DMG_MIN at LAND_HARD .. FALL_DMG_MAX at terminal).
+## pounces and stuck dodges are landings the cat set up for: no extra cost under LAND_HARD
+const LAND_FREE := 4.4
+const LAND_SOFT := 7.0
+const LAND_HARD := 10.8
+const LAND_KEEP_SOFT := 0.7
+const LAND_KEEP_HARD := 0.2
+const LAND_REC_SOFT := 0.15
+const LAND_REC_MAX := 0.4
+const FALL_TERMINAL := 27.0
+const FALL_DMG_MIN := 8.0
+const FALL_DMG_MAX := 60.0
+var land_rec := 0.0           # legs busy soaking up a landing: no jump, no run
+var last_impact := 0.0        # m/s the last landing came down at (tests, sfx)
 var _gather_t := 0.0
 var _gather_vy := 0.0
 var _air_left := AIR_BUDGET
@@ -582,8 +601,18 @@ func _unhandled_input(event: InputEvent) -> void:
 var _shift_prev := false
 var _shift_last_tap := -10.0
 var _galloping := false
-var _caps_prev := false
-var walk_lock := false        # caps lock walk toggle
+var _swat_prev := false
+var _swat_paw := 1             # the swat button alternates paws: this is the one it used last
+var _int_prev := false
+var _int_drop := false         # e pressed while carrying: dropped, so this hold isn't a scratch
+## the rat pit (arena_main) turns this on: lock on, rakes, the stamina bar and the health bar
+## only exist there. everywhere else the cat just moves, swats and explores. bots always get
+## the full set (tests + preview films drive those systems directly)
+var combat_zone := false
+
+
+func combat_on() -> bool:
+	return combat_zone or not bot.is_empty()
 var _brake_ask := false
 var _backing := false
 var _turn_factor := 1.0
@@ -607,42 +636,31 @@ func _read_input() -> Dictionary:
 	if CatKeys.down("left"): mv.x -= 1
 	if CatKeys.down("right"): mv.x += 1
 	mv = mv.limit_length(1.0)
-	# walk: hold x (or tap caps lock to keep walking). the keys then ask for a half pushed stick,
-	# which the speed curve turns into a real cat walk (~1 m/s) instead of the trot
-	var caps := CatKeys.down("walk_toggle")
-	if caps and not _caps_prev:
-		walk_lock = not walk_lock
-	_caps_prev = caps
+	# no walk keys any more (simplify pass): crouch is the slow, quiet sneak, a pad stick still
+	# walks with a half tilt
 	if mv != Vector2.ZERO:
 		CatPad.last_used_pad = false
-	var walking := CatKeys.down("walk") or walk_lock
-	if walking and not shift:
-		mv *= WALK_TILT
 	var kb := {
 		"move": mv,
 		"canter": shift and not _galloping,
 		"sprint": shift and _galloping,
 		"crouch": CatKeys.down("crouch"),
 		"jump": CatKeys.down("jump"),
-		"paw_l": CatKeys.down("paw_l"),
-		"paw_r": CatKeys.down("paw_r"),
+		"swat": CatKeys.down("swat"),
 		"grab": CatKeys.down("grab"),
-		"aim": CatKeys.down("aim"),
-		"scratch": CatKeys.down("scratch"),
+		"interact": CatKeys.down("interact"),
 		"toggle_view": CatKeys.down("toggle_view"),
-		"drop": CatKeys.down("drop"),
 		"dash": CatKeys.down("dash"),
 		"lock_on": CatKeys.down("lock_on"),   # press = lock / unlock (cat_lock_on.gd)
 	}
 	# gamepad (cat_pad.gd): every action has a button, the left stick's tilt picks the speed
 	var pad := CatPad.read()
-	if not pad.is_empty() and CatPad.walk_toggle and not (pad.canter or pad.sprint):
-		pad.move *= WALK_TILT
 	var d := CatPad.merge(kb, pad)
 	# vr controllers (vr/vr_body.gd): empty in flat mode
 	var vrd := CatVR.read(self)
 	if not vrd.is_empty():
 		d = CatPad.merge(d, vrd)
+	_human_buttons(d)
 	if CatKeys.blocked:
 		# pause menu open (online the game keeps running): the cat stands still
 		for k in d:
@@ -653,6 +671,34 @@ func _read_input() -> Dictionary:
 	d.hop_charge = sp.hop_charge
 	d.hop_mul = sp.hop_mul
 	return d
+
+
+## the few human buttons -> the actions the controller (and the bots) speak:
+##   swat     one button, alternates paws each press (held = that paw keeps hooking / raking)
+##   interact drop what's in your mouth, otherwise scratch (held) whatever's in front
+##   lock on  only in the rat pit
+func _human_buttons(d: Dictionary) -> void:
+	var sw: bool = d.get("swat", false)
+	d.erase("swat")
+	if sw and not _swat_prev:
+		_swat_paw = 1 - _swat_paw
+	_swat_prev = sw
+	# vr: each hand's trigger / swing is that side's own paw (vr/vr_body.gd)
+	d.paw_l = (sw and _swat_paw == 0) or d.get("vr_paw_l", false)
+	d.paw_r = (sw and _swat_paw == 1) or d.get("vr_paw_r", false)
+	d.erase("vr_paw_l")
+	d.erase("vr_paw_r")
+	var it: bool = d.get("interact", false)
+	d.erase("interact")
+	if it and not _int_prev:
+		_int_drop = carried != null
+	if not it:
+		_int_drop = false
+	_int_prev = it
+	d.drop = it and _int_drop
+	d.scratch = it and not _int_drop
+	if not combat_on():
+		d.lock_on = false
 
 
 ## space / A on the ground: hop when it's let go (higher the longer it was held), or held past
@@ -832,7 +878,7 @@ func _physics_process(dt: float) -> void:
 	last_event_t += dt
 	toast_t += dt
 	# stamina / dodge bookkeeping. bots run with a bottomless bar unless they ask for the real one
-	stamina.infinite = not bot.is_empty() and not bot.get("stamina", false)
+	stamina.infinite = (not bot.is_empty() and not bot.get("stamina", false)) or not combat_on()
 	dash.tick(dt)
 	var dash_in: bool = inp.get("dash", false)
 	if dash_in and not prev_dash and combat.dodge_pressed():
@@ -895,7 +941,7 @@ func _physics_process(dt: float) -> void:
 	_update_surface()
 	var tv: bool = inp.get("toggle_view", false)
 	if tv and not prev_v:
-		set_view((view_mode + 1) % 3)
+		set_view((view_mode + 1) % (3 if orbit_in_cycle else 2))
 	prev_v = tv
 
 	var fwd := -global_transform.basis.z
@@ -913,7 +959,7 @@ func _physics_process(dt: float) -> void:
 			pass
 		elif want_crouch_peek(inp):
 			ground_mv.x = mv.x * 0.45
-		elif side != 0.0 and not combat.committed() and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12) and not dash.busy() and dash.buffer <= 0.0 and stamina.spend(CatStamina.SIDE_HOP):
+		elif side != 0.0 and not bot.is_empty() and not combat.committed() and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12) and not dash.busy() and dash.buffer <= 0.0 and stamina.spend(CatStamina.SIDE_HOP):
 			_side_hop(side, fwd, right)
 	_prev_side = side
 	if is_on_floor():
@@ -973,6 +1019,13 @@ func _physics_process(dt: float) -> void:
 		_track_walls()
 		_post(dt, inp)
 		return
+	land_rec = maxf(land_rec - dt, 0.0)
+	if land_rec > 0.0 and real_move:
+		# legs folded under a landing: nothing springs or runs until they are back under it
+		jump_pressed = false
+		jump_held = false
+		aim_in = false
+		wish_len *= 0.3
 	if dash.recover > 0.0:
 		# landing out of a dodge: the legs are busy soaking it up
 		jump_pressed = false
@@ -987,7 +1040,7 @@ func _physics_process(dt: float) -> void:
 			return
 
 	# crouch / stand (only stand if there's room)
-	var crouch_target := 1.0 if (want_crouch or charging or _gather_t > 0.0) else 0.0
+	var crouch_target := 1.0 if (want_crouch or charging or _gather_t > 0.0 or (land_rec > LAND_REC_SOFT and real_move)) else 0.0
 	crouch_target = maxf(crouch_target, space_charge() * 0.5)   # gathering for a bigger hop
 	if crouch_target < crouch_amt and not _can_stand():
 		crouch_target = crouch_amt
@@ -1257,6 +1310,8 @@ func _physics_process(dt: float) -> void:
 		wall_sliding = false
 	if not grounded:
 		velocity.y -= G * dt
+		if real_move:
+			velocity.y = maxf(velocity.y, -FALL_TERMINAL)   # a spread out cat tops out at ~27 m/s
 		# claws out: steering into a wall it can't climb (or lying on a slope too steep to stand
 		# on) it slides down it, fore claws dragging. see _slide_step
 		_slide_step(dt, wish_dir)
@@ -2525,12 +2580,42 @@ func _leap() -> void:
 	_event("leap (%s %.1fm)" % [aim_kind, aim_point.y - global_position.y])
 
 
+## falls only cost health where health matters (the rat pit sets fall_damage) and for bots
+## (labs + tests measure it). everywhere else a fall past LAND_HARD is a stumble
+var fall_damage := false
+
+
+func fall_hurts() -> bool:
+	return fall_damage or combat_on()
+
+
 func _on_land() -> void:
 	var dodge_land := dash.state == CatDash.AIR
 	dash.on_land()
 	var impact := -prev_vy
 	land_dip_v -= clampf(impact * 0.12, 0.0, 0.9)
 	paws.land(impact)
+	last_impact = impact
+	if real_move and impact > LAND_FREE:
+		var set_up := stick_armed and (pounce_air or dodge_land)
+		var over := clampf((impact - LAND_HARD) / (FALL_TERMINAL - LAND_HARD), 0.0, 1.0)
+		if impact > LAND_HARD and fall_hurts():
+			health.fall(lerpf(FALL_DMG_MIN, FALL_DMG_MAX, over))
+		if not set_up or impact > LAND_HARD:
+			var hard := clampf((impact - LAND_SOFT) / (LAND_HARD - LAND_SOFT), 0.0, 1.0)
+			var keep_v := LAND_KEEP_SOFT if impact <= LAND_SOFT else lerpf(LAND_KEEP_SOFT, LAND_KEEP_HARD, hard)
+			velocity.x *= keep_v
+			velocity.z *= keep_v
+			land_rec = LAND_REC_SOFT if impact <= LAND_SOFT else lerpf(LAND_REC_SOFT, LAND_REC_MAX, hard)
+			_event("landed hard (%.1f m/s)" % impact if impact > LAND_SOFT else "soft landing")
+			if impact > LAND_HARD and not fall_hurts():
+				# outside the rat pit a big fall costs time, not health: the cat stumbles, sits low
+				# a beat longer and has to start its run again (simplify pass 2026-11-21)
+				velocity.x *= 0.4
+				velocity.z *= 0.4
+				land_rec = LAND_REC_MAX + lerpf(0.25, 0.6, over)
+				land_dip_v -= 0.4
+				_event("stumbled (%.1f m/s)" % impact)
 	if stick_armed and (pounce_air or dodge_land):
 		# stuck it: four paws down and the body stops right there, no skid, no steps after
 		land_stick = 0.3 if pounce_air else CatDash.STICK
