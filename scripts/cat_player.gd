@@ -656,6 +656,10 @@ func _read_input() -> Dictionary:
 	# gamepad (cat_pad.gd): every action has a button, the left stick's tilt picks the speed
 	var pad := CatPad.read()
 	var d := CatPad.merge(kb, pad)
+	# vr controllers (vr/vr_body.gd): empty in flat mode
+	var vrd := CatVR.read(self)
+	if not vrd.is_empty():
+		d = CatPad.merge(d, vrd)
 	_human_buttons(d)
 	if CatKeys.blocked:
 		# pause menu open (online the game keeps running): the cat stands still
@@ -679,8 +683,11 @@ func _human_buttons(d: Dictionary) -> void:
 	if sw and not _swat_prev:
 		_swat_paw = 1 - _swat_paw
 	_swat_prev = sw
-	d.paw_l = sw and _swat_paw == 0
-	d.paw_r = sw and _swat_paw == 1
+	# vr: each hand's trigger / swing is that side's own paw (vr/vr_body.gd)
+	d.paw_l = (sw and _swat_paw == 0) or d.get("vr_paw_l", false)
+	d.paw_r = (sw and _swat_paw == 1) or d.get("vr_paw_r", false)
+	d.erase("vr_paw_l")
+	d.erase("vr_paw_r")
 	var it: bool = d.get("interact", false)
 	d.erase("interact")
 	if it and not _int_prev:

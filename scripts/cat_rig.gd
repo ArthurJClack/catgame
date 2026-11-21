@@ -83,6 +83,8 @@ static func pounce_paw_spots(feet: Vector3, yaw: float) -> Array:
 	return out
 var claws_out := 0.0     # read only
 var slip_claws := 0.0    # 0..1 paws slipping on the floor: claws come out, paws stay down
+var vr_paw := [Vector3.INF, Vector3.INF]   # vr: world spot each fore paw follows (your hands, vr/vr_body.gd)
+var vr_paw_w := [0.0, 0.0]                 #   0..1 how much (a raised hand lifts its paw off the ground)
 
 # ---------------- state (readable by others) ----------------
 var phase := 0.0
@@ -1049,6 +1051,8 @@ func animate(dt: float) -> void:
 		for i in 2:
 			if (_swat_t >= 0.0 and _swat_i == i) or (claw_on and claw_i == i and climb < 0.5 and clamber < 0.5) or grip > 0.3:
 				want_free[i] = true
+			if vr_paw_w[i] > 0.3 and climb < 0.5 and clamber < 0.5:
+				want_free[i] = true
 	var gxf := Transform3D(gb, gx.origin)
 	if net_phase >= 0.0:
 		# remote copy: start this frame's step from where the owner's gait clock was, so the
@@ -1706,6 +1710,13 @@ func animate(dt: float) -> void:
 					sw_r = lerpf(0.95, prot, u)
 				foot = sw_p
 				prot = sw_r
+			# vr: a raised hand carries this paw (wins over the canned swat: the swing IS the swat)
+			var vw: float = vr_paw_w[i] * (1.0 - maxf(climb, clamber))
+			if vw > 0.001 and vr_paw[i] != Vector3.INF:
+				var vp := to_local(vr_paw[i])
+				vp.y = maxf(vp.y, 0.012)
+				foot = foot.lerp(vp, vw)
+				prot = lerpf(prot, 0.35, vw)
 			fp_foot[i] = foot - Vector3((HOME[i] as Vector3).x * track, 0.0, (HOME[i] as Vector3).z)
 			fp_down[i] = gait.mode[i] == CatGait.PLANTED
 		else:

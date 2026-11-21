@@ -23,6 +23,14 @@ const DEFAULTS := {
 	"show_fps": false,
 	"hints": true,        # tutorial hint cards on the farm (tutorial.gd)
 	"photo_cam": false,   # true = v also cycles the free orbit camera (photo mode)
+	"vr": false,          # play in vr (vr/cat_vr.gd): the game restarts itself with OpenXR on
+	"vr_turn": 0,         # 0 snap turn, 1 smooth turn (right stick)
+	"vr_snap": 30.0,      # degrees per snap
+	"vr_turn_speed": 120.0, # degrees / s smooth turning
+	"vr_vignette": 0.6,   # tunnel vignette while moving fast / turning (0 = off)
+	"vr_scale": 0.5,      # world scale: 0.5 = cat sized eyes (the world looks twice as big), 1 = human
+	"vr_hand": 1,         # menu pointer hand: 0 left, 1 right
+	"vr_paws": true,      # raising your hands lifts the cat's forepaws (swing = swat)
 }
 const QUALITY_NAMES := ["low", "medium", "high"]
 const FPS_CAPS := [0, 30, 60, 120, 144, 165, 240]
@@ -105,6 +113,8 @@ static func apply_audio() -> void:
 static func apply_display() -> void:
 	if DisplayServer.get_name() == "headless":
 		return
+	if CatVR.active and not CatVR.sim:
+		return   # the headset paces frames; the desktop window is only a mirror
 	if not OS.has_feature("web"):
 		var fs: bool = g("fullscreen")
 		var cur := DisplayServer.window_get_mode()
