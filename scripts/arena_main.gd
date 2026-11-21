@@ -49,6 +49,7 @@ func _ready() -> void:
 		player.set_style.call_deferred(Engine.get_meta("cat_style"))
 	player.health.died.connect(_on_died)
 	player.souls_hud.show_lives = true
+	player.fall_damage = true      # falls hurt here (elsewhere they're a stumble)
 	_build_hud()
 	if not (test_mode or show_mode) or "--puzzletest" in args:
 		Puzzles.pit(self, player)   # lanterns on the pillars (puzzles.gd)

@@ -9,6 +9,7 @@ extends Node3D
 ##   godot --headless --fixed-fps 60 --path . res://movelab.tscn -- --realtest [--only sprint_tile,hop_tap] [--csv out.csv]
 ##   --real 0 turns CatPlayer.real_move off where the build has it (before / after)
 ##   godot --path . res://movelab.tscn -- --show [--real 0] --write-movie out/zoom.avi --fixed-fps 30   (xvfb)
+##   same with --jumpshow: standing hop, gallop jump, air steer filmed from the side with slow motion
 ##     films one run on the tile from above: gallop, hard right, throw it into reverse, stop
 ##     (--path-csv f also writes that run's path, headless works too)
 ##
@@ -47,7 +48,17 @@ var keep := {}               # values other rows need (flat sprint for the hill 
 var _orb := 0.0
 var _hp0 := 0.0
 var show := false
+var jumpshow := false
 var cam: Camera3D
+var cap: Label
+var ruler: Node3D
+var dots: Array = []
+var _dot_n := 0
+var _press_t := -1.0
+var _off_t := -1.0
+var _peak := 0.0
+var _y0 := 0.0
+const JUMP_BEATS := {"hop": "standing hop, full charge", "run": "jump out of a gallop", "air": "hop, then steer hard right in the air"}
 
 
 func _ready() -> void:
@@ -59,10 +70,17 @@ func _ready() -> void:
 	var ps: Script = load("res://scripts/cat_player.gd")
 	if k >= 0 and ps.get("real_move") != null:
 		ps.set("real_move", args[k + 1] != "0")
-	show = "--show" in args
+	jumpshow = "--jumpshow" in args
+	show = "--show" in args or jumpshow
 	_build()
 	_scenarios()
-	if show:
+	if jumpshow:
+		var idle := {"move": Vector2.ZERO, "pitch": -0.1}
+		scen = {
+			"hop": [20.0, 0.0, 0.0, 2.6, func(tt): return idle.merged({"jump": tt > 0.5 and tt < 0.6, "hop_charge": 1.0}), func(): pass],
+			"run": [20.0, 0.0, 8.0, 5.3, func(tt): return _go({"sprint": true, "jump": tt > 3.5 and tt < 3.6, "hop_charge": 1.0}), func(): pass],
+			"air": [20.0, 0.0, 0.0, 3.2, func(tt): return _go({"jump": tt > 1.2 and tt < 1.3, "hop_charge": 1.0, "air_steer": 1.5708}), func(): pass]}
+	elif show:
 		scen = {"zoomies": [LANE.tile, 0.0, -30.0, 11.0, func(tt): return _go({"sprint": tt < 8.5, "turn_to": 0.0 if tt < 2.6 else (-PI * 0.5 if tt < 5.2 else PI * 0.5)}) if tt < 8.5 else {"move": Vector2.ZERO, "pitch": -0.1}, _dump_path]}
 	var only := []
 	k = args.find("--only")
@@ -95,13 +113,28 @@ func _ready() -> void:
 		add_child(we)
 		var cl := CanvasLayer.new()
 		add_child(cl)
-		var cap := Label.new()
+		cap = Label.new()
 		cap.position = Vector2(20, 14)
 		cap.add_theme_font_size_override("font_size", 28)
 		cap.add_theme_color_override("font_outline_color", Color.BLACK)
 		cap.add_theme_constant_override("outline_size", 8)
+		if jumpshow:
+			cap.add_theme_font_size_override("font_size", 34)
 		cap.text = ("real grip (tile holds 0.45 g)" if CatPlayer.real_move else "before (tile holds 1.4 g)") + "\ngallop, hard right, reverse, stop"
 		cl.add_child(cap)
+		if jumpshow:
+			ruler = Node3D.new()
+			add_child(ruler)
+			for i in 4:
+				var mi := MeshInstance3D.new()
+				var bm := BoxMesh.new()
+				bm.size = Vector3(0.06, 0.5, 0.06)
+				mi.mesh = bm
+				mi.position = Vector3(0, 0.25 + 0.5 * i, 0)
+				var m := StandardMaterial3D.new()
+				m.albedo_color = Color(0.95, 0.95, 0.95) if i % 2 == 0 else Color(0.85, 0.2, 0.15)
+				mi.material_override = m
+				ruler.add_child(mi)
 	_next.call_deferred()
 
 
@@ -126,7 +159,10 @@ func _box(pos: Vector3, size: Vector3, surface: String, rot := Vector3.ZERO) -> 
 		mi.mesh = bm
 		var img := Image.create(2, 2, false, Image.FORMAT_RGB8)
 		for i in 4:
-			img.set_pixel(i % 2, i / 2, Color(0.86, 0.87, 0.9) if (i % 2 + i / 2) % 2 == 0 else Color(0.62, 0.66, 0.72))
+			if jumpshow:
+				img.set_pixel(i % 2, i / 2, Color(0.36, 0.46, 0.36) if (i % 2 + i / 2) % 2 == 0 else Color(0.27, 0.36, 0.28))
+			else:
+				img.set_pixel(i % 2, i / 2, Color(0.86, 0.87, 0.9) if (i % 2 + i / 2) % 2 == 0 else Color(0.62, 0.66, 0.72))
 		var mat := StandardMaterial3D.new()
 		mat.albedo_texture = ImageTexture.create_from_image(img)
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
@@ -219,6 +255,18 @@ func _next() -> void:
 	_hp0 = player.health.value
 	t = -0.6
 	tr = {"t": [], "p": [], "v": [], "vy": [], "fl": [], "hp": [], "jump": []}
+	if jumpshow:
+		for d in dots:
+			d.queue_free()
+		dots.clear()
+		_press_t = -1.0
+		_off_t = -1.0
+		_peak = 0.0
+		_y0 = player.global_position.y
+		Engine.time_scale = 1.0
+		cam.global_position = Vector3.ZERO
+		cam.fov = 50.0
+		ruler.global_position = Vector3(float(s[0]) + 0.9, 0.0, float(s[2]))
 
 
 func _heading(v: Vector2) -> float:
@@ -252,11 +300,61 @@ func _physics_process(dt: float) -> void:
 		tr.fl.append(player.is_on_floor())
 		tr.hp.append(player.health.value)
 		tr.jump.append(bool(b.get("jump", false)))
+		if jumpshow:
+			_jump_film(bool(b.get("jump", false)))
 	if t > float(s[3]):
 		_next()
 
 
+## --jumpshow: slow motion round the jump, a dot trail in the air, live numbers in the caption
+func _jump_film(pressed: bool) -> void:
+	var p := player.global_position
+	if pressed and _press_t < 0.0:
+		_press_t = t
+		_y0 = p.y
+		ruler.global_position = Vector3(p.x + 0.9, 0.0, p.z + player.velocity.z * 0.3)
+	if _press_t >= 0.0:
+		if _off_t < 0.0 and not player.is_on_floor():
+			_off_t = t
+		_peak = maxf(_peak, p.y - _y0)
+		if _off_t >= 0.0 and not player.is_on_floor():
+			_dot_n += 1
+			if _dot_n % 6 == 0:
+				var mi := MeshInstance3D.new()
+				var sm := SphereMesh.new()
+				sm.radius = 0.035
+				sm.height = 0.07
+				mi.mesh = sm
+				var m := StandardMaterial3D.new()
+				m.albedo_color = Color(1.0, 0.6, 0.1)
+				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				mi.material_override = m
+				add_child(mi)
+				mi.global_position = p + Vector3(0, 0.2, 0)
+				dots.append(mi)
+	var slow: bool = _press_t >= 0.0 and t > _press_t - 0.05 and t < _press_t + 1.25
+	Engine.time_scale = 0.35 if slow else 1.0
+	var txt := ("now: real jumps" if CatPlayer.real_move else "before: old jumps") + "\n" + String(JUMP_BEATS[names[si]])
+	if _off_t >= 0.0:
+		txt += "\nlegs load for %d ms, peak %.2f m" % [roundi((_off_t - _press_t) * 1000.0), _peak]
+	if slow:
+		txt += "\n(slow motion)"
+	cap.text = txt
+
+
 func _process(_dt: float) -> void:
+	if jumpshow and cam and player and si >= 0 and si < names.size():
+		var p := player.global_position
+		if names[si] == "air":
+			var mx := 20.0 + (p.x - 20.0) * 0.5
+			var want := Vector3(mx, 2.6, p.z + 3.4)
+			cam.global_position = want if cam.global_position == Vector3.ZERO else cam.global_position.lerp(want, 0.15)
+			cam.look_at(Vector3(mx, 0.6, p.z - 0.6))
+		else:
+			cam.fov = 36.0
+			cam.global_position = Vector3(p.x - 4.2, 1.0, p.z - 0.3)
+			cam.look_at(Vector3(p.x, 0.95, p.z - 0.3))
+		return
 	if cam and player:
 		var p := player.global_position
 		cam.global_position = cam.global_position.lerp(p + Vector3(0, 7.5, 6.5), 0.12) if cam.global_position != Vector3.ZERO else p + Vector3(0, 7.5, 6.5)

@@ -23,6 +23,29 @@ var hits_taken := 0           # for tests
 var hits_dodged := 0
 
 
+## the cat came down too hard (CatPlayer._on_land, real_move). no shove: it is already on the
+## ground. rolling out of it (landing inside a dodge) halves it. returns what it took
+func fall(amount: float) -> float:
+	if dead or player == null:
+		return 0.0
+	if player.is_invulnerable():
+		amount *= 0.5
+	value = maxf(value - amount, 0.0)
+	flash = 1.0
+	_lag_hold = 0.6
+	hits_taken += 1
+	if player.get("combat") != null:
+		player.combat.interrupt()
+	hurt.emit(amount, player.global_position)
+	player._event("ouch, hard landing! (%.0f)" % value)
+	if value <= 0.0:
+		dead = true
+		lives -= 1
+		player._event("lost a life · %d left" % lives)
+		died.emit(lives)
+	return amount
+
+
 ## something hit the cat. from = where the blow came from (world), knock = m/s shove.
 ## returns true if it landed (false = dodged through it, grace window, or already down)
 func damage(amount: float, from: Vector3, knock := 2.2) -> bool:

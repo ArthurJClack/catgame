@@ -165,6 +165,24 @@ const RUN_HOP := 0.3          # share of the hop height left at a full gallop
 const STAND_PUSH := 1.2       # a standing hop with the stick held goes toward it (m/s)
 const AIR_NUDGE := 1.5
 const AIR_BUDGET := 0.5
+## movement plan phase 4 (real_move): coming down costs what the fall was worth. a cat lands on
+## its forelegs and folds: up to LAND_FREE m/s (a ~1 m drop) is nothing, up to LAND_SOFT (~2.5 m)
+## the legs give for a moment and it keeps most of its run, up to LAND_HARD (~6 m) it lands in a
+## deep crouch and needs LAND_REC_MAX s before it can spring or sprint again, and past that it
+## is hurt, more the faster it was falling (FALL_DMG_MIN at LAND_HARD .. FALL_DMG_MAX at terminal).
+## pounces and stuck dodges are landings the cat set up for: no extra cost under LAND_HARD
+const LAND_FREE := 4.4
+const LAND_SOFT := 7.0
+const LAND_HARD := 10.8
+const LAND_KEEP_SOFT := 0.7
+const LAND_KEEP_HARD := 0.2
+const LAND_REC_SOFT := 0.15
+const LAND_REC_MAX := 0.4
+const FALL_TERMINAL := 27.0
+const FALL_DMG_MIN := 8.0
+const FALL_DMG_MAX := 60.0
+var land_rec := 0.0           # legs busy soaking up a landing: no jump, no run
+var last_impact := 0.0        # m/s the last landing came down at (tests, sfx)
 var _gather_t := 0.0
 var _gather_vy := 0.0
 var _air_left := AIR_BUDGET
@@ -969,6 +987,13 @@ func _physics_process(dt: float) -> void:
 		_track_walls()
 		_post(dt, inp)
 		return
+	land_rec = maxf(land_rec - dt, 0.0)
+	if land_rec > 0.0 and real_move:
+		# legs folded under a landing: nothing springs or runs until they are back under it
+		jump_pressed = false
+		jump_held = false
+		aim_in = false
+		wish_len *= 0.3
 	if dash.recover > 0.0:
 		# landing out of a dodge: the legs are busy soaking it up
 		jump_pressed = false
@@ -983,7 +1008,7 @@ func _physics_process(dt: float) -> void:
 			return
 
 	# crouch / stand (only stand if there's room)
-	var crouch_target := 1.0 if (want_crouch or charging or _gather_t > 0.0) else 0.0
+	var crouch_target := 1.0 if (want_crouch or charging or _gather_t > 0.0 or (land_rec > LAND_REC_SOFT and real_move)) else 0.0
 	crouch_target = maxf(crouch_target, space_charge() * 0.5)   # gathering for a bigger hop
 	if crouch_target < crouch_amt and not _can_stand():
 		crouch_target = crouch_amt
@@ -1253,6 +1278,8 @@ func _physics_process(dt: float) -> void:
 		wall_sliding = false
 	if not grounded:
 		velocity.y -= G * dt
+		if real_move:
+			velocity.y = maxf(velocity.y, -FALL_TERMINAL)   # a spread out cat tops out at ~27 m/s
 		# claws out: steering into a wall it can't climb (or lying on a slope too steep to stand
 		# on) it slides down it, fore claws dragging. see _slide_step
 		_slide_step(dt, wish_dir)
@@ -2521,12 +2548,42 @@ func _leap() -> void:
 	_event("leap (%s %.1fm)" % [aim_kind, aim_point.y - global_position.y])
 
 
+## falls only cost health where health matters (the rat pit sets fall_damage) and for bots
+## (labs + tests measure it). everywhere else a fall past LAND_HARD is a stumble
+var fall_damage := false
+
+
+func fall_hurts() -> bool:
+	return fall_damage or not bot.is_empty()
+
+
 func _on_land() -> void:
 	var dodge_land := dash.state == CatDash.AIR
 	dash.on_land()
 	var impact := -prev_vy
 	land_dip_v -= clampf(impact * 0.12, 0.0, 0.9)
 	paws.land(impact)
+	last_impact = impact
+	if real_move and impact > LAND_FREE:
+		var set_up := stick_armed and (pounce_air or dodge_land)
+		var over := clampf((impact - LAND_HARD) / (FALL_TERMINAL - LAND_HARD), 0.0, 1.0)
+		if impact > LAND_HARD and fall_hurts():
+			health.fall(lerpf(FALL_DMG_MIN, FALL_DMG_MAX, over))
+		if not set_up or impact > LAND_HARD:
+			var hard := clampf((impact - LAND_SOFT) / (LAND_HARD - LAND_SOFT), 0.0, 1.0)
+			var keep_v := LAND_KEEP_SOFT if impact <= LAND_SOFT else lerpf(LAND_KEEP_SOFT, LAND_KEEP_HARD, hard)
+			velocity.x *= keep_v
+			velocity.z *= keep_v
+			land_rec = LAND_REC_SOFT if impact <= LAND_SOFT else lerpf(LAND_REC_SOFT, LAND_REC_MAX, hard)
+			_event("landed hard (%.1f m/s)" % impact if impact > LAND_SOFT else "soft landing")
+			if impact > LAND_HARD and not fall_hurts():
+				# outside the rat pit a big fall costs time, not health: the cat stumbles, sits low
+				# a beat longer and has to start its run again (simplify pass 2026-11-21)
+				velocity.x *= 0.4
+				velocity.z *= 0.4
+				land_rec = LAND_REC_MAX + lerpf(0.25, 0.6, over)
+				land_dip_v -= 0.4
+				_event("stumbled (%.1f m/s)" % impact)
 	if stick_armed and (pounce_air or dodge_land):
 		# stuck it: four paws down and the body stops right there, no skid, no steps after
 		land_stick = 0.3 if pounce_air else CatDash.STICK
