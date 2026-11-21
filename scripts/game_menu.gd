@@ -203,6 +203,7 @@ func show_page(p: String) -> void:
 		"settings": _page_settings()
 		"controls": _page_controls()
 		"achievements": _page_achievements()
+		"puzzles": _page_puzzles()
 
 
 func _button(parent: Node, text: String, fn: Callable) -> Button:
@@ -224,6 +225,7 @@ func _page_main() -> void:
 		_button(_body, txt, func(): Save.save_now(); show_page("main"))
 	_button(_body, "settings", show_page.bind("settings"))
 	_button(_body, "controls", show_page.bind("controls"))
+	_button(_body, "cat puzzles (%d / %d)" % [Puzzles.count_solved(), Puzzles.LIST.size()], show_page.bind("puzzles"))
 	var ach = Save.achievements
 	if ach:
 		_button(_body, "achievements (%d / %d)" % [ach.count(), Achievements.LIST.size()], show_page.bind("achievements"))
@@ -456,6 +458,46 @@ func _page_achievements() -> void:
 		v.add_child(t)
 		var d := Label.new()
 		d.text = (a[1] + ("  ·  " + str(ach.data()[id]) if got else "")) if (got or not a[2]) else "a secret"
+		d.add_theme_font_size_override("font_size", 12)
+		d.add_theme_color_override("font_color", Color(0.6, 0.6, 0.64))
+		v.add_child(d)
+		h.add_child(v)
+		_scroll_box.add_child(h)
+	_scroll_box = null
+	var b := _button(_body, "back", show_page.bind("main"))
+	b.grab_focus.call_deferred()
+
+
+## found tally: solved puzzles show their name, the rest only where to look. the hint line is
+## the one place the game tells you how to find them (the world itself stays wordless)
+func _page_puzzles() -> void:
+	_title.text = "cat puzzles  %d / %d" % [Puzzles.count_solved(), Puzzles.LIST.size()]
+	var hint := Label.new()
+	hint.text = "stuck? crouch and keep still for a moment: the cat notices things nearby."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.custom_minimum_size.x = PANEL_W
+	hint.add_theme_font_size_override("font_size", 13)
+	hint.add_theme_color_override("font_color", Color(0.65, 0.66, 0.7))
+	_body.add_child(hint)
+	_scroll()
+	for id in Puzzles.LIST:
+		var a: Array = Puzzles.LIST[id]
+		var got := int(Puzzles.solved.get(id, 0)) > 0
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 12)
+		var mark := Achievements.PawIcon.new()
+		mark.lit = got
+		mark.custom_minimum_size = Vector2(26, 26)
+		mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(mark)
+		var v := VBoxContainer.new()
+		var t := Label.new()
+		t.text = a[0] if got else "???"
+		t.add_theme_font_size_override("font_size", 17)
+		t.add_theme_color_override("font_color", Color(0.95, 0.78, 0.2) if got else Color(0.75, 0.75, 0.78))
+		v.add_child(t)
+		var d := Label.new()
+		d.text = a[1]
 		d.add_theme_font_size_override("font_size", 12)
 		d.add_theme_color_override("font_color", Color(0.6, 0.6, 0.64))
 		v.add_child(d)
