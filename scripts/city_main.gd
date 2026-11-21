@@ -98,6 +98,8 @@ func _ready() -> void:
 		_make_cam()
 	elif not OS.has_feature("web"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if si < 0 and not (tour or test):
+		Puzzles.city(self, player, _ground(START + Vector3(3.0, 0, -1.4), 0.0))   # the warm vent (puzzle_more.gd)
 
 
 func _ground(p: Vector3, up := 0.0) -> Vector3:

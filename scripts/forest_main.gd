@@ -74,6 +74,8 @@ func _ready() -> void:
 			tour = true
 	elif not OS.has_feature("web"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if si < 0 and not tour and not ("--watch" in args):
+		Puzzles.forest(self, player)   # the crow's shiny on the deer stand (puzzle_more.gd)
 
 
 func _spawn_mice() -> void:
