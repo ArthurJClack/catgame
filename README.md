@@ -102,6 +102,9 @@ still describe how each system works; where they name old keys, the table wins.
   `GRIP_REAL` scales it all). `CAT_OFF=real_move` or `--real 0` in the labs = the old grip table
 - jumps (also `real_move`): a hop loads the legs first (`GATHER_MIN`..`GATHER_MAX`), goes lower the faster the run
   (`RUN_HOP`), and can't be steered in the air past a small nudge (`AIR_NUDGE`, `AIR_BUDGET`)
+- landings (also `real_move`): hitting the ground faster than `LAND_FREE` costs run speed and a short recovery
+  (`LAND_KEEP_*`, `LAND_REC_*`), faster than `LAND_HARD` (about a 6 m fall) also hurts (`FALL_DMG_*`, `CatHealth.fall`).
+  a pounce or dodge that sticks its landing skips the soft tier
 - `scripts/cat_pad.gd` gamepad reader (deadzones, button map, `CatPad.sim` fake pad for tests)
 - `scripts/level.gd` living room gym + gait reference studio
 - `scripts/npc_cat.gd` wandering cats

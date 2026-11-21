@@ -39,11 +39,24 @@ const FIRE_T := 3.5
 const FIRE_R := 0.9
 const FIRE_TICK := 0.5
 
+## every puzzle in the game: id -> [name, where]. the pause menu's puzzle page counts these
+## (solved ones show their name, the rest only where they are)
+const LIST := {
+	"knock_it_off": ["knock it off", "the farm house"],
+	"perch_sunbeam": ["the sunbeam", "the barn"],
+	"gift": ["a gift for the humans", "the farm house"],
+	"pull_string": ["pull the string", "the barn"],
+	"herd": ["herd the chicks", "the farm yard"],
+	"quiet_paws": ["quiet paws", "pier 9"],
+	"lantern": ["lanterns", "the rat pit"],
+}
+
 static var treats_eaten := 0
 static var solved := {}        # puzzle id -> times solved this session
 
 var player: CatPlayer
 var arena: Node = null
+var sense: CatSense            # crouch + keep still = unsolved puzzles nearby shimmer (cat_sense.gd)
 var treats: Array[Node3D] = []
 var t := 0.0
 var _sfx := {}
@@ -104,8 +117,25 @@ static func docks(root: Node3D, p: CatPlayer) -> Puzzles:
 	# quiet paws: the guard dog asleep outside the hut door (hut x 6.7..9.3, front wall z 11.6),
 	# chained to a post by the wall, its bowl by the wall right in front of its nose
 	z.dog = QuietPaws.build(z, Vector3(8.7, 0, 12.35), Vector3(8.0, 0, 11.75), Vector3(7.35, 0, 11.95), StealthLevel.PUDDLES)
+	z._add_sense()
+	z.sense.add_point("quiet_paws", Vector3(7.35, 0, 11.95))
 	z._maybe_test()
 	return z
+
+
+func _add_sense() -> void:
+	sense = CatSense.new()
+	sense.name = "CatSense"
+	sense.player = player
+	add_child(sense)
+
+
+static func count_solved() -> int:
+	var n := 0
+	for id in LIST:
+		if int(solved.get(id, 0)) > 0:
+			n += 1
+	return n
 
 
 func _maybe_test() -> void:
@@ -133,6 +163,12 @@ func _build_farm() -> void:
 	rope = PullString.build(self, Vector3(11.2, 2.2, 21.74), Vector3(11.2, 2.55, 22.12))
 	# herd the chicks: five loose in the yard east of the barn door, their pen by the east fence
 	herd = HerdChicks.build(self)
+	_add_sense()
+	sense.add_point("knock_it_off", bag)
+	sense.add_point("perch_sunbeam", sun_spot)
+	sense.add_point("gift", mat_pos)
+	sense.add_point("pull_string", Vector3(11.2, 1.3, 21.74))
+	sense.add_point("herd", Vector3(21.3, 0.0, 12.2))     # the gap in the pen
 
 
 func _build_pit() -> void:
@@ -150,6 +186,9 @@ func _build_pit() -> void:
 			tops.append(pp + Vector3(0, h, 0) - pp.normalized() * 0.12)
 	set_meta("tops", tops)
 	_place_lanterns()
+	_add_sense()
+	if tops.size() > 0:
+		sense.add_point("lantern", tops[0])
 	_wave_seen = int(arena.get("wave")) if "wave" in arena else 0
 
 
