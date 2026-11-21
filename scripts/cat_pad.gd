@@ -6,12 +6,13 @@ extends RefCounted
 ##   right stick  look / camera
 ##   L3 (click)   run: canter. click again while running = full gallop (same as double tapping shift)
 ##   A            same as space: tap hop, hold higher hop, hold long = pounce + aim line, wall kick   B   dodge
-##   X (hold)     scratch                    Y (hold)  grab: rear up + pin it with both paws
-##   LT / RT      left / right paw: tap = swat, hold = rake. 
-##   LB (hold)    aim a leap, let go to leap
-##   RB (hold)    crouch / stalk
-##   R3 (click)   lock on
-##   d-pad down   drop what you're carrying  d-pad up  walk toggle  d-pad left  switch view
+##   X            interact: scratch (hold at a post / wall), drop what's in your mouth
+##   Y            meow
+##   RT           swat (alternates paws), hold = hook with your claws
+##   LT           grab / hold in your mouth
+##   RB (hold)    crouch / sneak
+##   R3 (click)   lock on (rat pit only)
+##   d-pad left   first / third person
 ## deadzones are radial with the range rescaled past them, so the slowest creep is right at the edge
 ## of the deadzone instead of jumping to 20 percent speed.
 
@@ -157,8 +158,6 @@ static func look_delta(dt: float) -> Vector2:
 # ---- run toggle on L3 (canter, click again = gallop) ----
 static var _l3_prev := false
 static var _run := 0           # 0 off, 1 canter, 2 gallop
-static var _walk_prev := false
-static var walk_toggle := false
 
 
 ## reads every button into the same dict shape cat_player uses for the keyboard
@@ -174,10 +173,6 @@ static func read() -> Dictionary:
 	# let off the stick (or stop pushing forward-ish hard) and the run ends, like letting go of shift
 	if mv.length() < 0.5:
 		_run = 0
-	var wt := btn(JOY_BUTTON_DPAD_UP)
-	if wt and not _walk_prev:
-		walk_toggle = not walk_toggle
-	_walk_prev = wt
 	var d := {
 		"move": mv,
 		"canter": _run == 1,
@@ -185,14 +180,12 @@ static func read() -> Dictionary:
 		"crouch": btn(JOY_BUTTON_RIGHT_SHOULDER),
 		"jump": btn(JOY_BUTTON_A),
 		"dash": btn(JOY_BUTTON_B),
-		"scratch": btn(JOY_BUTTON_X),
-		"grab": btn(JOY_BUTTON_Y),
+		"interact": btn(JOY_BUTTON_X),
+		"meow": btn(JOY_BUTTON_Y),
 		"toggle_view": btn(JOY_BUTTON_DPAD_LEFT),
-		"paw_l": trigger(false),
-		"paw_r": trigger(true),
-		"aim": btn(JOY_BUTTON_LEFT_SHOULDER),
+		"swat": trigger(true),
+		"grab": trigger(false),
 		"lock_on": btn(JOY_BUTTON_RIGHT_STICK),
-		"drop": btn(JOY_BUTTON_DPAD_DOWN),
 	}
 	for k in d:
 		if typeof(d[k]) == TYPE_BOOL and d[k]:

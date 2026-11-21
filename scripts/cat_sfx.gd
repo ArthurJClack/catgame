@@ -192,7 +192,7 @@ func _process(dt: float) -> void:
 	# ---- meow (local cat only: key "meow")
 	_meow_cool = maxf(_meow_cool - dt, 0.0)
 	if local:
-		var m: bool = CatKeys.down("meow")
+		var m: bool = CatKeys.down("meow") or (not CatKeys.blocked and CatPad.connected() and CatPad.btn(JOY_BUTTON_Y))
 		if m and not _meow_prev and _meow_cool <= 0.0:
 			meow()
 		_meow_prev = m

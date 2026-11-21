@@ -8,6 +8,31 @@ open the folder in godot 4.3+ and hit play (f5).
 boot = **title screen** (`title_screen.gd`) over the live farm while the camera circles your cat: continue (last save, says where + play time + puzzles + treats), load / new game (3 slots, "start over" needs two clicks), settings, play online (the m lobby), quit. once per run, never in tests / previews / the server. test: `xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/title_test.gd [-- out/title]` (saves screenshots)
 
 ## controls
+**simplified layout (2026-11-21)**, 14 rebindable actions:
+
+| key | does |
+|---|---|
+| wasd + mouse | move (the cat turns to run where you look) |
+| shift | run, double tap + hold = gallop |
+| ctrl / c | crouch / sneak (slow + quiet) |
+| space | tap = hop, hold = leap: aim the line, let go (onto prey it's a pounce) |
+| mouse1 | swat (alternates paws), hold = hook with your claws |
+| mouse2 / g | grab / hold in your mouth |
+| e / f | interact: drop what's in your mouth, otherwise scratch whatever's in front |
+| alt / mouse4 | dodge |
+| n | meow |
+| v | first / third person (settings -> photo cam adds the orbit cam) |
+| tab | lock on (rat pit only) |
+| esc / h | menu / help |
+
+pad: L3 run, A hop / leap, B dodge, X interact, Y meow, RT swat, LT grab, RB crouch, R3 lock on, d-pad left view.
+lock on, rakes, the stamina bar and the health bar only exist in the rat pit (`player.combat_zone`, set by
+arena_main; bots always get them). removed: q / mouse3 aim leap (hold space does it), x / caps lock walk
+(crouch sneaks), separate left / right paw buttons, d-pad walk / drop. 1-9 coats, f4 / f6 / f7 / f8 / f10
+level jumps and t teleports are dev only (`DevKeys`, off in release exports): coats are in settings.
+test: `--script res://tests/controls_test.gd` (xvfb). the notes below are the detailed history and
+still describe how each system works; where they name old keys, the table wins.
+
 - wasd moves relative to where you look (same as the orbit cam in every view), the cat turns to run that way and its head follows your look. backing up is slow, a/d = short sideways hop, hold shift = canter (6 m/s), double tap shift + hold = full gallop (11 m/s), ctrl/c stalk (crouch)
 - momentum: the cat has weight. speed builds (trot ~0.4 s, full gallop ~2.5 s) and bleeds off when you let go (gallop rolls ~1.5-2 s), asking to go the other way at speed plants the paws and skids, and the faster it runs the wider it turns. hold x (or tap caps lock) = walk (~1 m/s)
 - controller (`cat_pad.gd`, any pad godot maps, xbox names): left stick tilt = speed (nudge creep, half walk, full trot), right stick look, L3 run (click again = gallop), A = space (tap hop, hold higher hop, hold long = pounce), B dodge, X scratch, Y grab, LT/RT left/right paw, LB aim leap, RB crouch, R3 lock on, d-pad down drop, d-pad up walk toggle, d-pad left view. radial deadzones with rescale, hysteresis on the triggers

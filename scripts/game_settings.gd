@@ -22,6 +22,7 @@ const DEFAULTS := {
 	"quality": 2,         # 0 low, 1 medium, 2 high
 	"show_fps": false,
 	"hints": true,        # tutorial hint cards on the farm (tutorial.gd)
+	"photo_cam": false,   # true = v also cycles the free orbit camera (photo mode)
 }
 const QUALITY_NAMES := ["low", "medium", "high"]
 const FPS_CAPS := [0, 30, 60, 120, 144, 165, 240]
@@ -171,6 +172,9 @@ static func apply_player(p: Node) -> void:
 	cp.invert_y = g("invert_y")
 	cp.fov_base = float(g("fov"))
 	cp.calm_cam = not g("head_bob")
+	cp.orbit_in_cycle = g("photo_cam")
+	if not cp.orbit_in_cycle and cp.view_mode == 2:
+		cp.set_view(0)
 
 
 ## everything, on the whole running tree

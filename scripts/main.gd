@@ -170,10 +170,11 @@ func _build_hud() -> void:
 	help_label.add_theme_font_size_override("font_size", 15)
 	help_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	help_label.add_theme_constant_override("outline_size", 5)
-	help_label.text = "wasd move (relative to your view, the cat turns to run that way) · hold shift canter · double tap shift gallop · ctrl/c stalk · space hop (hold = higher, hold long = pounce + aim line) / wall kick (1 per jump) · alt or mouse4 dodge (wasd picks the way, none = backstep) · arrows also look\ntab = lock on (rats first, then prey / wildlife): camera holds it, wasd circles it, flick the mouse = next target, tab again = unlock\nhold q or mouse3 + look + release = aimed leap (yellow ring = grab the edge + haul up)\njump at trees / posts / fences / hay / curtains holding w = climb (then wasd any way, round trunks + corners, space + direction = lunge) · hold f at a wall = scratch\nstalk (c) up to prey, hold space to pounce · mouse1 / mouse2 = left / right paw swat (hold = rake, or claws: hook stuff) · g / mouse5 = grab + pin it · e drop\nattacks are committed (souls style): dodge comes out of the recovery, extra clicks are buffered\n1-9 swap cat · v first / third / orbit cam (scroll zooms) · walk out the yard gates to travel: west = forest, east = pier 9, north = trail, back fence behind the house = the city, cellar by the barn = rat pit (f6 / f7 / f8 / f10 / f4 shortcuts) · n meow · h hide help · esc = menu (settings, rebind keys)"
+	help_label.text = "wasd move (the cat turns to run where you look) · shift run, double tap = gallop · ctrl / c sneak\nspace: tap = hop · hold = leap / pounce (aim the line, let go) · jump at trees, posts and fences holding w to climb\nmouse1 swat (hold = hook with your claws) · mouse2 / g grab · e scratch / drop · alt dodge · n meow · v first / third person\nwalk out the yard gates to travel · h hide help · esc menu (settings, coats, keys)"
 	if OS.has_feature("web"):
-		help_label.text = "click the game to grab the mouse (in a browser use c to crouch, ctrl+w closes the tab!)\n" + help_label.text.replace("ctrl/c", "c")
+		help_label.text = "click the game to grab the mouse (in a browser use c to crouch, ctrl+w closes the tab!)\n" + help_label.text.replace("ctrl / c", "c")
 		help_label.offset_top = -152
+	help_label.visible = false     # h shows it. the tutorial cards + controls page teach the keys
 	hud.add_child(help_label)
 	crosshair = ColorRect.new()
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE   # the captured cursor parks on it: STOP would eat every mouse move
@@ -193,6 +194,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var k: int = event.physical_keycode
+		if DevKeys.blocked(k):
+			return
 		if k >= KEY_1 and k <= KEY_9:
 			player.set_style(CatRig.STYLE_ORDER[k - KEY_1])
 		elif k == KEY_H:

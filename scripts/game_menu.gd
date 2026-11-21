@@ -333,6 +333,32 @@ func _option(text: String, key: String, labels: Array, values: Array) -> OptionB
 	return o
 
 
+const COAT_NAMES := {"block_black": "black", "block": "tabby", "block_tux": "tuxedo", "block_lean": "lean blue",
+	"block_bob": "bobtail", "stepped": "fluffy", "stepped_coon": "maine coon", "stepped_persian": "persian",
+	"stepped_smoke": "smoke"}
+
+
+## coat picker (used to be the 1-9 keys, which are dev only now)
+func _cat_picker() -> void:
+	var h := _row("coat")
+	var o := OptionButton.new()
+	o.custom_minimum_size = Vector2(160, 32)
+	var cat := local_cat()
+	var cur: String = cat.style if cat and "style" in cat else ""
+	for i in CatRig.STYLE_ORDER.size():
+		var st: String = CatRig.STYLE_ORDER[i]
+		o.add_item(COAT_NAMES.get(st, st), i)
+		if st == cur:
+			o.selected = i
+	o.item_selected.connect(func(i):
+		var st: String = CatRig.STYLE_ORDER[i]
+		Engine.set_meta("cat_style", st)
+		var c := local_cat()
+		if c:
+			c.set_style(st))
+	h.add_child(o)
+
+
 func _apply() -> void:
 	GameSettings.apply_all(get_tree())
 
@@ -348,11 +374,14 @@ func _page_settings() -> void:
 	_slider("master volume", "master", 0.0, 1.0, 0.05, _pct)
 	_slider("world / ambience", "ambience", 0.0, 1.0, 0.05, _pct)
 	_slider("cat + effects", "sfx", 0.0, 1.0, 0.05, _pct)
+	_section("your cat")
+	_cat_picker()
 	_section("mouse + camera")
 	_slider("mouse sensitivity", "sens", 0.2, 3.0, 0.05, func(x): return "%.2fx" % x)
 	_check("invert look up / down", "invert_y")
 	_slider("field of view", "fov", 60.0, 110.0, 1.0, func(x): return "%d°" % roundi(x))
 	_check("head bob (first person)", "head_bob")
+	_check("photo cam (v also cycles a free orbit camera)", "photo_cam")
 	_section("display")
 	if not OS.has_feature("web"):
 		_check("fullscreen", "fullscreen")
@@ -416,14 +445,14 @@ func _page_controls() -> void:
 	pad.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	pad.custom_minimum_size.x = PANEL_W - 30
 	pad.add_theme_font_size_override("font_size", 13)
-	pad.text = "left stick move (tilt = speed), right stick look, L3 run / gallop, A hop / pounce, B dodge, X scratch, Y grab, LT / RT paws, LB aim leap, RB crouch, R3 lock on, d-pad down drop, up walk, left view, start = this menu"
+	pad.text = "left stick move (tilt = speed), right stick look, L3 run / gallop, A hop (tap) / leap + pounce (hold), B dodge, X scratch / drop, Y meow, RT swat, LT grab, RB crouch / sneak, R3 lock on (rat pit), d-pad left first / third person, start = this menu"
 	_scroll_box.add_child(pad)
 	_section("other keys")
 	var other := Label.new()
 	other.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	other.custom_minimum_size.x = PANEL_W - 30
 	other.add_theme_font_size_override("font_size", 13)
-	other.text = "esc menu, m online lobby, 1-9 coats, f5 back to the farm, r restart (pit / trail), f9 update, mouse wheel zoom (orbit view)"
+	other.text = "esc menu, h help, m online lobby, f5 back to the farm, r restart (pit / trail / city), f9 update. coats are in settings"
 	_scroll_box.add_child(other)
 	_scroll_box = null
 	var h2 := HBoxContainer.new()

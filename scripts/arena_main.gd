@@ -49,6 +49,7 @@ func _ready() -> void:
 		player.set_style.call_deferred(Engine.get_meta("cat_style"))
 	player.health.died.connect(_on_died)
 	player.souls_hud.show_lives = true
+	player.combat_zone = true      # lock on, rakes, stamina + health only live in the pit
 	player.fall_damage = true      # falls hurt here (elsewhere they're a stumble)
 	_build_hud()
 	if not (test_mode or show_mode) or "--puzzletest" in args:
@@ -183,6 +184,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if player == null or not player.bot.is_empty() or not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var k: int = event.physical_keycode
+	if DevKeys.blocked(k):
+		return
 	if k >= KEY_1 and k <= KEY_8:
 		var order: Array = CatRig.STYLE_ORDER
 		if k - KEY_1 < order.size():
@@ -386,7 +389,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the rat pit: rats can only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nalt / mouse4 dodge (i-frames) · mouse1 / mouse2 left / right paw (hold = rake) · hold space = pounce (heavy hit, leads a running rat) · g / mouse5 grab + pin it (can't walk while holding) · attacks are committed: dodge out of the recovery · watch your stamina\ntab lock on (wasd circles, flick mouse = switch rat, dodges go relative to it) · r restart · 1-8 swap cat · v camera · h hide help · f5 back to the house"
+	help_label.text = "the rat pit: rats only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nmouse1 swat (hold = rake) · hold space = pounce · mouse2 / g grab + pin · alt dodge out of the recovery · watch your stamina\ntab lock on (wasd circles, flick the mouse = next rat) · r restart · h hide help · f5 back to the farm"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)

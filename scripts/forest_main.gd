@@ -159,7 +159,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -112
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the forest: deer + rabbits in the meadow, ducks + fish on the pond, crows, a hawk overhead, hedgehogs, lizards on the rocks, grasshoppers + mice to hunt\nstalk (c) to sneak up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nt teleport to next landmark · n skip time (sunset, night, morning) · m mute · 1-8 swap cat · v camera · h hide help · walk out the gate behind you (or f5) = back to the yard"
+	help_label.text = "the forest: deer + rabbits in the meadow, ducks + fish on the pond, crows, a hawk overhead, hedgehogs, lizards on the rocks, grasshoppers + mice to hunt\nsneak (ctrl / c) up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nh hide help · walk out the gate behind you (or f5) = back to the yard"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -182,6 +182,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if player == null or not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var k: int = event.physical_keycode
+	if DevKeys.blocked(k):
+		return
 	if k >= KEY_1 and k <= KEY_8 and player.has_method("set_style"):
 		var order: Array = CatRig.STYLE_ORDER
 		if k - KEY_1 < order.size():
@@ -197,12 +199,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			player.toast_t = 0.0
 		KEY_H:
 			help_label.visible = not help_label.visible
-		KEY_M:
+		KEY_F2:
 			sound.set_muted(not sound.muted)
 			player.toast = "sound off" if sound.muted else "sound on"
 			player.toast_t = 0.0
-		KEY_N:
-			# skip ahead: afternoon -> sunset -> night -> morning
+		KEY_F3:
+			# skip ahead (dev key: n is meow): afternoon -> sunset -> night -> morning
 			atmos.skip = 3.0
 			player.toast = "time passes..."
 			player.toast_t = 0.0

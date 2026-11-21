@@ -110,6 +110,7 @@ var _sc_ground_t := 0.0
 var _sc_last := Vector3.ZERO
 var third_person := false
 var view_mode := 0            # 0 first person, 1 third person (behind), 2 orbit
+var orbit_in_cycle := false   # v only flips first / third person unless the photo cam setting is on
 var orb_yaw := 0.0            # where you're looking (all views). the body (yaw) turns to run where you steer
 var orb_pitch := -0.35        # orbit view pitch (first/third person use pitch)
 var orb_dist := 1.4
@@ -600,8 +601,18 @@ func _unhandled_input(event: InputEvent) -> void:
 var _shift_prev := false
 var _shift_last_tap := -10.0
 var _galloping := false
-var _caps_prev := false
-var walk_lock := false        # caps lock walk toggle
+var _swat_prev := false
+var _swat_paw := 1             # the swat button alternates paws: this is the one it used last
+var _int_prev := false
+var _int_drop := false         # e pressed while carrying: dropped, so this hold isn't a scratch
+## the rat pit (arena_main) turns this on: lock on, rakes, the stamina bar and the health bar
+## only exist there. everywhere else the cat just moves, swats and explores. bots always get
+## the full set (tests + preview films drive those systems directly)
+var combat_zone := false
+
+
+func combat_on() -> bool:
+	return combat_zone or not bot.is_empty()
 var _brake_ask := false
 var _backing := false
 var _turn_factor := 1.0
@@ -625,38 +636,27 @@ func _read_input() -> Dictionary:
 	if CatKeys.down("left"): mv.x -= 1
 	if CatKeys.down("right"): mv.x += 1
 	mv = mv.limit_length(1.0)
-	# walk: hold x (or tap caps lock to keep walking). the keys then ask for a half pushed stick,
-	# which the speed curve turns into a real cat walk (~1 m/s) instead of the trot
-	var caps := CatKeys.down("walk_toggle")
-	if caps and not _caps_prev:
-		walk_lock = not walk_lock
-	_caps_prev = caps
+	# no walk keys any more (simplify pass): crouch is the slow, quiet sneak, a pad stick still
+	# walks with a half tilt
 	if mv != Vector2.ZERO:
 		CatPad.last_used_pad = false
-	var walking := CatKeys.down("walk") or walk_lock
-	if walking and not shift:
-		mv *= WALK_TILT
 	var kb := {
 		"move": mv,
 		"canter": shift and not _galloping,
 		"sprint": shift and _galloping,
 		"crouch": CatKeys.down("crouch"),
 		"jump": CatKeys.down("jump"),
-		"paw_l": CatKeys.down("paw_l"),
-		"paw_r": CatKeys.down("paw_r"),
+		"swat": CatKeys.down("swat"),
 		"grab": CatKeys.down("grab"),
-		"aim": CatKeys.down("aim"),
-		"scratch": CatKeys.down("scratch"),
+		"interact": CatKeys.down("interact"),
 		"toggle_view": CatKeys.down("toggle_view"),
-		"drop": CatKeys.down("drop"),
 		"dash": CatKeys.down("dash"),
 		"lock_on": CatKeys.down("lock_on"),   # press = lock / unlock (cat_lock_on.gd)
 	}
 	# gamepad (cat_pad.gd): every action has a button, the left stick's tilt picks the speed
 	var pad := CatPad.read()
-	if not pad.is_empty() and CatPad.walk_toggle and not (pad.canter or pad.sprint):
-		pad.move *= WALK_TILT
 	var d := CatPad.merge(kb, pad)
+	_human_buttons(d)
 	if CatKeys.blocked:
 		# pause menu open (online the game keeps running): the cat stands still
 		for k in d:
@@ -667,6 +667,31 @@ func _read_input() -> Dictionary:
 	d.hop_charge = sp.hop_charge
 	d.hop_mul = sp.hop_mul
 	return d
+
+
+## the few human buttons -> the actions the controller (and the bots) speak:
+##   swat     one button, alternates paws each press (held = that paw keeps hooking / raking)
+##   interact drop what's in your mouth, otherwise scratch (held) whatever's in front
+##   lock on  only in the rat pit
+func _human_buttons(d: Dictionary) -> void:
+	var sw: bool = d.get("swat", false)
+	d.erase("swat")
+	if sw and not _swat_prev:
+		_swat_paw = 1 - _swat_paw
+	_swat_prev = sw
+	d.paw_l = sw and _swat_paw == 0
+	d.paw_r = sw and _swat_paw == 1
+	var it: bool = d.get("interact", false)
+	d.erase("interact")
+	if it and not _int_prev:
+		_int_drop = carried != null
+	if not it:
+		_int_drop = false
+	_int_prev = it
+	d.drop = it and _int_drop
+	d.scratch = it and not _int_drop
+	if not combat_on():
+		d.lock_on = false
 
 
 ## space / A on the ground: hop when it's let go (higher the longer it was held), or held past
@@ -846,7 +871,7 @@ func _physics_process(dt: float) -> void:
 	last_event_t += dt
 	toast_t += dt
 	# stamina / dodge bookkeeping. bots run with a bottomless bar unless they ask for the real one
-	stamina.infinite = not bot.is_empty() and not bot.get("stamina", false)
+	stamina.infinite = (not bot.is_empty() and not bot.get("stamina", false)) or not combat_on()
 	dash.tick(dt)
 	var dash_in: bool = inp.get("dash", false)
 	if dash_in and not prev_dash and combat.dodge_pressed():
@@ -909,7 +934,7 @@ func _physics_process(dt: float) -> void:
 	_update_surface()
 	var tv: bool = inp.get("toggle_view", false)
 	if tv and not prev_v:
-		set_view((view_mode + 1) % 3)
+		set_view((view_mode + 1) % (3 if orbit_in_cycle else 2))
 	prev_v = tv
 
 	var fwd := -global_transform.basis.z
@@ -927,7 +952,7 @@ func _physics_process(dt: float) -> void:
 			pass
 		elif want_crouch_peek(inp):
 			ground_mv.x = mv.x * 0.45
-		elif side != 0.0 and not combat.committed() and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12) and not dash.busy() and dash.buffer <= 0.0 and stamina.spend(CatStamina.SIDE_HOP):
+		elif side != 0.0 and not bot.is_empty() and not combat.committed() and _hop_cool <= 0.0 and (side != _prev_side or ground_time > 0.12) and not dash.busy() and dash.buffer <= 0.0 and stamina.spend(CatStamina.SIDE_HOP):
 			_side_hop(side, fwd, right)
 	_prev_side = side
 	if is_on_floor():
@@ -2554,7 +2579,7 @@ var fall_damage := false
 
 
 func fall_hurts() -> bool:
-	return fall_damage or not bot.is_empty()
+	return fall_damage or combat_on()
 
 
 func _on_land() -> void:
