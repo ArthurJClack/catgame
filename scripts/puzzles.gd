@@ -49,6 +49,9 @@ const LIST := {
 	"herd": ["herd the chicks", "the farm yard"],
 	"quiet_paws": ["quiet paws", "pier 9"],
 	"lantern": ["lanterns", "the rat pit"],
+	"crow_shiny": ["the crow's shiny", "the forest"],
+	"trail_boulder": ["the boulder", "the trail"],
+	"warm_vent": ["the warm vent", "the city"],
 }
 
 static var treats_eaten := 0
@@ -56,6 +59,7 @@ static var solved := {}        # puzzle id -> times solved this session
 
 var player: CatPlayer
 var arena: Node = null
+var more: MorePuzzles          # forest / trail / city puzzles (puzzle_more.gd)
 var sense: CatSense            # crouch + keep still = unsolved puzzles nearby shimmer (cat_sense.gd)
 var treats: Array[Node3D] = []
 var t := 0.0
@@ -136,6 +140,49 @@ static func count_solved() -> int:
 		if int(solved.get(id, 0)) > 0:
 			n += 1
 	return n
+
+
+## forest: the crow's shiny on the deer stand platform (ForestLevel.deer_stand at 12, -14, 3 m up)
+static func forest(root: Node3D, p: CatPlayer) -> Puzzles:
+	var z := _plain(root, p)
+	var base := ForestLevel.ground(12.0, -14.0)
+	var cap := z.more.shiny(base + Vector3(0.3, 3.03, -0.2))
+	z.more.knock(cap, "crow_shiny", 4)
+	z.sense.add_point("crow_shiny", cap)
+	return z
+
+
+## trail: a tall rough boulder by the rock garden with a treat bag on top
+static func trail(root: Node3D, p: CatPlayer) -> Puzzles:
+	var z := _plain(root, p)
+	var f: Array = TrailLevel.frame(52.0, 2.8)
+	var base: Vector3 = f[0]
+	var size := Vector3(1.1, 1.9, 1.0)
+	z.more.boulder(base, size)
+	var bag := z._treat_bag(base + Vector3(0, size.y, 0))
+	z.more.knock(bag, "trail_boulder", 7)
+	z.sense.add_point("trail_boulder", bag)
+	return z
+
+
+## city: a steaming grate on the pavement near the start. `floor_at` = the real floor height
+static func city(root: Node3D, p: CatPlayer, at: Vector3) -> Puzzles:
+	var z := _plain(root, p)
+	z.more.vent(at)
+	z.more.sit(at, "warm_vent")
+	z.sense.add_point("warm_vent", at)
+	return z
+
+
+static func _plain(root: Node3D, p: CatPlayer) -> Puzzles:
+	var z := Puzzles.new()
+	z.name = "Puzzles"
+	z.player = p
+	root.add_child(z)
+	z._sfx_init()
+	z.more = MorePuzzles.make(z)
+	z._add_sense()
+	return z
 
 
 func _maybe_test() -> void:
@@ -346,6 +393,8 @@ func _physics_process(dt: float) -> void:
 		_sun_tick(dt)
 	if mat_pos != Vector3.ZERO:
 		_gift_tick()
+	if more:
+		more.tick(dt)
 	if arena:
 		_lantern_tick()
 		_fire_tick(dt)

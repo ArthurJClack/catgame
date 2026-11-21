@@ -68,6 +68,8 @@ func _ready() -> void:
 		_make_cam()
 	elif not OS.has_feature("web"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if si < 0 and not run_bot:
+		Puzzles.trail(self, player)    # the boulder by the rock garden (puzzle_more.gd)
 	_last_s = TrailLevel.nearest(player.global_position.x, player.global_position.z)[1]
 
 
