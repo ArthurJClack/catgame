@@ -26,7 +26,7 @@ boot = **title screen** (`title_screen.gd`) over the live farm while the camera 
 | esc / h | menu / help |
 
 pad: L3 run, A hop / leap, B dodge, X interact, Y meow, RT swat, LT grab, RB crouch, R3 lock on, d-pad left view.
-lock on, rakes, the stamina bar and the health bar only exist in the rat pit (`player.combat_zone`, set by
+lock on, rakes and the health bar only exist in the rat pit (`player.combat_zone`, set by
 arena_main; bots always get them). removed: q / mouse3 aim leap (hold space does it), x / caps lock walk
 (crouch sneaks), separate left / right paw buttons, d-pad walk / drop. 1-9 coats, f4 / f6 / f7 / f8 / f10
 level jumps and t teleports are dev only (`DevKeys`, off in release exports): coats are in settings.
