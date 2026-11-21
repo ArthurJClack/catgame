@@ -32,6 +32,7 @@ func _ready() -> void:
 	_build()
 	get_tree().node_added.connect(_on_node_added)
 	GameSettings.apply_all.call_deferred(get_tree())
+	CatVR.boot(get_tree())
 
 
 func _on_node_added(n: Node) -> void:
@@ -318,8 +319,21 @@ func _check(text: String, key: String) -> CheckButton:
 	return c
 
 
-func _option(text: String, key: String, labels: Array, values: Array) -> OptionButton:
+func _option(text: String, key: String, labels: Array, values: Array) -> Control:
 	var h := _row(text)
+	if CatVR.active:
+		# vr: a dropdown's popup is its own window, which the vr panel can't show. click to cycle
+		var cb := Button.new()
+		cb.custom_minimum_size = Vector2(160, 32)
+		var at := [maxi(values.find(GameSettings.g(key)), 0)]
+		cb.text = str(labels[at[0]])
+		cb.pressed.connect(func():
+			at[0] = (at[0] + 1) % values.size()
+			cb.text = str(labels[at[0]])
+			GameSettings.s(key, values[at[0]])
+			_apply())
+		h.add_child(cb)
+		return cb
 	var o := OptionButton.new()
 	o.custom_minimum_size = Vector2(160, 32)
 	for i in labels.size():
@@ -333,6 +347,8 @@ func _option(text: String, key: String, labels: Array, values: Array) -> OptionB
 
 func _apply() -> void:
 	GameSettings.apply_all(get_tree())
+	if CatVR.body and is_instance_valid(CatVR.body):
+		CatVR.body.apply_settings()
 
 
 func _pct(x: float) -> String:
@@ -371,6 +387,7 @@ func _page_settings() -> void:
 		close_menu()
 		Tutorial.restart())
 	rt.add_child(rb)
+	_page_vr()
 	_section("graphics")
 	_option("quality", "quality", GameSettings.QUALITY_NAMES, [0, 1, 2])
 	_slider("render scale", "render_scale", 0.5, 1.0, 0.05, _pct)
@@ -388,6 +405,42 @@ func _page_settings() -> void:
 		show_page("settings"))
 	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.grab_focus.call_deferred()
+
+
+## vr (vr/cat_vr.gd). turning vr on / off restarts the game (OpenXR can only start with the engine)
+func _page_vr() -> void:
+	if OS.has_feature("web"):
+		return
+	_section("vr")
+	var r := _row("vr mode (SteamVR, Quest Link...)")
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(220, 32)
+	b.text = "turn vr off (restarts)" if CatVR.active else "turn vr on (restarts)"
+	b.pressed.connect(func():
+		var on := not CatVR.active
+		GameSettings.s("vr", on)
+		CatVR.relaunch(get_tree(), on))
+	r.add_child(b)
+	if CatVR.failed != "":
+		var l := Label.new()
+		l.text = CatVR.failed
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.modulate = Color(1, 0.8, 0.6)
+		_body_target().add_child(l)
+	_option("turning", "vr_turn", ["snap", "smooth"], [0, 1])
+	_slider("snap turn angle", "vr_snap", 15.0, 90.0, 15.0, func(x): return "%d°" % roundi(x))
+	_slider("smooth turn speed", "vr_turn_speed", 45.0, 240.0, 15.0, func(x): return "%d°/s" % roundi(x))
+	_slider("comfort vignette", "vr_vignette", 0.0, 1.0, 0.05, func(x): return "off" if x <= 0.0 else _pct(x))
+	_slider("cat size (world scale)", "vr_scale", 0.25, 1.0, 0.05, func(x): return "%.2fx" % x)
+	_option("menu pointer hand", "vr_hand", ["left", "right"], [0, 1])
+	_check("your hands move the paws", "vr_paws")
+	if CatVR.active and CatVR.body:
+		var rr := _row("")
+		var rc := Button.new()
+		rc.text = "recenter view"
+		rc.custom_minimum_size = Vector2(220, 32)
+		rc.pressed.connect(func(): CatVR.body.recenter())
+		rr.add_child(rc)
 
 
 func _page_controls() -> void:

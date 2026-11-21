@@ -42,6 +42,7 @@ Source: "..\build\win\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{autoprograms}\Cat Game"; Filename: "{app}\CatGame.exe"
+Name: "{autoprograms}\Cat Game VR"; Filename: "{app}\CatGame.exe"; Parameters: "--xr-mode on -- --vrboot"; Comment: "play in vr (SteamVR / Quest Link)"
 Name: "{autodesktop}\Cat Game"; Filename: "{app}\CatGame.exe"; Check: not IsUpdate
 
 [Run]

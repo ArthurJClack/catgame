@@ -37,3 +37,11 @@ lights_and_shadows/directional_shadow/size=4096
 lights_and_shadows/directional_shadow/size.web=2048
 renderer/rendering_method.web="gl_compatibility"
 anti_aliasing/quality/msaa_3d.web=0
+
+[xr]
+
+openxr/enabled=false
+openxr/default_action_map="res://openxr_action_map.tres"
+openxr/reference_space=0
+openxr/startup_alert=false
+shaders/enabled=true

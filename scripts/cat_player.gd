@@ -639,6 +639,10 @@ func _read_input() -> Dictionary:
 	if not pad.is_empty() and CatPad.walk_toggle and not (pad.canter or pad.sprint):
 		pad.move *= WALK_TILT
 	var d := CatPad.merge(kb, pad)
+	# vr controllers (vr/vr_body.gd): empty in flat mode
+	var vrd := CatVR.read(self)
+	if not vrd.is_empty():
+		d = CatPad.merge(d, vrd)
 	if CatKeys.blocked:
 		# pause menu open (online the game keeps running): the cat stands still
 		for k in d:
