@@ -1,6 +1,12 @@
 class_name Tutorial
 extends CanvasLayer
 ## first time on the farm: one small hint card at a time (bottom centre), showing the keys you
+## (simplify pass 2026-11-21: the cards follow the first puzzle. after move / look the cat sense
+## card points you at what's worth a look (the treat bag motes up on the kitchen cabinets), and
+## the rest wait for the moment they're useful: leap near the kitchen, swat when something's in
+## paw reach, climb next to something climbable, scratch at a post, meow once the bag is down.
+## a waiting card shows nothing; GATE_MAX later it comes up anyway.)
+##
 ## actually have bound (cat_keys.gd) or the pad buttons if you're on a pad. each card ticks off
 ## when you do the thing, or moves on by itself after a while. it's only ever about controls:
 ## the puzzles keep the "no words, the world answers" rule. progress lives in the save
@@ -14,19 +20,22 @@ signal finished
 const GOLD := Color(0.95, 0.78, 0.2)
 const SKIP_AFTER := 40.0        # a card nobody does moves on by itself
 const DONE_HOLD := 0.9          # the tick shows this long before the next card
+const GATE_MAX := 45.0          # a card waiting for its moment comes up anyway after this
+const BAG := Vector3(1.75, 0.0, -3.9)   # the treat bag's cabinet (puzzles.gd knock it off)
 
 ## [id, text with {action} keys, pad text]
 const STEPS := [
 	["move", "{forward} {left} {back} {right}  to walk around", "left stick to walk around"],
 	["look", "move the mouse to look", "right stick to look"],
-	["run", "hold {run} to run, double tap it and hold for a full gallop", "click L3 to run, again to gallop"],
+	["sense", "hold {crouch} and keep still: the cat notices things worth a look. go and see", "hold RB and keep still: the cat notices things worth a look. go and see"],
 	["hop", "tap {jump} to hop", "tap A to hop"],
 	["pounce", "hold {jump}: the cat crouches and shows where it'll land. let go to leap there (onto prey = a pounce)", "hold A: aim where to land, let go to leap (onto prey = a pounce)"],
-	["climb", "jump at the cat tree, a fence or a tree trunk holding {forward} to climb it", "jump at a cat tree or trunk holding forward to climb"],
 	["swat", "{swat} swat (hold it to hook things with your claws)", "RT swat (hold to hook with your claws)"],
-	["scratch", "{interact} at a post or the cat tree: scratch. it also drops whatever's in your mouth", "hold X at a post or the cat tree: scratch. X also drops what's in your mouth"],
+	["climb", "jump at it holding {forward} to climb", "jump at it holding forward to climb"],
+	["scratch", "{interact} here: scratch. it also drops whatever's in your mouth", "hold X here: scratch. X also drops what's in your mouth"],
+	["run", "hold {run} to run, double tap it and hold for a full gallop", "click L3 to run, again to gallop"],
 	["meow", "{meow} meow", "Y meow"],
-	["explore", "that's it. esc opens the menu, the gaps in the yard fence lead out to other places", "start opens the menu. the gaps in the yard fence lead out to other places"],
+	["explore", "that's it. esc opens the menu (it counts the puzzles you've found), the gaps in the yard fence lead out to other places", "start opens the menu (it counts the puzzles you've found). the gaps in the yard fence lead out to other places"],
 ]
 
 static var force := false
@@ -49,6 +58,9 @@ var _was_floor := true
 var _leaps0 := 0
 var _pounces0 := 0
 var _meowed := false
+var _gate_t := 0.0             # how long the current card has waited for its moment
+var _near := {}                # group -> bool, refreshed a few times a second
+var _near_t := 0.0
 
 
 static func _al(n: String) -> Node:
@@ -195,6 +207,7 @@ func _next(i: int) -> void:
 		return
 	_refresh_text()
 	_card.modulate.a = 0.0
+	_gate_t = 0.0
 	if player and is_instance_valid(player):
 		_start_pos = player.global_position
 		_yaw0 = player.orb_yaw
@@ -214,6 +227,11 @@ func _process(dt: float) -> void:
 	var paused := get_tree().paused or not get_tree().get_nodes_in_group("title_screen").is_empty()
 	_card.visible = not paused
 	if paused:
+		return
+	if _done_t < 0.0 and _t == 0.0 and not _moment(dt):
+		# waiting for the moment this card is useful: nothing on screen
+		_gate_t += dt
+		_card.modulate.a = 0.0
 		return
 	_t += dt
 	_card.modulate.a = minf(_card.modulate.a + dt * 3.0, 1.0)
@@ -242,6 +260,52 @@ func complete() -> void:
 	step_done.emit(id())
 
 
+## is now a good moment for the current card? (cards with no moment are always ready)
+func _moment(dt: float) -> bool:
+	if _gate_t >= GATE_MAX:
+		return true
+	var p := player
+	_near_t -= dt
+	if _near_t <= 0.0:
+		_near_t = 0.25
+		_near = _groups_near(p.global_position + Vector3(0, 0.2, 0), 1.6)
+	match id():
+		"pounce":
+			var d := p.global_position - BAG
+			return Vector2(d.x, d.z).length() < 4.0     # in the kitchen, the counters to get up
+		"swat":
+			return not p._paw_target(p.SWAT_RANGE, 0.5).is_empty()
+		"climb":
+			return _near.get("climbable", false) and p.is_on_floor()
+		"scratch":
+			return _near.get("scratchable", false) and p.is_on_floor()
+		"run":
+			return _gate_t > 8.0 and p.global_position.z > 4.5    # out in the yard
+		"meow":
+			return int(Puzzles.solved.get("knock_it_off", 0)) > 0
+	return true
+
+
+func _groups_near(at: Vector3, r: float) -> Dictionary:
+	var out := {}
+	var w := player.get_world_3d()
+	if w == null:
+		return out
+	var q := PhysicsShapeQueryParameters3D.new()
+	var sh := SphereShape3D.new()
+	sh.radius = r
+	q.shape = sh
+	q.transform = Transform3D(Basis.IDENTITY, at)
+	q.exclude = [player.get_rid()]
+	for h in w.direct_space_state.intersect_shape(q, 24):
+		var c = h.get("collider")
+		if c is Node:
+			for g in ["climbable", "scratchable"]:
+				if (c as Node).is_in_group(g):
+					out[g] = true
+	return out
+
+
 func _check(dt: float) -> bool:
 	var p := player
 	var floor := p.is_on_floor()
@@ -263,6 +327,9 @@ func _check(dt: float) -> bool:
 			return _hops >= 1
 		"scratch":
 			return p.scratching
+		"sense":
+			var z = main.get_node_or_null("Puzzles") if main else null
+			return z != null and z.sense != null and z.sense.level >= 0.95
 		"climb":
 			return p.climbing
 		"swat":
