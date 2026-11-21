@@ -2078,9 +2078,15 @@ func _run_movetest() -> void:
 		var turned := p.orb_yaw - oy    # no wrap: on a slow renderer 30 frames can spin past a full turn
 		axis.call(JOY_AXIS_TRIGGER_LEFT, 1.0)
 		await _ticks(2)
-		var lt: bool = p._read_input().paw_l
+		var lt: bool = p._read_input().grab     # simplify pass: LT = grab, RT = swat
 		axis.call(JOY_AXIS_TRIGGER_LEFT, 0.0)
-		print("pad: tilt 0.55 -> %.2f m/s, full -> %.2f, L3 -> %.2f, L3 again -> %.2f, right stick 30 frames -> %.2f rad, LT paw_l %s" % [v_half, v_full, v_run, v_gal, turned, lt])
+		await _ticks(2)
+		axis.call(JOY_AXIS_TRIGGER_RIGHT, 1.0)
+		await _ticks(2)
+		var ri := p._read_input()
+		lt = lt and (ri.paw_l or ri.paw_r) and not ri.grab
+		axis.call(JOY_AXIS_TRIGGER_RIGHT, 0.0)
+		print("pad: tilt 0.55 -> %.2f m/s, full -> %.2f, L3 -> %.2f, L3 again -> %.2f, right stick 30 frames -> %.2f rad, LT grab + RT swat %s" % [v_half, v_full, v_run, v_gal, turned, lt])
 		ok = ok and v_half > 0.6 and v_half < 1.6 and absf(v_full - CatPlayer.TROT_SPEED) < 0.2 and absf(v_run - CatPlayer.CANTER_SPEED) < 0.3 and v_gal > 9.0 and turned < -0.05 and lt
 		CatPad.sim = {}
 	else:
