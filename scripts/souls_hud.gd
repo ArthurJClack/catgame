@@ -78,8 +78,16 @@ func _process(_dt: float) -> void:
 	if player == null:
 		return
 	# scripted bots (preview videos) don't show it unless they play with the real bars
-	# outside the rat pit there's no stamina / health to watch (simplify pass): no bars
-	visible = (player.bot.is_empty() or player.bot.get("stamina", false)) and not hidden_by_menu and player.combat_on()
+	visible = (player.bot.is_empty() or player.bot.get("stamina", false)) and not hidden_by_menu
+	# health only matters in the rat pit: elsewhere just the stamina bar, moved up into its place
+	var hp_on: bool = player.combat_on()
+	_hp_back.visible = hp_on
+	_hp_lag.visible = hp_on
+	_hp_fill.visible = hp_on
+	var sy := (Y + H_HP + 7.0) if hp_on else Y
+	_st_back.position.y = sy - 2.0
+	_st_lag.position.y = sy
+	_st_fill.position.y = sy
 	var h: CatHealth = player.health
 	var s: CatStamina = player.stamina
 	_hp_fill.size.x = h.value * PX_PER

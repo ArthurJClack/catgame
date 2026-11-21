@@ -1,7 +1,7 @@
 extends SceneTree
 ## the simplified controls (simplify pass 2026-11-21) with real key / mouse presses on the farm:
 ## one swat button alternates paws, e drops what's in the mouth or scratches, no aim key,
-## no walk keys, lock on / stamina / health bars only in the rat pit, v flips first / third
+## no walk keys, lock on + the health bar only in the rat pit (stamina everywhere), v flips first / third
 ## person (orbit only with the photo cam setting), dev keys are off in release builds,
 ## binds saved with the old layout fall back to the new defaults.
 ##   xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/controls_test.gd
@@ -129,8 +129,9 @@ func _run() -> void:
 	_ok(not p.combat_on(), "farm: combat systems off")
 	p.stamina.value = 10.0
 	await _game(3)
-	_ok(p.stamina.value >= CatStamina.MAX - 0.01, "farm: stamina never runs out")
-	_ok(not p.souls_hud.visible, "farm: no health / stamina bars")
+	_ok(p.stamina.value < CatStamina.MAX - 1.0, "farm: stamina is real (%.1f)" % p.stamina.value)
+	p.stamina.value = CatStamina.MAX
+	_ok(p.souls_hud.visible and p.souls_hud._st_fill.visible and not p.souls_hud._hp_fill.visible, "farm: stamina bar, no health bar")
 	_key(KEY_TAB, true)
 	await _game(3)
 	_key(KEY_TAB, false)
@@ -138,7 +139,7 @@ func _run() -> void:
 	_ok(not p.lock.active(), "farm: tab doesn't lock on")
 	p.combat_zone = true
 	await _game(3)
-	_ok(p.souls_hud.visible, "rat pit flag: bars come back")
+	_ok(p.souls_hud._hp_fill.visible, "rat pit flag: health bar comes back")
 	p.combat_zone = false
 
 	# --- a / d walk, never side hop, for a human

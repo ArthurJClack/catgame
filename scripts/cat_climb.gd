@@ -34,6 +34,7 @@ const CORNER_IN := 0.72      # a side hit whose normal is this far off ours is a
 const LUNGE_V := 2.3         # peak speed of a climb lunge
 const LUNGE_T := 0.3
 const LUNGE_COST := 14.0
+const LUNGE_ACC := 18.0       # m/s2 a lunge swells in (and checks up before an edge) at. 25 snapped the head round
 const HEAD_MAX := 1.05       # rad the body turns toward sideways travel (~60 deg)
 const HEAD_W := 9.0          # turn spring (rad/s, critically damped)
 const CHEST := 0.12          # probe height above the feet
@@ -624,9 +625,20 @@ func _cling(dt: float, mv: Vector2, wish_dir: Vector3, jump_pressed: bool, want_
 				_let_go(0.4, "down", n * 0.3 + Vector3.DOWN * 0.3)
 			return
 
+	# coming up on the end of the face sideways faster than a normal sidle (a lunge): the paws
+	# check up before the edge so it rounds the corner at sidle speed instead of whipping
+	# round it (a 2.5 m/s swing round a thin post jolted the head ~2.5 m/s in one frame)
+	var edge_brake := false
+	if side != 0.0 and absf(_cv.x) > SIDE_SPEED * 1.1:
+		var look: float = absf(_cv.x) * 0.1 + 0.1
+		if _probe(feet + right * side * look, n).is_empty():
+			edge_brake = true
+			p.climb_lunge_t = 0.0
+			vx = side * minf(absf(vx), SIDE_SPEED)
+
 	# the limbs can only change the speed so fast: ease toward it (the bursts stay in)
 	var want := Vector2(vx, vy)
-	_cv = _cv.move_toward(want, (CLIMB_ACC if p.climb_lunge_t <= 0.0 else 25.0) * dt)
+	_cv = _cv.move_toward(want, (CLIMB_ACC if p.climb_lunge_t <= 0.0 and not edge_brake else LUNGE_ACC) * dt)
 	if vx == 0.0:
 		_cv.x = 0.0   # (stopped against something beside it)
 	if vy == 0.0 and want.y == 0.0 and (dir.y > 0.0):

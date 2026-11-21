@@ -605,8 +605,8 @@ var _swat_prev := false
 var _swat_paw := 1             # the swat button alternates paws: this is the one it used last
 var _int_prev := false
 var _int_drop := false         # e pressed while carrying: dropped, so this hold isn't a scratch
-## the rat pit (arena_main) turns this on: lock on, rakes, the stamina bar and the health bar
-## only exist there. everywhere else the cat just moves, swats and explores. bots always get
+## the rat pit (arena_main) turns this on: lock on, rakes and the health bar only exist there
+## (stamina is everywhere). everywhere else the cat just moves, swats and explores. bots always get
 ## the full set (tests + preview films drive those systems directly)
 var combat_zone := false
 
@@ -871,7 +871,9 @@ func _physics_process(dt: float) -> void:
 	last_event_t += dt
 	toast_t += dt
 	# stamina / dodge bookkeeping. bots run with a bottomless bar unless they ask for the real one
-	stamina.infinite = (not bot.is_empty() and not bot.get("stamina", false)) or not combat_on()
+	# stamina is everywhere again (user 2026-11-21: "put stamina back in"): only bots that
+	# don't ask for the real bar run bottomless
+	stamina.infinite = not bot.is_empty() and not bot.get("stamina", false)
 	dash.tick(dt)
 	var dash_in: bool = inp.get("dash", false)
 	if dash_in and not prev_dash and combat.dodge_pressed():
@@ -1401,8 +1403,12 @@ func _post(dt: float, _inp: Dictionary) -> void:
 		# stops without a jerk, where a plain ease starts at full speed)
 		# (a top out from a climb tells it how far round the body is: it tips over the edge
 		# with the haul, see CatClimb.climb_pose)
-		_w_climb_m = LowPoly.damp(_w_climb_m, climber.climb_pose(), 22.0, dt)
-		_w_climb_v += (17.0 * 17.0 * (_w_climb_m - w_climb) - 34.0 * _w_climb_v) * dt
+		var cp := climber.climb_pose()
+		_w_climb_m = LowPoly.damp(_w_climb_m, cp, 22.0, dt)
+		# dropping off the wall into the air (claws gave out, let go): the body swings round
+		# slower, it's falling, not hauling itself over. 17 here jolted the hips (climblab stamina)
+		var wf := 10.0 if (not climbing and cp <= 0.0 and not is_on_floor()) else 17.0
+		_w_climb_v += (wf * wf * (_w_climb_m - w_climb) - 2.0 * wf * _w_climb_v) * dt
 		w_climb = clampf(w_climb + _w_climb_v * dt, 0.0, 1.0)
 		_w_clamber_m = LowPoly.damp(_w_clamber_m, 1.0 if clambering else 0.0, 26.0, dt)
 		_w_clamber_v += (22.0 * 22.0 * (_w_clamber_m - w_clamber) - 44.0 * _w_clamber_v) * dt
