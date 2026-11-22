@@ -7,6 +7,7 @@ extends Node3D
 ## preview: `-- --arenatest` (headless rules check), `-- --arenashow` (bot fight for the video),
 ## `-- --combattest` / `-- --combatshow` (paw combat: swats, rakes, two paw grip; combat_test.gd)
 ## `-- --locktest` / `-- --lockshow` (tab lock on: pick, strafe, dodges, flick switch; lock_test.gd)
+## `-- --parrytest` / `-- --parryshow` (deflects, rat combos, cues, posture, the rat king; parry_test.gd)
 
 const R := 6.0                # pit radius
 const WAVES := [
@@ -14,6 +15,7 @@ const WAVES := [
 	[1.0, 1.0],
 	[1.0, 1.0, 1.0],
 	[1.6, 1.0],
+	[2.3],          # the rat king (souls_rat.gd: long combos, perilous tail sweeps + leaps)
 ]
 
 var player: CatPlayer
@@ -38,8 +40,8 @@ var spawn := Vector3(0, 0.02, 4.4)
 func _ready() -> void:
 	process_priority = 10
 	var args := OS.get_cmdline_user_args()
-	test_mode = "--arenatest" in args or "--combattest" in args or "--locktest" in args
-	show_mode = "--arenashow" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--lockshow" in args or "--landshow" in args or "--reachshow" in args
+	test_mode = "--arenatest" in args or "--combattest" in args or "--locktest" in args or "--parrytest" in args
+	show_mode = "--arenashow" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--lockshow" in args or "--landshow" in args or "--reachshow" in args or "--parryshow" in args or "--dodgeshow" in args
 	_setup_env()
 	_build_pit()
 	player = CatPlayer.new()
@@ -60,6 +62,8 @@ func _ready() -> void:
 		var t: ArenaTest = CombatTest.new() if ("--combattest" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--landshow" in args or "--reachshow" in args) else ArenaTest.new()
 		if "--locktest" in args or "--lockshow" in args:
 			t = LockTest.new()
+		if "--parrytest" in args or "--parryshow" in args or "--dodgeshow" in args:
+			t = ParryTest.new()
 		t.arena = self
 		add_child(t)
 		return
@@ -85,10 +89,17 @@ func _start_wave(i: int) -> void:
 		var a := PI + (float(k) - (n - 1) * 0.5) * 0.5
 		spawn_rat(Vector3(sin(a) * (R - 1.2), 0.02, cos(a) * (R - 1.2)), sizes[k])
 	wave_label.text = "wave %d" % (i + 1)
-	player._event("wave %d · %d rat%s" % [i + 1, n, "" if n == 1 else "s"])
+	if sizes.max() >= 2.0:
+		player._event("wave %d · the rat king" % (i + 1))
+		player.toast = "the rat king"
+		player.toast_t = 0.0
+	else:
+		player._event("wave %d · %d rat%s" % [i + 1, n, "" if n == 1 else "s"])
 
 
 func _endless(i: int) -> Array:
+	if (i + 1) % 5 == 0:
+		return [2.3, 1.0]
 	var a := [1.6]
 	for k in mini(i - 2, 5):
 		a.append(1.0)
@@ -389,7 +400,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the rat pit: rats only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nmouse1 swat (hold = rake) · hold space = pounce · mouse2 / g grab + pin · alt dodge out of the recovery · watch your stamina\ntab lock on (wasd circles, flick the mouse = next rat) · r restart · h hide help · f5 back to the farm"
+	help_label.text = "the rat pit: rats bite in combos. glint + closing ring = deflect it (alt + mouse1 as the ring closes), red ! = dodge it\nmouse1 swat (hold = rake) · alt dodge · alt + mouse1 deflect (keep alt held for the next hit) · fill a rat's posture bar, then swat to finish it\ntab lock on (wasd circles, flick the mouse = next rat) · r restart · h hide help · f5 back to the farm"
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)

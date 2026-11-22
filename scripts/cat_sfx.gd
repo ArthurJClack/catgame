@@ -326,6 +326,23 @@ static func bake() -> void:
 	_tone(hit, 0.0, 0.09, 160.0, 70.0, 0.7)
 	_noise(hit, r, 0.0, 0.05, 0.7, 0.6, 7.0)
 	clips["hit"] = _wav(hit)
+	# deflect (cat_parry.gd): a hard claw-on-tooth clack with a short bright ring
+	var dfl := _buf(0.32)
+	_noise(dfl, r, 0.0, 0.025, 0.8, 0.95, 12.0)
+	_tone(dfl, 0.0, 0.3, 2350.0, 2250.0, 0.32)
+	_tone(dfl, 0.0, 0.22, 3720.0, 3650.0, 0.18)
+	_tone(dfl, 0.0, 0.06, 420.0, 260.0, 0.5)
+	clips["deflect"] = _wav(dfl)
+	# parry cues (parry_cue.gd): a soft ting for a hit you can deflect, a low warning for a perilous one
+	var gl := _buf(0.25)
+	_tone(gl, 0.0, 0.24, 2960.0, 2960.0, 0.16)
+	_tone(gl, 0.0, 0.18, 4440.0, 4440.0, 0.06)
+	clips["cue_glint"] = _wav(gl)
+	var pe := _buf(0.45)
+	_tone(pe, 0.0, 0.42, 150.0, 120.0, 0.6, 0.08, 9.0)
+	_tone(pe, 0.0, 0.3, 300.0, 240.0, 0.25)
+	_noise(pe, r, 0.0, 0.12, 0.3, 0.3, 4.0)
+	clips["cue_peril"] = _wav(pe)
 	# scratching a post / sofa: rasping strokes
 	var sc := _buf(0.8)
 	for k in 6:
@@ -492,7 +509,9 @@ class RatVoice extends Node:
 		var st: int = rat.get("state")
 		if st != _state:
 			match st:
-				2: CatSfx.play_at("rat_wind", rat.global_position, 0.7, randf_range(0.9, 1.1))     # WINDUP
+				2:     # WINDUP (only the first tell of a combo, the rest are quick)
+					if int(rat.get("step")) == 0:
+						CatSfx.play_at("rat_wind", rat.global_position, 0.7 if not rat.get("king") else 1.0, randf_range(0.9, 1.1) / sqrt(float(rat.get("s"))))
 				3: CatSfx.play_at("rat_bite", rat.global_position, 0.8, randf_range(0.9, 1.1))     # LUNGE
 				6: CatSfx.play_at("rat_die", rat.global_position, 0.8, randf_range(0.9, 1.1))      # DEAD
 			_state = st
