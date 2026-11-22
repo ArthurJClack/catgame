@@ -749,8 +749,8 @@ func _vel_of(n: Node) -> Vector3:
 		var e: Array = _seen.get(n.get_instance_id(), [])
 		if e.size() == 3 and e[2]:
 			v = e[1]
-	if n.has_method("pinned") and n.pinned():
-		return Vector3.ZERO
+	if "caught" in n and n.get("caught") == true:
+		return Vector3.ZERO   # (never call pinned() to ask: on prey that IS the catch)
 	v.y = 0.0               # land where it'll be on the ground, not where a hop would take it
 	return v
 
