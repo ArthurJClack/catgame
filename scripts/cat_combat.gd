@@ -408,12 +408,6 @@ func _swat(i: int) -> void:
 	_fire(i, false)
 
 
-## auto swat (crosshair on something loose): only when nothing else is going on
-func auto_swat() -> void:
-	if atk == "" and buf_paw < 0:
-		_fire(randi() % 2, false)
-
-
 func _fire(i: int, rake: bool) -> bool:
 	if not player.stamina.spend(CatStamina.RAKE if rake else CatStamina.SWAT):
 		return false
@@ -564,6 +558,7 @@ func _slam(valid: bool) -> void:
 		p._event("missed the grab")
 		return
 	if grip_target.has_method("take_hit"):
+		NetWorld.hold(grip_target)     # online: pinned under my paws = I run it (world_sync.gd)
 		grip_target.take_hit(GRIP_SLAM_DMG, p.global_position, true)
 		_slam_fx(grip_target)
 		if grip_target.has_method("grab") and (not grip_target.has_method("alive") or grip_target.alive()):

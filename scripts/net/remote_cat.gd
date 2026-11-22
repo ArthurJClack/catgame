@@ -74,6 +74,10 @@ func _process(dt: float) -> void:
 
 ## prey in the mouth: a look-alike of the same kind of critter, with its brain switched off
 func _update_carry(key: String) -> void:
+	var net := get_node_or_null("/root/Net")
+	var w = net.get("world") if net else null
+	if w and w.active:
+		key = ""      # the real prey is kept in step (world_sync.gd) and rides in their mouth itself
 	if key != _carry_key:
 		_carry_key = key
 		if is_instance_valid(_carry_node):
