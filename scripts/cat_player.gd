@@ -27,6 +27,7 @@ const DOUBLE_TAP := 0.3
 const FRICTION := 5.0
 # ---- momentum: the cat has weight. speed builds and bleeds instead of snapping ----
 const WALK_SPEED := 1.0       # real cats walk ~0.7-1.0 m/s
+const STROLL_SPEED := 1.25    # wasd without shift: a calm cat stroll (was a 3.2 m/s trot). shift runs
 const CREEP_SPEED := 0.25     # the slowest the stick (just past the deadzone) asks for
 const WALK_TILT := 0.45       # keyboard walk (hold x / caps lock) = this much stick
 const PUSH_ACCEL := 9.0       # m/s2 the legs can shove the body from a stand
@@ -462,6 +463,11 @@ func _ready() -> void:
 				if sc.get(nm) != null:
 					sc.set(nm, false)
 	add_to_group("player")
+	add_to_group("cat")
+	vision = CatVision.new()
+	vision.name = "CatVision"
+	vision.player = self
+	add_child(vision)
 	GameSettings.apply_player.call_deferred(self)   # sens / fov / invert / head bob (no-op for bots)
 	(func(): if bot.is_empty() or Engine.get_write_movie_path() != "": CatSfx.attach(self)).call_deferred()   # the cat's own sounds (cat_sfx.gd)
 	floor_snap_length = 0.06
@@ -609,6 +615,9 @@ var _int_drop := false         # e pressed while carrying: dropped, so this hold
 ## (stamina is everywhere). everywhere else the cat just moves, swats and explores. bots always get
 ## the full set (tests + preview films drive those systems directly)
 var combat_zone := false
+## cat vision button held (q / LB): cat_vision.gd lights up what's worth a look
+var vision_held := false
+var vision: CatVision
 
 
 func combat_on() -> bool:
@@ -620,6 +629,7 @@ var _turn_factor := 1.0
 
 func _read_input() -> Dictionary:
 	if not bot.is_empty():
+		vision_held = bot.get("vision", false)
 		return bot
 	# hold shift = canter. double tap shift (and keep holding) = full gallop
 	var shift := CatKeys.down("run")
@@ -644,6 +654,7 @@ func _read_input() -> Dictionary:
 		"move": mv,
 		"canter": shift and not _galloping,
 		"sprint": shift and _galloping,
+		"stroll": mv != Vector2.ZERO and not shift,   # keys alone = stroll, shift = run
 		"crouch": CatKeys.down("crouch"),
 		"jump": CatKeys.down("jump"),
 		"swat": CatKeys.down("swat"),
@@ -652,6 +663,7 @@ func _read_input() -> Dictionary:
 		"toggle_view": CatKeys.down("toggle_view"),
 		"dash": CatKeys.down("dash"),
 		"lock_on": CatKeys.down("lock_on"),   # press = lock / unlock (cat_lock_on.gd)
+		"vision": CatKeys.down("vision"),     # hold = cat vision (cat_vision.gd)
 	}
 	# gamepad (cat_pad.gd): every action has a button, the left stick's tilt picks the speed
 	var pad := CatPad.read()
@@ -661,6 +673,8 @@ func _read_input() -> Dictionary:
 	if not vrd.is_empty():
 		d = CatPad.merge(d, vrd)
 	_human_buttons(d)
+	vision_held = d.get("vision", false) and not CatKeys.blocked
+	d.erase("vision")
 	if CatKeys.blocked:
 		# pause menu open (online the game keeps running): the cat stands still
 		for k in d:
@@ -747,6 +761,22 @@ func _space_filter(held: bool, on_ground: bool, dt: float) -> Dictionary:
 ## 0..1 how far a held space is toward pounce mode (hud / rig gather)
 func space_charge() -> float:
 	return clampf(_sp_t / POUNCE_HOLD, 0.0, 1.0) if _sp_state == 1 else 0.0
+
+
+## the jump bar under the crosshair (souls_hud.gd): while space is held on the ground it fills
+## with how high the hop will go, once it turns into a leap it shows how far the leap lands.
+## {on, fill 0..1, text, leap}
+func jump_meter() -> Dictionary:
+	if combat != null and combat.aiming() and combat.pounce.has("point"):
+		var pt: Vector3 = combat.pounce.point
+		var d := Vector2(pt.x - global_position.x, pt.z - global_position.z).length()
+		return {"on": true, "fill": clampf(d / CatCombat.POUNCE_RANGE, 0.05, 1.0), "text": "leap %.1f m" % d, "leap": true}
+	if _sp_state == 1:
+		var c := clampf((_sp_t - HOP_TAP) / (POUNCE_HOLD - HOP_TAP), 0.0, 1.0)
+		var h := HOP_HEIGHT * lerpf(HOP_TAP_MUL, HOP_CHARGE_MUL, c)
+		var txt := ("hop %d cm" % int(round(h * 100.0))) if h < 1.0 else ("hop %.1f m" % h)
+		return {"on": true, "fill": h / (HOP_HEIGHT * HOP_CHARGE_MUL), "text": txt, "leap": false}
+	return {"on": false, "fill": 0.0, "text": "", "leap": false}
 
 
 var log_events := false
@@ -895,6 +925,7 @@ func _physics_process(dt: float) -> void:
 
 	var sprint: bool = inp.get("sprint", false)
 	var canter: bool = inp.get("canter", false)
+	var stroll: bool = inp.get("stroll", false)
 	# running only happens straight ahead
 	if mv.y < 0.5 or absf(mv.x) > 0.3:
 		sprint = false
@@ -1138,6 +1169,8 @@ func _physics_process(dt: float) -> void:
 		target_speed = SPRINT_SPEED
 	elif canter and wish_len > 0.8:
 		target_speed = CANTER_SPEED
+	elif stroll:
+		target_speed = minf(target_speed, STROLL_SPEED)
 	if _backing:
 		target_speed = minf(target_speed, BACKUP_SPEED)
 	if charging:

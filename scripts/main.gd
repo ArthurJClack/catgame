@@ -170,7 +170,10 @@ func _build_hud() -> void:
 	help_label.add_theme_font_size_override("font_size", 15)
 	help_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	help_label.add_theme_constant_override("outline_size", 5)
-	var help := "{forward} {left} {back} {right} move (the cat turns to run where you look) · {run} run, double tap = gallop · {crouch} sneak\n{jump}: tap = hop · hold = leap / pounce (aim the line, let go) · jump at trees, posts and fences holding {forward} to climb\n{swat} swat (hold = hook with your claws) · {grab} grab · {interact} scratch / drop · {dash} dodge · {meow} meow · {toggle_view} first / third person\nwalk out the yard gates to travel · h hide help · esc menu (settings, coats, keys) · m play online"
+	var help := "{forward} {left} {back} {right} move (the cat turns to run where you look) · {run} run, double tap = gallop · {crouch} sneak
+{jump}: tap = hop · hold = leap / pounce (aim the line, let go) · jump at trees, posts and fences holding {forward} to climb
+{swat} swat (hold = hook with your claws) · {grab} grab · {interact} scratch / drop · {dash} dodge · {meow} meow · {toggle_view} first / third person · hold {vision} cat vision
+walk out the yard gates to travel · h hide help · esc menu (settings, coats, keys) · m play online"
 	if OS.has_feature("web"):
 		help = "click the game to grab the mouse (ctrl+w closes the tab, so crouch on c in a browser)\n" + help
 		help_label.offset_top = -152

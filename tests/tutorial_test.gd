@@ -91,7 +91,7 @@ func _run() -> void:
 		root.get_texture().get_image().save_png(shots + "/tutorial_card.png")
 
 	_key(KEY_W, true)
-	await _game(1.5)
+	await _game(3.0)   # wasd is a 1.25 m/s stroll now
 	_key(KEY_W, false)
 	_ok(await _on("look"), "walking ticks off move")
 	_ok(int(save.data.tutorial.get("step", -1)) == 1, "progress is in the save")

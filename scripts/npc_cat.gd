@@ -21,6 +21,7 @@ var rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
+	add_to_group("cat")   # cat vision lights other cats up (cat_vision.gd)
 	rig = CatRig.new()
 	rig.coat_from_style = false
 	rig.fur = fur

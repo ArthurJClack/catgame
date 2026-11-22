@@ -22,8 +22,8 @@ extends Node
 ##
 ## POUNCE: holding space past the hop drops the cat into the pounce crouch, winding up (bum
 ## wiggle) while you aim with the mouse; a dense dotted line shows the exact path. let go and it
-## launches: a free ballistic projectile, low and mostly forward (POUNCE_LIFT, the view pitch only
-## tilts it a little, capped at POUNCE_EL_MAX), speed from how long it wound up, no air steering.
+## launches: a free ballistic projectile along where you look (POUNCE_LIFT above the view line,
+## look up and it goes up, capped at POUNCE_EL_MAX), speed from how long it wound up, no air steering.
 ## it soft locks: prey / rats near where the arc comes down, the tab lock-on target
 ## (player.lock_target) and ledges the arc would smack into just under the top all bend the launch
 ## so it comes down exactly on them, and moving ones are LED (_lead_on: velocity x flight time,
@@ -63,9 +63,9 @@ const POUNCE_WIND_T := 0.7    # crouched this long = full power
 const POUNCE_SPD_MIN := 2.4   # m/s off the hind legs, no wind up
 const POUNCE_SPD_MAX := 6.2   # full wind up (~1.8 m up / ~3.6 m out, real cat numbers)
 const POUNCE_LIFT := 0.3      # rad: launch angle with the view level (mostly forward, a low arc)
-const POUNCE_PITCH := 0.35    # how much looking up / down tilts it
-const POUNCE_EL_MIN := 0.2
-const POUNCE_EL_MAX := 0.62   # never a high lob: that's the q leap's job
+const POUNCE_PITCH := 1.0     # the arc follows the view pitch: look up = leap up, look down = skim low
+const POUNCE_EL_MIN := 0.08
+const POUNCE_EL_MAX := 1.25   # ~72 deg: straight up a trunk / onto a shelf above you
 const POUNCE_RANGE := 3.6     # soft lock reach (horizontal)
 const MAGNET_R := 0.55        # prey this close to where the free arc lands gets locked
 

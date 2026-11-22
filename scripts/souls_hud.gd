@@ -22,6 +22,13 @@ var _st_lag: ColorRect
 var _st_fill: ColorRect
 var _lives: Label
 var _vignette: ColorRect
+## the jump bar: under the crosshair while space is held (CatPlayer.jump_meter)
+const JUMP_W := 140.0
+const JUMP_H := 6.0
+var _jump: Control
+var _jump_fill: ColorRect
+var _jump_label: Label
+var _jump_a := 0.0
 var show_lives := false
 
 
@@ -62,6 +69,36 @@ void fragment() {
 	_vignette.material = sm
 	add_child(_vignette)
 	move_child(_vignette, 0)
+	_jump = Control.new()
+	_jump.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_jump.anchor_left = 0.5
+	_jump.anchor_right = 0.5
+	_jump.anchor_top = 0.5
+	_jump.anchor_bottom = 0.5
+	_jump.offset_top = 34.0
+	_jump.offset_left = -JUMP_W * 0.5
+	add_child(_jump)
+	var jb := ColorRect.new()
+	jb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	jb.position = Vector2(-2, -2)
+	jb.size = Vector2(JUMP_W + 4, JUMP_H + 4)
+	jb.color = Color(0.04, 0.03, 0.03, 0.7)
+	_jump.add_child(jb)
+	_jump_fill = ColorRect.new()
+	_jump_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_jump_fill.size = Vector2(0, JUMP_H)
+	_jump.add_child(_jump_fill)
+	_jump_label = Label.new()
+	_jump_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_jump_label.position = Vector2(0, JUMP_H + 3)
+	_jump_label.size = Vector2(JUMP_W, 18)
+	_jump_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_jump_label.add_theme_font_size_override("font_size", 13)
+	_jump_label.add_theme_color_override("font_color", Color(0.95, 0.92, 0.82))
+	_jump_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_jump_label.add_theme_constant_override("outline_size", 4)
+	_jump.add_child(_jump_label)
+	_jump.modulate.a = 0.0
 
 
 func _rect(pos: Vector2, size: Vector2, c: Color) -> ColorRect:
@@ -74,9 +111,10 @@ func _rect(pos: Vector2, size: Vector2, c: Color) -> ColorRect:
 	return r
 
 
-func _process(_dt: float) -> void:
+func _process(dt: float) -> void:
 	if player == null:
 		return
+	_jump_bar(dt)
 	# scripted bots (preview videos) don't show it unless they play with the real bars
 	visible = (player.bot.is_empty() or player.bot.get("stamina", false)) and not hidden_by_menu
 	# health only matters in the rat pit: elsewhere just the stamina bar, moved up into its place
@@ -103,3 +141,19 @@ func _process(_dt: float) -> void:
 	_lives.visible = show_lives
 	_lives.text = "lives  " + "■ ".repeat(h.lives) + "□ ".repeat(maxi(9 - h.lives, 0))
 	(_vignette.material as ShaderMaterial).set_shader_parameter("amt", h.flash * 0.85)
+
+
+func _jump_bar(dt: float) -> void:
+	var m: Dictionary = player.jump_meter() if player.has_method("jump_meter") else {"on": false}
+	_jump_a = LowPoly.damp(_jump_a, 1.0 if m.on else 0.0, 18.0 if m.on else 10.0, dt)
+	_jump.modulate.a = _jump_a
+	if not m.on:
+		return
+	_jump_fill.size.x = JUMP_W * float(m.fill)
+	_jump_fill.color = Color(0.95, 0.75, 0.25) if m.leap else Color(0.85, 0.9, 0.95)
+	_jump_label.text = m.text
+
+
+## true while the jump bar is up (tests)
+func jump_shown() -> bool:
+	return _jump_a > 0.5
