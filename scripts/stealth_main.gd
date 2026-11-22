@@ -139,7 +139,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -132
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "wasd move · shift run (double tap = gallop) · ctrl / c sneak · space hop, hold = leap · mouse1 swat · e scratch · alt dodge · v camera · hold q cat vision\nr respawn · h hide help · f5 back to the farm\ntry: kick up the shaft by the east wall into the duct, walk the i-beams, climb the crane leg"
+	CatKeys.help(help_label, "{forward} {left} {back} {right} move · {run} run (double tap = gallop) · {crouch} sneak · {jump} hop, hold = leap · {swat} swat · {interact} scratch · {dash} dodge · {toggle_view} camera · hold {vision} cat vision\nr respawn · h hide help · f5 back to the farm\ntry: kick up the shaft by the east wall into the duct, walk the i-beams, climb the crane leg")
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.mouse_filter = Control.MOUSE_FILTER_IGNORE

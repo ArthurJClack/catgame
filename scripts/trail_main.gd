@@ -155,7 +155,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the trail: roots, logs, a rock garden, stone steps, drop offs, a creek. run it (shift run, double tap shift gallop)\nthe cat glides over roots + branches and steps up onto low stuff by itself. space to jump logs, rocks and the creek\nr restart · h hide help · f5 back to the farm"
+	CatKeys.help(help_label, "the trail: roots, logs, a rock garden, stone steps, drop offs, a creek. run it ({run} run, double tap = gallop)\nthe cat glides over roots + branches and steps up onto low stuff by itself. {jump} to jump logs, rocks and the creek\nr restart · h hide help · f5 back to the farm")
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)
