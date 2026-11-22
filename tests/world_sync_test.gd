@@ -249,9 +249,18 @@ func _run() -> void:
 			break
 	var next := await _wait(15, func(): return int(current_scene.wave) > w0 and int(_theirs().get("wave", -1)) == int(current_scene.wave))
 	_ok(next, "next wave in both games (%d / %d)" % [int(current_scene.wave), int(_theirs().get("wave", -1))])
-	await _sleep(3)
-	c = _compare("rat", 0.45)
-	_ok(c[0] >= 2 and c[1] < 0.45, "new wave's rats match too (%d, worst %.2f m)" % [c[0], c[1]])
+	# a slow test box can run the game well behind the wall clock, so wait for the match instead of a fixed time.
+	# charging rats (2.2 m/s): their file can be ~0.15 s old and a puppet runs ~1 packet behind,
+	# so the slack is what a rat covers in that time
+	var got := [0, 0.0, 0.0]    # matched, worst, slack (a lambda can't assign outer locals)
+	var same := await _wait(15, func():
+		var age := absf(Time.get_unix_time_from_system() - float(_theirs().get("t", 0.0)))
+		var cc: Array = _compare("rat", 0.45)
+		got[0] = cc[0]
+		got[1] = cc[1]
+		got[2] = 0.25 + 2.2 * (age + 0.07)
+		return cc[0] >= 2 and cc[1] < got[2])
+	_ok(same, "new wave's rats match too (%d, worst %.2f m, slack %.2f m)" % [got[0], got[1], got[2]])
 	_flag("pit_done")
 	# ---- 4. the farm: knocked props land in the same place
 	var farm := await _wait(120, func(): return _in("res://main.tscn") and net.world.active and _theirs().get("scene", "") == "res://main.tscn")
