@@ -1,36 +1,23 @@
 extends Node3D
-## the city street (res://city.tscn, f4 from the farm, gate in the back fence): secret's Pioneer
-## Square, Seattle (real OpenStreetMap streets + elevation, psx look, Shitbox Rally cars parked on
-## the curbs) at night, dressed up cyberpunk (city/city_neon.gd): neon, rain, steam, wet street.
-## You're a cat, so the whole city is enormous: curbs are steps, parked cars are climbing frames,
-## alley dumpsters + crates are the way up.
-##   r back to the start · t next spot · 1-9 swap cat · v camera · h hide help · f5 / farm sign = back
-## preview: `-- --still x,y,z,tx,ty,tz`, `-- --tour` (bot run + camera director for the clip),
-## `-- --citytest` (builds, cat lands on the street, cars + neon + exit exist, prints one line)
+## the city (res://city.tscn, f4 from the farm, gate in the back fence): one dense crossroads at
+## cat scale (city/city_block.gd), at night in the rain, cyberpunk neon. traffic you have to wait
+## for (city/city_traffic.gd: lights, walk signals, bonk back to the curb), pigeons on the
+## pavements and sparrows in the park (wildlife.gd birds), rats in the alleys (hunt_prey.gd, if
+## the hunting update is in), the warm vent puzzle on the s main st sidewalk.
+##   r back to the start · t next spot · 1-9 swap cat · h hide help · f5 / farm sign = back
+## preview: `-- --still x,y,z,tx,ty,tz`, `-- --tour` (camera flythrough for the clip),
+## `-- --citytest` (builds, runs the bot, checks traffic + a bonk, prints one line),
+## `-- --mapshot <png>` (explores a route, opens the explore map, saves a screenshot)
 
-const Builder := preload("res://scripts/city/city_builder.gd")
 const Cars := preload("res://scripts/city/city_cars.gd")
-const Neon := preload("res://scripts/city/city_neon.gd")
-const DATA := "res://data/city/pioneer_square.json"
-# S Main St between 1st Ave S and Occidental (where secret starts you), your three cars at the curb
-const START := Vector3(-46, 0, 42.4)
-const START_YAW := -PI * 0.5
-const START_CARS := [["wrx_wagon", Vector3(-30, 0, 45.4)], ["crownvic", Vector3(-46, 0, 45.4)], ["civic_ep3", Vector3(-62, 0, 45.4)]]
-# t cycles these: [name, pos, yaw]
-const SPOTS := [
-	["s main st", Vector3(-46, 0, 42.4), -PI * 0.5],
-	["occidental square", Vector3(-10, 0, 0), PI],
-	["1st ave s", Vector3(-89, 0, 100), PI],
-	["the alley", Vector3(-40, 0, -90), 0.0],
-	["s jackson st", Vector3(40, 0, 139), -PI * 0.5],
-]
-static var n_parked := 90
+const CAR_IDS := ["wrx_wagon", "crownvic", "civic_ep3"]
 
 var player: CatPlayer
-var builder
+var block: CityBlock
+var traffic: CityTraffic
 var cars
-var neon
-var data: Dictionary
+var birds: Array = []
+var rats: Array = []
 var hud: CanvasLayer
 var hud_label: Label
 var event_label: Label
@@ -41,14 +28,11 @@ var spot_i := 0
 var t := 0.0
 var tour := false
 var test := false
-var _mode := ""
-var _cam_pos := Vector3.ZERO
-var _cam_look := Vector3.ZERO
-var _cam_init := false
-var _stuck_t := 0.0
-var _route_i := 0
-# the tour bot's route: east along the S Main St sidewalk, then up Occidental Ave S (checked clear of buildings)
-const ROUTE := [Vector2(-46, 42.4), Vector2(-20, 42.6), Vector2(4, 42.8), Vector2(11, 36.0), Vector2(11, 0.0), Vector2(11, -40.0), Vector2(11, -80.0), Vector2(11, -110.0)]
+var mapshot := ""
+var _phase := 0
+var _phase_t := 0.0
+var _bonk_car = null
+var _test_log := []
 
 
 func _ready() -> void:
@@ -56,27 +40,35 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	tour = "--tour" in args
 	test = "--citytest" in args
+	var mi := args.find("--mapshot")
+	if mi >= 0:
+		mapshot = args[mi + 1] if mi + 1 < args.size() else "user://mapshot.png"
 	_setup_env()
-	data = JSON.parse_string(FileAccess.get_file_as_string(DATA))
-	builder = Builder.new()
-	add_child(builder)
-	builder.build(data)
-	_tag_ground()
+	block = CityBlock.new()
+	block.name = "CityBlock"
+	add_child(block)
+	block.build()
 	cars = Cars.new()
+	cars.name = "ParkedCars"
 	add_child(cars)
-	for sc in START_CARS:
-		var p: Vector3 = sc[1]
-		cars.park(sc[0], Transform3D(Basis(Vector3.UP, -PI * 0.5), _ground(p)), Color(0.72, 0.74, 0.76) if sc[0] == "wrx_wagon" else (Color(0.08, 0.08, 0.09) if sc[0] == "crownvic" else Color(0.45, 0.08, 0.08)))
-	cars.fill(_free_spots(), n_parked, builder.terrain)
-	neon = Neon.new()
-	add_child(neon)
-	neon.build(data, builder.terrain)
+	for k in block.parked.size():
+		var pk: Array = block.parked[k]
+		cars.park(CAR_IDS[(k * 7 + 3) % 3], Transform3D(Basis(Vector3.UP, pk[1]), pk[0]), Cars.PAINT[(k * 5 + 1) % Cars.PAINT.size()])
 	player = CatPlayer.new()
-	player.position = _ground(START, 0.25)
-	player.yaw = START_YAW
-	player.orb_yaw = START_YAW
+	player.position = block.start + Vector3(0, 0.1, 0)
+	player.yaw = block.start_yaw
+	player.orb_yaw = block.start_yaw
 	add_child(player)
 	Hub.arrive(player)
+	traffic = CityTraffic.new()
+	traffic.name = "Traffic"
+	traffic.player = player
+	if test:
+		# start the test in a main st green so the bonk check has moving cars to step in front of
+		var now := Time.get_unix_time_from_system()
+		traffic.clock_offset = CityTraffic.CYCLE - fposmod(now, CityTraffic.CYCLE) + 2.0
+	add_child(traffic)
+	_spawn_wildlife()
 	_build_hud()
 	_build_farm_exit()
 	_build_rain()
@@ -86,49 +78,67 @@ func _ready() -> void:
 		player.process_mode = Node.PROCESS_MODE_DISABLED
 		_make_cam()
 		var v := args[si + 1].split_floats(",")
-		# heights are above the street (the ground climbs ~40 m across the map)
-		cam.global_position = _ground(Vector3(v[0], 0, v[2]), v[1])
-		cam.look_at(_ground(Vector3(v[3], 0, v[5]), v[4]), Vector3.UP)
+		cam.global_position = Vector3(v[0], v[1], v[2])
+		cam.look_at(Vector3(v[3], v[4], v[5]), Vector3.UP)
 		player.souls_hud.visible = false
-	elif tour or test:
+	elif tour or test or mapshot != "":
 		help_label.visible = false
-		player.bot = {"move": Vector2(0, 1), "yaw": START_YAW, "pitch": -0.1}
+		player.bot = {"move": Vector2.ZERO, "yaw": block.start_yaw, "pitch": -0.1}
 		var vs := args.find("--style")
 		player.set_style.call_deferred(args[vs + 1] if vs >= 0 else "block")
-		_make_cam()
+		if tour:
+			_make_cam()
+			player.visible = false
+			player.process_mode = Node.PROCESS_MODE_DISABLED
+			player.global_position = Vector3(-44.0, CityBlock.CURB + 0.1, 8.4)
 	elif not OS.has_feature("web"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	if si < 0 and not (tour or test):
-		Puzzles.city(self, player, _ground(START + Vector3(3.0, 0, -1.4), 0.0))   # the warm vent (puzzle_more.gd)
+		Puzzles.city(self, player, block.vent_at)   # the warm vent (puzzle_more.gd)
 
 
-func _ground(p: Vector3, up := 0.0) -> Vector3:
-	return builder.terrain.at_v(p, up)
+## the explore map (explore_map.gd) asks the level for its extent + place names
+func map_info() -> Dictionary:
+	return {"rect": Rect2(-CityBlock.HALF, -CityBlock.HALF, CityBlock.HALF * 2.0, CityBlock.HALF * 2.0), "cell": 1.0, "labels": block.labels, "top": 26.0}
 
 
-## footsteps: the city's one big trimesh is street / sidewalk / stone
-func _tag_ground() -> void:
-	for c in builder.get_children():
-		if c is StaticBody3D:
-			c.set_meta("surface", "stone")
-
-
-## parked spots not right on top of your three cars or the spawn
-func _free_spots() -> Array:
-	var out := []
-	for s in data.get("parked", []):
-		var p := Vector2(float(s["x"]), float(s["z"]))
-		var near := p.distance_to(Vector2(START.x, START.z)) < 26.0
-		if not near:
-			out.append(s)
-	return out
+func _spawn_wildlife() -> void:
+	var gy := func(x: float, z: float) -> float: return CityBlock.ground_y(x, z) + (0.02 if x > CityBlock.WALK and z > CityBlock.WALK else 0.0)
+	var r := RandomNumberGenerator.new()
+	r.seed = 77
+	var add := func(p: Vector3, pigeon: bool) -> void:
+		var c := Critter.new()
+		c.kind = "bird"
+		c.pigeon = pigeon
+		c.ground_cb = gy
+		c.perch_list = block.perches
+		c.home = Vector3(p.x, gy.call(p.x, p.z), p.z)
+		add_child(c)
+		birds.append(c)
+	for s in block.pigeon_spots:
+		for k in r.randi_range(4, 6):
+			add.call(s + Vector3(r.randf_range(-1.5, 1.5), 0, r.randf_range(-1.5, 1.5)), true)
+	for s in block.sparrow_spots:
+		for k in r.randi_range(3, 5):
+			add.call(s + Vector3(r.randf_range(-1.2, 1.2), 0, r.randf_range(-1.2, 1.2)), false)
+	# rats: the hunting update's prey (same ones in the same order on every machine)
+	if ResourceLoader.exists("res://scripts/hunt_prey.gd"):
+		var hp = load("res://scripts/hunt_prey.gd")
+		if hp != null and hp.has_method("spawn"):
+			for di in block.rat_dens.size():
+				if di % 2 == 1 or rats.size() >= 12:
+					continue
+				var den: Array = block.rat_dens[di]
+				var hides: Array[Vector3] = []
+				hides.assign(den[1])
+				rats.append(hp.spawn(self, "rat", den[0], hides, Callable(), block.blockers))
 
 
 func _make_cam() -> void:
 	cam = Camera3D.new()
 	cam.fov = 64
 	cam.near = 0.02
-	cam.far = 600
+	cam.far = 300
 	add_child(cam)
 	cam.current = true
 
@@ -145,13 +155,12 @@ func _setup_env() -> void:
 	psm.ground_bottom_color = Color(0.05, 0.03, 0.08)
 	psm.ground_horizon_color = Color(0.38, 0.12, 0.42)
 	psm.sun_angle_max = 0.0
-	psm.sky_energy_multiplier = 1.0
 	sky.sky_material = psm
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.42, 0.36, 0.62)
-	env.ambient_light_energy = 1.3
+	env.ambient_light_color = Color(0.45, 0.4, 0.62)
+	env.ambient_light_energy = 1.4
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 5.0
 	env.glow_enabled = true
@@ -160,7 +169,7 @@ func _setup_env() -> void:
 	env.glow_hdr_threshold = 0.9
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.3, 0.12, 0.38)
-	env.fog_density = 0.008
+	env.fog_density = 0.0085
 	env.fog_sky_affect = 1.0
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.2
@@ -170,7 +179,7 @@ func _setup_env() -> void:
 	var moon := DirectionalLight3D.new()
 	moon.rotation_degrees = Vector3(-55, 40, 0)
 	moon.light_color = Color(0.55, 0.6, 0.9)
-	moon.light_energy = 0.35
+	moon.light_energy = 0.4
 	moon.shadow_enabled = true
 	moon.directional_shadow_max_distance = 30.0
 	add_child(moon)
@@ -198,6 +207,7 @@ func _build_rain() -> void:
 	rain.initial_velocity_max = 11.0
 	rain.preprocess = 1.2
 	rain.visibility_aabb = AABB(Vector3(-12, -16, -12), Vector3(24, 18, 24))
+	rain.layers = 1 << (CityTraffic.VIS_LAYER - 1)
 	add_child(rain)
 
 
@@ -212,8 +222,8 @@ func _build_hud() -> void:
 	event_label.anchor_left = 0.5
 	event_label.anchor_right = 0.5
 	event_label.anchor_top = 0.62
-	event_label.offset_left = -300
-	event_label.offset_right = 300
+	event_label.offset_left = -320
+	event_label.offset_right = 320
 	event_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_style(event_label, 22)
 	hud.add_child(event_label)
@@ -223,7 +233,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the city: pioneer square at night (real osm map from secret, cars from shitbox rally). you're a cat: curbs are steps, cars are climbing frames\nhop onto hoods + roofs, alley dumpsters and crates go higher, hide under cars from the rain\nr back to the start · h hide help · f5 or the farm sign = back to the farm\nmap data (c) openstreetmap contributors, odbl"
+	help_label.text = "the city: one crossroads, packed. sills, ac units, awnings, pipes, fire escapes, rooftops, a park\ncars don't stop for cats: cross on WALK, or go over (awnings, the sign bridge, the footbridge)\n%s map · r back to the start · t next spot · h hide help · f5 or the farm sign = back to the farm" % CatKeys.describe("map")
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)
@@ -243,14 +253,13 @@ func _style(l: Label, size: int) -> void:
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
-## farm gate on the sidewalk just behind the start, a chain-link panel with a neon sign
+## farm gate at the west end of the s main st sidewalk, a chain-link panel with a neon sign
 func _build_farm_exit() -> void:
-	var c := _ground(START + Vector3(-5.0, 0, -2.6), 0.15)
-	var dir := Vector3(1, 0, 0)      # sign faces down the street toward the start
+	var c := block.exit_at
 	for s in [-1.0, 1.0]:
 		Level.box(self, c + Vector3(0, 0.75, s * 0.6), Vector3(0.08, 1.5, 0.08), Color(0.35, 0.36, 0.4)).name = "FarmGatePost"
 	Level.box(self, c + Vector3(0, 1.52, 0), Vector3(0.08, 0.06, 1.28), Color(0.35, 0.36, 0.4), false)
-	Hub.exit(self, c, dir, "city", Vector2.ZERO, "farm")
+	Hub.exit(self, c, Vector3(1, 0, 0), "city", Vector2.ZERO, "farm")
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -266,11 +275,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	match k:
 		KEY_R:
 			spot_i = 0
-			_place(SPOTS[0])
+			_place(block.spots[0])
 		KEY_T:
-			spot_i = (spot_i + 1) % SPOTS.size()
-			_place(SPOTS[spot_i])
-			player._event(SPOTS[spot_i][0])
+			spot_i = (spot_i + 1) % block.spots.size()
+			_place(block.spots[spot_i])
+			player.toast = block.spots[spot_i][0]
+			player.toast_t = 0.0
 		KEY_H:
 			help_label.visible = not help_label.visible
 		KEY_F5:
@@ -278,7 +288,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _place(s: Array) -> void:
-	player.global_position = _ground(s[1], 0.3)
+	player.global_position = s[1] + Vector3(0, 0.15, 0)
 	player.velocity = Vector3.ZERO
 	player.yaw = s[2]
 	player.orb_yaw = s[2]
@@ -287,41 +297,113 @@ func _place(s: Array) -> void:
 func _physics_process(dt: float) -> void:
 	if player == null:
 		return
-	var p := player.global_position
-	if p.y < builder.terrain.at(p.x, p.z) - 3.0:
-		_place(SPOTS[spot_i])
-	if tour or test:
-		_bot(dt)
+	if player.global_position.y < -3.0:
+		_place(block.spots[spot_i])
+	if test:
+		_test(dt)
+	elif mapshot != "":
+		_mapshot(dt)
 
 
-func _bot(dt: float) -> void:
+# ---------------------------------------------------------------- citytest
+
+func _test(dt: float) -> void:
+	_phase_t += dt
 	var p := player.global_position
-	var tgt: Vector2 = ROUTE[mini(_route_i, ROUTE.size() - 1)]
-	var to := Vector2(tgt.x - p.x, tgt.y - p.z)
-	if to.length() < 1.5 and _route_i < ROUTE.size() - 1:
-		_route_i += 1
-	var want := atan2(-to.x, -to.y)
-	var cur: float = player.bot.get("yaw", player.yaw)
-	player.bot.yaw = cur + clampf(wrapf(want - cur, -PI, PI), -4.0 * dt, 4.0 * dt)
-	player.bot.canter = true
-	player.bot.sprint = t > 3.0 and t < 14.0
-	player.bot.move = Vector2(0, 1) if _route_i < ROUTE.size() - 1 or to.length() > 1.0 else Vector2.ZERO
-	var hs := Vector2(player.velocity.x, player.velocity.z).length()
-	_stuck_t = _stuck_t + dt if hs < 0.5 else 0.0
-	player.bot.jump = _stuck_t > 0.4 and _stuck_t < 0.5
-	if test and t > 6.0:
-		_report()
+	match _phase:
+		0:
+			# walk east along the s main st sidewalk for a few seconds
+			player.bot.move = Vector2(0, 1)
+			player.bot.canter = true
+			if _phase_t > 5.0:
+				_test_log.append("walk ran %.1f m, on floor %s, y %.2f" % [p.distance_to(block.start), player.is_on_floor(), p.y])
+				_test_log.append(player.is_on_floor() and p.distance_to(block.start) > 3.0 and absf(p.y - CityBlock.CURB) < 0.3)
+				player.bot.move = Vector2.ZERO
+				_phase = 1
+				_phase_t = 0.0
+		1:
+			# step in front of a moving car: should get bonked back onto the curb
+			if _bonk_car == null:
+				for v in traffic.vehicles:
+					if v.v > 4.0 and v.kind == "car" and v.s > 8.0 and v.s < 40.0:
+						_bonk_car = v
+						break
+				if _bonk_car == null:
+					if _phase_t > 25.0:
+						_test_log.append("no moving car found")
+						_test_log.append(false)
+						_phase = 2
+					return
+				var l: Dictionary = traffic.lanes[_bonk_car.lane]
+				var at: Vector3 = traffic.pos_of(_bonk_car) + (l.d as Vector3) * 7.0
+				player.global_position = Vector3(at.x, 0.05, at.z)
+				player.velocity = Vector3.ZERO
+				_phase_t = 0.0
+			elif _phase_t > 3.5:
+				var ok: bool = traffic.bonks > 0 and not CityBlock.on_road(player.global_position)
+				_test_log.append("bonks %d, cat at %s (on road %s)" % [traffic.bonks, player.global_position.snapped(Vector3.ONE * 0.1), CityBlock.on_road(player.global_position)])
+				_test_log.append(ok)
+				_phase = 2
+		2:
+			_report()
+			_phase = 3
 
 
 func _report() -> void:
-	var p := player.global_position
-	var gy: float = builder.terrain.at(p.x, p.z)
-	var moved := Vector2(p.x - START.x, p.z - START.z).length()
+	var em = get_node_or_null("/root/ExploreMap")
+	var explored: float = em.explored() if em else -1.0
+	var oks := _test_log.filter(func(x): return x is bool)
+	var ok: bool = oks.all(func(x): return x) and traffic.spawned > 4 and traffic.heads.size() >= 8 and traffic.walks.size() == 8 \
+		and block.n_boxes > 3000 and block.perches.size() > 40 and birds.size() > 15 and block.rat_dens.size() >= 6 and explored > 0.0
 	var exits := get_tree().get_nodes_in_group("hub_trigger").filter(func(n: Node) -> bool: return is_ancestor_of(n)).size()
-	var ok: bool = player.is_on_floor() and p.y > gy - 0.5 and p.y < gy + 3.0 and moved > 4.0 and cars.cars.size() > 40 and neon.lights > 10 and exits >= 1
-	print("[city] %s: on floor %s, y %.2f ground %.2f, ran %.1f m, %d cars, %d neon lights, %d puddles, %d vents, %d exits, %d fps" % [
-		"ok" if ok else "FAIL", player.is_on_floor(), p.y, gy, moved, cars.cars.size(), neon.lights, neon.puddles.size(), neon.vents.size(), exits, Engine.get_frames_per_second()])
+	ok = ok and exits >= 1
+	print("[city] %s: %s | %d boxes, %d shapes, %d lights, %d perches, %d birds, %d rat dens (%d rats), %d vehicles now (%d spawned), %d signal heads, %d walk signs, explored %.1f%%, %d exits, %d fps" % [
+		"ok" if ok else "FAIL", " · ".join(_test_log.filter(func(x): return x is String)), block.n_boxes, block.n_shapes, block.n_lights, block.perches.size(), birds.size(),
+		block.rat_dens.size(), rats.size(), traffic.vehicles.size(), traffic.spawned, traffic.heads.size(), traffic.walks.size(), explored * 100.0, exits, Engine.get_frames_per_second()])
 	get_tree().quit(0 if ok else 1)
+
+
+# ---------------------------------------------------------------- map screenshot
+
+const MAP_ROUTE := [Vector3(-38, 0.2, 7), Vector3(-25, 0.2, 7), Vector3(-34.5, 0.2, 7), Vector3(-34.5, 0.2, -8), Vector3(-34.5, 0.2, -28),
+	Vector3(-34.5, 7.0, -36), Vector3(-27, 14, -15), Vector3(-15, 10.5, -15), Vector3(0, 10.8, -15), Vector3(15, 10.5, -15),
+	Vector3(7, 0.2, -7), Vector3(7, 0.2, 7), Vector3(14, 0.2, 14), Vector3(26, 0.2, 24), Vector3(33, 0.2, 28), Vector3(19, 0.2, 34)]
+
+
+func _mapshot(dt: float) -> void:
+	_phase_t += dt
+	var em = get_node_or_null("/root/ExploreMap")
+	if em == null:
+		return
+	match _phase:
+		0:
+			hud.visible = false
+			player.souls_hud.visible = false
+			if _phase_t > 1.0:
+				# walk the route: reveal along it, leave the cat at the end
+				for i in MAP_ROUTE.size() - 1:
+					var a: Vector3 = MAP_ROUTE[i]
+					var b: Vector3 = MAP_ROUTE[i + 1]
+					var n := int(a.distance_to(b) / 1.5) + 1
+					for k in n + 1:
+						em.reveal_at(a.lerp(b, float(k) / n))
+				player.global_position = MAP_ROUTE[MAP_ROUTE.size() - 1]
+				player.yaw = PI * 0.75
+				Puzzles.solved["warm_vent"] = 1
+				_phase = 1
+				_phase_t = 0.0
+		1:
+			if _phase_t > 0.5:
+				em.no_pause = true
+				em.open_map()
+				_phase = 2
+				_phase_t = 0.0
+		2:
+			if _phase_t > 2.0:
+				var img := get_viewport().get_texture().get_image()
+				img.save_png(mapshot)
+				print("[city] map screenshot -> %s (explored %.1f%%)" % [mapshot, em.explored() * 100.0])
+				get_tree().quit()
 
 
 func _process(dt: float) -> void:
@@ -340,59 +422,68 @@ func _process(dt: float) -> void:
 	var v := player.velocity
 	var hs := Vector2(v.x, v.z).length()
 	hud_label.text = "%d fps\n%.1f m/s   %s" % [Engine.get_frames_per_second(), hs, player.surface]
-	if player.toast_t < 0.9:
+	if player.toast_t < 1.6:
 		event_label.text = player.toast
-		event_label.modulate.a = 1.0 - player.toast_t / 0.9
+		event_label.modulate.a = 1.0 - player.toast_t / 1.6
 	else:
 		event_label.text = ""
 
 
-## clip shots: high crane over the street, chase behind the cat, low side dolly, first person
-func _director(dt: float) -> void:
+# ---------------------------------------------------------------- flythrough (--tour)
+
+## camera keys [time, pos, look]: low down the sidewalk, into the alley, up the fire escape,
+## over the roofs + the sign bridge, down to the crossing (traffic), the park, the pond, the
+## playground, the construction site, the footbridge, up and out for the whole block
+const KEYS := [
+	[0.0, Vector3(-41.0, 0.45, 7.6), Vector3(-30.0, 0.6, 6.0)],
+	[4.0, Vector3(-34.5, 0.6, 5.0), Vector3(-34.5, 1.0, -6.0)],
+	[8.0, Vector3(-34.6, 1.2, -10.0), Vector3(-34.5, 1.5, -26.0)],
+	[12.0, Vector3(-34.3, 2.2, -26.0), Vector3(-36.0, 6.0, -36.0)],
+	[16.0, Vector3(-33.0, 8.0, -33.0), Vector3(-36.0, 9.0, -40.0)],
+	[20.0, Vector3(-30.0, 15.5, -26.0), Vector3(-15.0, 11.0, -15.0)],
+	[24.0, Vector3(-17.0, 11.6, -16.0), Vector3(0.0, 11.2, -15.0)],
+	[28.0, Vector3(-3.0, 11.4, -15.4), Vector3(12.0, 10.5, -15.0)],
+	[31.0, Vector3(6.5, 7.0, -7.5), Vector3(0.0, 0.5, 2.0)],
+	[35.0, Vector3(9.5, 1.2, 9.5), Vector3(-4.0, 0.6, -2.0)],
+	[39.0, Vector3(13.0, 0.8, 16.5), Vector3(28.0, 0.8, 30.0)],
+	[43.0, Vector3(27.5, 1.1, 27.0), Vector3(34.0, 0.9, 33.0)],
+	[47.0, Vector3(25.0, 1.6, 36.0), Vector3(17.0, 1.0, 35.0)],
+	[51.0, Vector3(20.5, 4.5, 31.5), Vector3(40.0, 1.0, 17.5)],
+	[55.0, Vector3(33.0, 7.0, 9.0), Vector3(27.0, 5.3, 0.0)],
+	[59.0, Vector3(27.1, 5.9, -5.0), Vector3(27.1, 5.6, 8.0)],
+	[63.0, Vector3(-7.0, 3.0, 13.0), Vector3(-15.0, 1.0, 28.0)],
+	[66.0, Vector3(-8.0, 3.5, 25.0), Vector3(-20.0, 2.0, 30.0)],
+	[70.0, Vector3(-24.0, 5.0, 27.0), Vector3(-36.0, 4.0, 36.0)],
+	[74.0, Vector3(-30.0, 9.0, 31.0), Vector3(-40.0, 6.0, 40.0)],
+	[78.0, Vector3(-20.0, 30.0, 40.0), Vector3(0.0, 0.0, 0.0)],
+	[83.0, Vector3(30.0, 48.0, 50.0), Vector3(0.0, 0.0, -2.0)],
+]
+
+
+func _director(_dt: float) -> void:
 	hud.visible = false
-	var mode := "crane"
-	if t > 4.0:
-		mode = "chase"
-	if t > 10.0:
-		mode = "low"
-	if t > 15.0:
-		mode = "fp"
-	if t > 21.0:
+	player.souls_hud.visible = false
+	var last: Array = KEYS[KEYS.size() - 1]
+	if t > float(last[0]) + 0.5:
 		get_tree().quit()
 		return
-	var p := player.rig.global_position
-	var fwd := -player.global_transform.basis.z
-	var left := Vector3(fwd.z, 0, -fwd.x)
-	if mode != _mode:
-		_mode = mode
-		_cam_init = false
-	if player.third_person != (mode != "fp"):
-		player.set_third_person(mode != "fp")
-	if mode == "fp":
-		player.cam.current = true
-		player.bot.pitch = 0.05
-		return
-	cam.current = true
-	var want_pos := p
-	var want_look := p
-	match mode:
-		"crane":
-			var u := clampf(t / 4.0, 0.0, 1.0)
-			want_pos = p + Vector3(0, lerpf(14.0, 1.2, u * u), 0) - fwd * lerpf(8.0, 1.6, u) + left * 1.5
-			want_look = p + fwd * 2.0 + Vector3(0, lerpf(2.0, 0.3, u), 0)
-		"chase":
-			want_pos = p - fwd * 1.3 + left * 0.25 + Vector3(0, 0.45, 0)
-			want_look = p + fwd * 1.0 + Vector3(0, 0.45, 0)
-		"low":
-			want_pos = p + left * 1.1 + fwd * 0.4 + Vector3(0, 0.15, 0)
-			want_look = p + fwd * 0.3 + Vector3(0, 0.35, 0)
-	var off := want_pos - p
-	var loff := want_look - p
-	if not _cam_init or mode == "crane":
-		_cam_pos = off
-		_cam_look = loff
-		_cam_init = true
-	_cam_pos = LowPoly.damp3(_cam_pos, off, 4.0, dt)
-	_cam_look = LowPoly.damp3(_cam_look, loff, 6.0, dt)
-	cam.global_position = p + _cam_pos
-	cam.look_at(p + _cam_look, Vector3.UP)
+	var i := 0
+	while i < KEYS.size() - 2 and t > float(KEYS[i + 1][0]):
+		i += 1
+	var k0: Array = KEYS[maxi(i - 1, 0)]
+	var k1: Array = KEYS[i]
+	var k2: Array = KEYS[i + 1]
+	var k3: Array = KEYS[mini(i + 2, KEYS.size() - 1)]
+	var u := clampf((t - float(k1[0])) / (float(k2[0]) - float(k1[0])), 0.0, 1.0)
+	u = u * u * (3.0 - 2.0 * u) * 0.35 + u * 0.65
+	var pos := _cr(k0[1], k1[1], k2[1], k3[1], u)
+	var look := _cr(k0[2], k1[2], k2[2], k3[2], u)
+	cam.global_position = pos
+	if pos.distance_to(look) > 0.01:
+		cam.look_at(look, Vector3.UP)
+
+
+static func _cr(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, u: float) -> Vector3:
+	var u2 := u * u
+	var u3 := u2 * u
+	return 0.5 * ((2.0 * p1) + (-p0 + p2) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u3)

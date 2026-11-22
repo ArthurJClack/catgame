@@ -13,6 +13,11 @@ extends Node3D
 ##   butterfly flutters between flowers, swerves away from paws
 
 var kind := "rabbit"
+# outside the forest (the city): ground height callback + perch list instead of ForestLevel's,
+# no forest obstacles / water. pigeon = a bigger grey bird (kind "bird")
+var ground_cb := Callable()
+var perch_list: Array = []
+var pigeon := false
 var home := Vector3.ZERO
 var state := "idle"
 var state_t := 0.0
@@ -115,6 +120,9 @@ func _build_rabbit() -> void:
 
 func _build_bird() -> void:
 	var col: Color = [Color(0.5, 0.36, 0.25), Color(0.25, 0.35, 0.6), Color(0.72, 0.3, 0.2)][rng.randi() % 3]
+	if pigeon:
+		col = [Color(0.45, 0.47, 0.52), Color(0.38, 0.4, 0.46), Color(0.55, 0.55, 0.58), Color(0.3, 0.28, 0.3)][rng.randi() % 4]
+		scale = Vector3.ONE * 1.6
 	body = _pivot(self, Vector3.ZERO)
 	_p(body, LowPoly.sphere(6, 4), col, Vector3(0, 0.05, 0), Vector3(0.06, 0.06, 0.11))
 	_p(body, LowPoly.sphere(5, 3), col.lightened(0.4), Vector3(0, 0.04, -0.015), Vector3(0.05, 0.045, 0.07))
@@ -269,6 +277,8 @@ func _cat() -> Node3D:
 
 
 func _ground_y(x: float, z: float) -> float:
+	if ground_cb.is_valid():
+		return ground_cb.call(x, z)
 	return ForestLevel.height(x, z)
 
 
@@ -277,10 +287,11 @@ func _pick_wander(radius := 6.0) -> void:
 		var a := rng.randf() * TAU
 		var r := rng.randf_range(1.0, radius)
 		var t := home + Vector3(cos(a) * r, 0, sin(a) * r)
-		t.x = clampf(t.x, -34, 34)
-		t.z = clampf(t.z, -34, 34)
+		var lim := 45.0 if ground_cb.is_valid() else 34.0
+		t.x = clampf(t.x, -lim, lim)
+		t.z = clampf(t.z, -lim, lim)
 		var h := _ground_y(t.x, t.z)
-		if kind != "deer" and kind != "frog" and h < ForestLevel.WATER_Y + 0.05:
+		if not ground_cb.is_valid() and kind != "deer" and kind != "frog" and h < ForestLevel.WATER_Y + 0.05:
 			continue
 		target = Vector3(t.x, h, t.z)
 		return
@@ -310,6 +321,8 @@ static func _near_obstacles(p: Vector2) -> Array:
 
 
 func _avoid(dir: Vector3) -> Vector3:
+	if ground_cb.is_valid():
+		return dir
 	# steer around trunks / rocks / logs (ground animals)
 	var p := Vector2(position.x, position.z)
 	var push := Vector2.ZERO
@@ -518,7 +531,7 @@ func _process(dt: float) -> void:
 
 func _snap_ground(dt: float, lift := 0.0) -> void:
 	var gy := _ground_y(position.x, position.z)
-	if kind != "frog" and kind != "deer":
+	if kind != "frog" and kind != "deer" and not ground_cb.is_valid():
 		gy = maxf(gy, ForestLevel.WATER_Y - 0.02)
 	position.y = LowPoly.damp(position.y, gy + lift, 18.0, dt)
 
@@ -733,10 +746,11 @@ func _fly_to_perch(th: Array) -> void:
 	var best := Vector3.ZERO
 	var best_score := -1e9
 	var away: Vector3 = th[4]
+	var pl: Array = perch_list if not perch_list.is_empty() else ForestLevel.perches
 	for i in 10:
-		if ForestLevel.perches.is_empty():
+		if pl.is_empty():
 			break
-		var p: Vector3 = ForestLevel.perches[rng.randi() % ForestLevel.perches.size()]
+		var p: Vector3 = pl[rng.randi() % pl.size()]
 		var off := p - position
 		var dist := off.length()
 		if dist < 2.0 or dist > 22.0:

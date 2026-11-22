@@ -15,6 +15,7 @@ Updater="*res://scripts/updater.gd"
 Net="*res://scripts/net/net.gd"
 GameMenu="*res://scripts/game_menu.gd"
 Save="*res://scripts/save_game.gd"
+ExploreMap="*res://scripts/explore_map.gd"
 
 [display]
 

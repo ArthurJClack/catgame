@@ -23,6 +23,7 @@ const ACTIONS := [
 	["toggle_view", "first / third person"],
 	["lock_on", "lock on (rat pit / play fight)"],
 	["vision", "cat vision (hold: light up stuff worth a look)"],
+	["map", "explore map"],
 ]
 
 ## bump when the default layout changes: older saved binds are dropped so nobody keeps a
@@ -45,6 +46,7 @@ const DEFAULTS := {
 	"toggle_view": [{"k": KEY_V}],
 	"lock_on": [{"k": KEY_TAB}],
 	"vision": [{"k": KEY_Q}],
+	"map": [{"k": KEY_J}],
 }
 
 ## keys the game keeps for itself (menus, level keys): can't be bound

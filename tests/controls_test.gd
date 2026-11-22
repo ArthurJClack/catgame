@@ -80,7 +80,7 @@ func _run() -> void:
 	var ids := []
 	for a in CatKeys.ACTIONS:
 		ids.append(a[0])
-	_ok(ids.size() <= 15, "15 or fewer rebindable actions (%d)" % ids.size())   # 15th = cat vision, asked for 2026-11-22
+	_ok(ids.size() <= 16, "16 or fewer rebindable actions (%d)" % ids.size())   # 15th = cat vision, 16th = the explore map
 	for gone in ["aim", "walk", "walk_toggle", "paw_l", "paw_r", "scratch", "drop"]:
 		_ok(not gone in ids, "no '%s' key any more" % gone)
 	_ok(CatKeys.describe("grab").begins_with("mouse2"), "grab is on mouse2 (%s)" % CatKeys.describe("grab"))

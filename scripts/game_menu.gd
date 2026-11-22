@@ -227,6 +227,9 @@ func _page_main() -> void:
 		_button(_body, txt, func(): Save.save_now(); show_page("main"))
 	_button(_body, "settings", show_page.bind("settings"))
 	_button(_body, "controls", show_page.bind("controls"))
+	var em = get_node_or_null("/root/ExploreMap")
+	if em and em.gw > 0:
+		_button(_body, "map (%d%% explored)" % roundi(em.explored() * 100.0), func(): close_menu(); em.open_map())
 	_button(_body, "cat puzzles (%d / %d)" % [Puzzles.count_solved(), Puzzles.LIST.size()], show_page.bind("puzzles"))
 	var ach = Save.achievements
 	if ach:
