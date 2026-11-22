@@ -194,6 +194,8 @@ func scare(amount := 1.0) -> void:
 
 ## the rig heard something (CatRig.hear)
 func heard(pos: Vector3, loud: float) -> void:
+	if rig == null or not is_instance_valid(rig):
+		return
 	var d: float = pos.distance_to(rig.global_position)
 	if loud >= 0.8 and d < 3.5 and rig.speed_s < 1.5:
 		scare(clampf(loud * (1.0 - d / 5.0), 0.0, 1.0))

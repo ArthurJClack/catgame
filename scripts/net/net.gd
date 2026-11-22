@@ -38,6 +38,8 @@ var peers := {}                # id -> NetPeer
 var my_name := "cat"
 var status_text := ""
 var ui: Node = null
+var world: NetWorld            # keeps props / prey / rats / wildlife the same for everyone in a level
+var handlers := {}             # packet type byte -> Callable(from, data): extra packet kinds (PreySync 14, NetWorld 15)
 
 var _sim_t := 0.0
 var _disp_t := 0.0
@@ -52,7 +54,6 @@ var _was_floor := true
 var _was_claw := false
 var _join_t := 0.0
 var _map_done := false
-var handlers := {}             # packet type byte -> func(from, data) for other systems (PreySync: 14)
 
 # lobby room
 signal match_started(scene: String)
@@ -129,6 +130,10 @@ func _ready() -> void:
 		if ci >= 0 and ci + 1 < all.size():
 			var hp := all[ci + 1].split(":")
 			join_server.call_deferred(hp[0], int(hp[1]) if hp.size() > 1 else NetEnetTransport.PORT)
+	world = NetWorld.new()
+	world.name = "World"
+	add_child(world)
+	handlers[NetWorld.T_WORLD] = world.on_packet
 	if DisplayServer.get_name() != "headless" and not _quiet_run(args):
 		ui = preload("res://scripts/net/lobby_ui.gd").new()
 		add_child(ui)
@@ -476,9 +481,9 @@ func _on_packet(from: int, data: PackedByteArray) -> void:
 			if from == 1 and transport is NetEnetTransport:
 				_on_server_info(NetDedicatedServer.read_info(data))
 		_:
-			var h: Callable = handlers.get(data[0], Callable())
-			if h.is_valid():
-				h.call(from, data)
+			var hd: Callable = handlers.get(int(data[0]), Callable())
+			if hd.is_valid():
+				hd.call(from, data)
 
 
 func _on_server_info(info: Dictionary) -> void:
@@ -603,6 +608,21 @@ func host_lan(port: int = NetEnetTransport.PORT) -> bool:
 	_room_reset()
 	_set_status("hosting on lan, udp port %d. friends join with your ip" % port)
 	return true
+
+
+## who runs the level's shared state (world_sync.gd): the lobby host if they're in this level,
+## else the lowest id among the cats here. a dedicated server only relays, so it never is
+func authority_here() -> int:
+	var here := _scene_path()
+	var ids := [my_id()]
+	for id in peers:
+		var p: NetPeer = peers[id]
+		if p.hello_seen and p.scene == here:
+			ids.append(id)
+	if in_room() and host_id() in ids:
+		return host_id()
+	ids.sort()
+	return ids[0]
 
 
 func hosting_lan() -> bool:

@@ -430,6 +430,8 @@ func _ate(n: int) -> void:
 
 
 func _solve(id: String, at: Vector3) -> void:
+	if int(solved.get(id, 0)) == 0:
+		NetWorld.solved(id)    # online: the others in this level get it too
 	solved[id] = int(solved.get(id, 0)) + 1
 	_play("chime", at, 0.8)
 

@@ -252,12 +252,20 @@ func _build() -> void:
 func stun(_t: float) -> void:
 	if target == null:
 		return
-	take_hit(1.0, target.global_position)
+	take_hit(1.0, target.global_position)   # (online: target is always this game's own cat)
 
 
 ## a pounce landed on it
 func pin_hit(by: Node3D) -> void:
 	take_hit(2.5, by.global_position, true)
+
+
+## online: a rat someone else's game runs shows the hit at once, the owner applies it (world_sync.gd)
+func _net_forward(args: Array) -> bool:
+	if NetWorld.forward(self, "take_hit", args):
+		_hit_flash = 1.0
+		return true
+	return false
 
 
 func pinned() -> void:
@@ -278,6 +286,8 @@ func behind(from: Vector3) -> bool:
 ## poise_mul: how much this hit counts toward a stagger (rakes 0.5, grip squeezes 0)
 func take_hit(dmg: float, from: Vector3, heavy := false, poise_mul := 1.0) -> void:
 	if state == DEAD:
+		return
+	if _net_forward([dmg, from, heavy, poise_mul]):
 		return
 	var back := behind(from)
 	if state == BROKEN and poise_mul > 0.0:
@@ -322,6 +332,7 @@ func take_hit(dmg: float, from: Vector3, heavy := false, poise_mul := 1.0) -> vo
 func grab(by: Node3D) -> void:
 	if state == DEAD:
 		return
+	NetWorld.hold(self)
 	held_by = by
 	held_t = 0.0
 	hold_point = global_position

@@ -76,8 +76,12 @@ func _ready() -> void:
 
 # ---------------------------------------------------------------- waves
 
+var _round := 0                # every wave start (also a restart of the same wave) is a new round
+
+
 func _start_wave(i: int) -> void:
 	wave = i
+	_round += 1
 	for r in rats:
 		if is_instance_valid(r):
 			r.queue_free()
@@ -109,6 +113,8 @@ func _endless(i: int) -> Array:
 func spawn_rat(pos: Vector3, size := 1.0) -> SoulsRat:
 	var r := SoulsRat.new()
 	r.s = size
+	# online: the same rat in every game (world_sync.gd matches them by this)
+	r.set_meta("net_key", "r%d_%d" % [_round, rats.size()])
 	r.position = pos
 	r.yaw = atan2(pos.x, pos.z)   # facing the middle
 	r.target = player
@@ -146,7 +152,24 @@ func _on_died(lives_left: int) -> void:
 func restart() -> void:
 	player.health.lives = 9
 	_put_back()
-	_start_wave(0)
+	if not NetWorld.level_puppet():
+		_start_wave(0)
+
+
+## online (world_sync.gd): the host's wave, so everyone fights the same rats
+func net_level_pack() -> Dictionary:
+	return {"wave": wave, "round": _round}
+
+
+func net_level_apply(d: Dictionary) -> void:
+	if test_mode or show_mode:
+		return
+	var rd := int(d.get("round", _round))
+	if rd != _round:
+		if int(d.get("wave", wave)) != wave:
+			player.health.heal_full()
+		_round = rd - 1
+		_start_wave(int(d.get("wave", wave)))
 
 
 func _put_back() -> void:
@@ -165,6 +188,8 @@ func _physics_process(dt: float) -> void:
 		_torches[i].light_energy = 1.6 + 0.25 * sin(_t * 9.0 + i * 1.7) + 0.15 * sin(_t * 23.0 + i)
 	if test_mode or show_mode:
 		return
+	if _between > 0.0 and NetWorld.level_puppet():
+		_between = 0.0             # online: the waves come from the host (net_level_apply)
 	if _between > 0.0:
 		_between -= dt
 		if _between <= 0.0:
@@ -178,7 +203,8 @@ func _physics_process(dt: float) -> void:
 				restart()
 			else:
 				_put_back()
-				_start_wave(wave)
+				if not NetWorld.level_puppet():
+					_start_wave(wave)
 	else:
 		_fade_a = maxf(_fade_a - dt * 1.2, 0.0)
 	fade.color.a = _fade_a

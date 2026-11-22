@@ -419,9 +419,6 @@ var catches := 0
 var leaps := 0                   # aimed leaps taken (tutorial / stats)
 var hunt_info := ""             # hud line: nearest prey while stalking
 var _swat_prey: Node3D = null
-var _auto_t := 0.0
-var _auto_last: Object = null
-var _auto_last_t := 0.0
 var prev_drop := false
 # grip: how hard the paws can push on what's underfoot (m/s^2 before they slip)
 const GRIP := {"wood": 16.0, "tile": 14.0, "carpet": 30.0, "rug": 30.0, "grass": 24.0, "dirt": 19.0, "hay": 20.0, "default": 18.0}
@@ -978,19 +975,7 @@ func _physics_process(dt: float) -> void:
 	if drop_in and not prev_drop and carried:
 		_drop_carried()
 	prev_drop = drop_in
-	# auto swat: anything loose (or prey) right under the crosshair and in paw reach gets swatted
-	_auto_t -= dt
-	_auto_last_t += dt
-	if bot.is_empty() and _auto_t <= 0.0 and not clawing and not combat.any_down() and not combat.busy() and _swat_hit_t < 0.0 and not (climbing or clambering or mantling or scratching or charging):
-		_auto_t = 0.1
-		var at := _paw_target(SWAT_RANGE * 0.85, 0.17)
-		if not at.is_empty():
-			var who: Object = at.get("prey") if at.get("prey") else at.get("rb")
-			if who != carried and (who != _auto_last or _auto_last_t > 1.4):
-				_auto_last = who
-				_auto_last_t = 0.0
-				_auto_t = 0.55
-				combat.auto_swat()
+	# (no auto swat: the cat only swats when you press swat. user asked 2026-11-22)
 	_update_surface()
 	var tv: bool = inp.get("toggle_view", false)
 	if tv and not prev_v:
@@ -2783,6 +2768,7 @@ func _prey_name(n: Object) -> String:
 
 ## caught something: it stops struggling and goes in the mouth
 func _catch(n: Object) -> void:
+	NetWorld.touch(n)
 	if n.has_method("pin_hit"):
 		n.call("pin_hit", self)   # too big to carry (arena rats): the pounce lands as a heavy hit
 		if n is Node3D:
@@ -3138,7 +3124,7 @@ func _paw_target(reach: float, cone: float) -> Dictionary:
 var _swat_rake := false
 var _swat_pt := Vector3.ZERO      # world point the paw strikes (for the slash fx)
 
-## paw 0 = left, 1 = right, -1 = random (auto swat). rake = one of a held paw's repeated rakes
+## paw 0 = left, 1 = right, -1 = random. rake = one of a held paw's repeated rakes
 func _do_swat(paw := -1, rake := false) -> void:
 	if paw < 0:
 		paw = randi() % 2
@@ -3266,6 +3252,7 @@ func _hit_prey(n: Node3D) -> void:
 	if _swat_done.has(n):
 		return
 	_swat_done.append(n)
+	NetWorld.touch(n)      # online: swatted prey runs in my game now (rats excepted, world_sync.gd)
 	if _swat_rake and n.has_method("take_hit"):
 		n.call("take_hit", CatCombat.RAKE_DMG, global_position, false, CatCombat.RAKE_POISE)
 	elif n.has_method("stun"):
@@ -3279,6 +3266,7 @@ func _hit_bodies(hits: Array[RigidBody3D], dir: Vector3, sweep: Vector3) -> void
 		if rb == carried or _swat_done.has(rb):
 			continue
 		_swat_done.append(rb)
+		NetWorld.touch(rb)     # online: I knocked it, my game runs it (unfreezes a puppet copy)
 		if rb.freeze:
 			if rb.is_in_group("prey"):
 				continue
@@ -3344,6 +3332,7 @@ func _claw_start(paw := -1) -> void:
 		return
 	if not t.is_empty() and t.rb:
 		claw_rb = t.rb
+		NetWorld.touch(claw_rb)
 		if claw_rb.freeze and not claw_rb.is_in_group("prey"):
 			claw_rb = null
 		else:
@@ -3490,4 +3479,6 @@ func _push_props() -> void:
 		var col := c.get_collider()
 		if col is RigidBody3D:
 			var rb: RigidBody3D = col
+			if Vector2(velocity.x, velocity.z).length() > 0.3:
+				NetWorld.touch(rb)   # online: pushing it = my game runs it
 			rb.apply_central_impulse(-c.get_normal() * 0.02 * Vector2(velocity.x, velocity.z).length())
