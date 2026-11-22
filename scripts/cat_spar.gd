@@ -271,6 +271,8 @@ func _send(to: Node3D, ev: Array) -> void:
 			if not NetWorld.forward(to, "play_tag", [kind, player.global_position]):
 				to.play_tag(kind, player.global_position)
 			_inbox.append([to, ["res", ev[1], kind, "hit"]])
+		elif str(ev[0]) == "res" and to.has_method("play_result"):
+			to.play_result(str(ev[3]))
 		return
 	if to is RemoteCat:
 		var rig = player.get("rig")
