@@ -19,6 +19,8 @@ const DESTS := {
 	"trail": {"scene": "res://trail.tscn", "label": "the trail", "sign": "running trail", "spawn": "trail_gate"},
 	"pit": {"scene": "res://arena.tscn", "label": "the rat pit", "sign": "rat pit", "spawn": "pit_hatch"},
 	"city": {"scene": "res://city.tscn", "label": "the city", "sign": "the city", "spawn": "city_gate"},
+	"desert": {"scene": "res://desert.tscn", "label": "the desert", "sign": "desert", "spawn": "desert_gate"},
+	"mountain": {"scene": "res://mountain.tscn", "label": "the mountain", "sign": "mountain", "spawn": "mountain_gate"},
 }
 
 ## fence gates: which side of the yard + where along it (world.gd fence runs x -16..26, z -9..31)
@@ -27,6 +29,8 @@ const FENCE_GATES := {
 	"docks": {"side": "east", "at": 3.25},
 	"trail": {"side": "north", "at": -3.0},
 	"city": {"side": "south", "at": 17.5},
+	"desert": {"side": "west", "at": -7.75},
+	"mountain": {"side": "north", "at": 17.35},
 }
 ## the rat pit is under the barn: a cellar hatch against its west wall
 const PIT_HATCH := Vector3(5.0, 0.0, 23.6)
@@ -53,6 +57,8 @@ static func spawns() -> Dictionary:
 		"trail_gate": [Vector3(-3.0, 0.02, FENCE_Z1 - 1.2), 0.0],
 		"pit_hatch": [PIT_HATCH + Vector3(-1.4, 0.02, -1.2), 0.6],
 		"city_gate": [Vector3(17.35, 0.02, FENCE_Z0 + 1.2), PI],
+		"desert_gate": [Vector3(FENCE_X0 + 1.0, 0.02, -7.75), -PI / 2.0],
+		"mountain_gate": [Vector3(17.35, 0.02, FENCE_Z1 - 1.2), 0.0],
 	}
 	return out
 
@@ -227,6 +233,8 @@ static func fence_gate(lv: Node3D, key: String, c: Vector3, w: float) -> void:
 		"docks": _gate_docks(lv, c, w, out, along, ry)
 		"trail": _gate_trail(lv, c, w, out, along, ry)
 		"city": _gate_city(lv, c, w, out, along, ry)
+		"desert": _gate_desert(lv, c, w, out, along, ry)
+		"mountain": _gate_mountain(lv, c, w, out, along, ry)
 	var d: Dictionary = DESTS[key]
 	# signs both ways: outside readers rarely matter, but from inside the yard it's the whole point
 	label(lv, c + Vector3(0, 1.78, 0) - out * 0.08, ry + PI, d.sign, d.scene)
@@ -332,6 +340,37 @@ static func _gate_city(lv: Node3D, c: Vector3, w: float, out: Vector3, along: Ve
 	lv.add_child(light)
 
 
+static func _gate_desert(lv: Node3D, c: Vector3, w: float, out: Vector3, along: Vector3, ry: float) -> void:
+	# bleached ranch gate with a steer skull on the lintel, sand drifting in over a pale track
+	_posts(lv, c, w, along, Color(0.78, 0.7, 0.58), 1.8)
+	Level.box(lv, c + Vector3(0, 2.0, 0) - out * 0.04, Vector3(0.22, 0.16, 0.26) if absf(out.x) > 0.5 else Vector3(0.26, 0.16, 0.22), Color(0.93, 0.9, 0.82), false)
+	for s in [-1.0, 1.0]:
+		Level.rbox(lv, c + Vector3(0, 2.02, 0) - out * 0.04 + along * s * 0.2, Vector3(0.24, 0.04, 0.04), Vector3(0, atan2(-along.z, along.x), s * 0.5), Color(0.9, 0.86, 0.78), false)
+	for k in 10:
+		var p := c + out * (0.6 + k * 0.8) + along * sin(k * 0.8) * 0.25
+		Level.rbox(lv, p + Vector3(0, -0.006, 0), Vector3(1.1, 0.02, 0.85), Vector3(0, ry + sin(k) * 0.2, 0), Color(0.88, 0.72, 0.5).darkened(0.04 * (k % 3)), false)
+	# a cactus + a bleached rock outside: the desert starts here
+	var cp := c + out * 2.2 - along * 1.4
+	Level.box(lv, cp + Vector3(0, 0.75, 0), Vector3(0.24, 1.5, 0.24), Color(0.42, 0.55, 0.32))
+	Level.box(lv, cp + Vector3(0, 0.95, 0) + along * 0.2, Vector3(0.36, 0.14, 0.14) if absf(along.x) > 0.5 else Vector3(0.14, 0.14, 0.36), Color(0.42, 0.55, 0.32), false)
+	Level.box(lv, cp + Vector3(0, 1.2, 0) + along * 0.32, Vector3(0.14, 0.5, 0.14), Color(0.42, 0.55, 0.32), false)
+	Level.box(lv, c + out * 1.4 + along * 1.3 + Vector3(0, 0.2, 0), Vector3(0.7, 0.4, 0.55), Color(0.8, 0.5, 0.34))
+
+
+static func _gate_mountain(lv: Node3D, c: Vector3, w: float, out: Vector3, along: Vector3, ry: float) -> void:
+	# dry stone gateposts with a cairn on top, a stony path climbing away, a snowy peak painted on the sign
+	for s in [-1.0, 1.0]:
+		var p: Vector3 = c + along * s * w * 0.5
+		for k in 4:
+			Level.box(lv, p + Vector3(0, 0.22 + k * 0.42, 0), Vector3(0.36 - k * 0.03, 0.42, 0.36 - k * 0.03), Color(0.62, 0.62, 0.64).darkened(0.05 * (k % 2)))
+		Level.box(lv, p + Vector3(0, 1.82, 0), Vector3(0.18, 0.14, 0.18), Color(0.7, 0.7, 0.72), false)
+	for k in 12:
+		var p := c + out * (0.6 + k * 0.6) + along * sin(k * 1.1) * 0.3
+		Level.rbox(lv, p + Vector3(0, -0.004 + k * 0.01, 0), Vector3(0.5, 0.05, 0.45), Vector3(0, k * 0.5, 0), Color(0.58, 0.58, 0.6).lightened(0.05 * (k % 3)), false)
+	Level.box(lv, c + out * 1.8 + along * 1.4 + Vector3(0, 0.35, 0), Vector3(0.9, 0.7, 0.8), Color(0.6, 0.6, 0.62))
+	Level.box(lv, c + out * 1.8 + along * 1.4 + Vector3(0, 0.72, 0), Vector3(0.7, 0.06, 0.6), Color(0.96, 0.97, 1.0), false)
+
+
 ## cellar hatch against the barn: two doors flung open over a dark stairwell
 static func _pit_hatch(lv: Node3D) -> void:
 	var c := PIT_HATCH
@@ -365,13 +404,15 @@ static func _fingerpost(lv: Node3D, base: Vector3) -> void:
 		"trail": Vector3(-3.0, 0, FENCE_Z1),
 		"pit": PIT_HATCH,
 		"city": Vector3(17.35, 0, FENCE_Z0),
+		"desert": Vector3(FENCE_X0, 0, -7.75),
+		"mountain": Vector3(17.35, 0, FENCE_Z1),
 	}
 	var k := 0
 	for key in targets:
 		var to: Vector3 = targets[key] - base
 		to.y = 0
 		var dir := to.normalized()
-		var y := 1.5 - k * 0.24
+		var y := 1.55 - k * 0.19
 		var mid := base + dir * 0.5 + Vector3(0, y, 0)
 		var ang := atan2(-dir.z, dir.x)
 		Level.rbox(lv, mid, Vector3(0.95, 0.16, 0.03), Vector3(0, ang, 0), Color(0.88, 0.84, 0.74), false)

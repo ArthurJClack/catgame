@@ -14,7 +14,7 @@ extends Node3D
 const RATE := 22050
 const SURF := {
 	"wood": "tap", "tile": "tap", "default": "tap", "stone": "tap",
-	"carpet": "soft", "rug": "soft",
+	"carpet": "soft", "rug": "soft", "snow": "soft",
 	"grass": "rustle", "hay": "rustle",
 	"dirt": "grit", "sand": "grit", "gravel": "grit",
 }

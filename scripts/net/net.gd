@@ -565,6 +565,8 @@ static func scene_label(path: String) -> String:
 		"res://trail.tscn": return "the trail"
 		"res://arena.tscn": return "the rat pit"
 		"res://city.tscn": return "the city"
+		"res://desert.tscn": return "the desert"
+		"res://mountain.tscn": return "the mountain"
 	return path.get_file().get_basename()
 
 
