@@ -16,6 +16,10 @@ extends Node
 ##     run one with `--headless -- --server` (NetDedicatedServer, steam listing: NetSteamServer)
 ##   - lan / direct ip: `-- --net-host` and `-- --net-join <ip>` (NetEnetTransport)
 ##   - `-- --nettest`: loopback test, your own cat echoed back through a fake laggy network
+##
+## the lobby room (lobby_ui.gd): once you're in a steam lobby or a lan game, everyone ticks ready
+## and picks a coat (T_LOBBY), the host picks the level and presses start (T_START), and every game
+## loads that level. dedicated servers skip the room: they're always on, you drop into their level.
 
 signal changed
 
@@ -48,6 +52,14 @@ var _was_floor := true
 var _was_claw := false
 var _join_t := 0.0
 var _map_done := false
+
+# lobby room
+signal match_started(scene: String)
+const LEVELS := ["res://main.tscn", "res://forest.tscn", "res://stealth.tscn", "res://trail.tscn",
+	"res://arena.tscn", "res://city.tscn"]
+var me_ready := false          # me, ticked ready in the room
+var level := "res://main.tscn" # host: the level start loads
+var playing := false           # host: a match is on (late joiners get "jump in")
 
 
 func _ready() -> void:
@@ -98,6 +110,8 @@ func _ready() -> void:
 				# took a steam invite while on a server: the lobby wins
 				if steam.in_lobby() and on_server():
 					leave_server()
+				if not steam.in_lobby():
+					_room_reset()
 				changed.emit())
 			_use(steam, false)
 			_set_status("steam ready as %s. host a lobby or join one" % my_name)
@@ -170,9 +184,10 @@ func leave_server() -> void:
 	_switch_to(steam if steam and steam.ready_ok else null)
 	t.close()
 	t.queue_free()
-	var was: String = str(server_info.get("name", server_addr))
+	var was: String = str(server_info.get("name", server_addr)) if server_addr != "" else "your lan game"
 	server_info = {}
 	server_addr = ""
+	_room_reset()
 	if was != "":
 		_set_status("left %s" % was)
 
@@ -374,6 +389,7 @@ func _on_peer_joined(id: int) -> void:
 	var p := _peer(id)
 	p.last_heard = NetPeer.now()
 	_send_hello_to([id])
+	_send_lobby_to([id])
 	_flash("%s joined" % p.name)
 	changed.emit()
 
@@ -424,6 +440,15 @@ func _on_packet(from: int, data: PackedByteArray) -> void:
 			changed.emit()
 		CatNetState.T_BYE:
 			_on_peer_left(from)
+		CatNetState.T_LOBBY:
+			_on_lobby(from, data)
+		CatNetState.T_START:
+			var b := StreamPeerBuffer.new()
+			b.data_array = data
+			b.seek(1)
+			var sc := b.get_utf8_string()
+			if from == host_id() and not is_host():
+				_go_match(sc)
 		CatNetState.T_INFO:
 			if from == 1 and transport is NetEnetTransport:
 				_on_server_info(NetDedicatedServer.read_info(data))
@@ -444,6 +469,7 @@ func _on_server_info(info: Dictionary) -> void:
 	var map: String = info.map
 	if not _map_done and map != "" and map != _scene_path() and ResourceLoader.exists(map):
 		_map_done = true
+		_close_title()
 		print("net: heading to %s, where the server is" % scene_label(map))
 		var root := get_tree().current_scene
 		if is_instance_valid(_player):
@@ -465,7 +491,12 @@ func _process(dt: float) -> void:
 		transport.poll()
 	if steam and transport != steam:
 		steam.poll()
-	if on_server() and server_info.is_empty():
+	if on_server() and server_info.is_empty() and transport.connected() and _join_t >= 0.0:
+		_join_t = -1.0
+		_set_status("connected to %s" % server_addr)
+	if on_server() and server_info.is_empty() and not transport.connected():
+		# still knocking. (a lan host never sends server info, so being connected is enough:
+		# this used to drop every --net-join after 10 s)
 		_join_t += dt
 		if _join_t > 10.0:
 			_on_server_lost()
@@ -520,10 +551,207 @@ static func scene_label(path: String) -> String:
 	match path:
 		"res://main.tscn": return "the farm"
 		"res://forest.tscn": return "the forest"
-		"res://stealth.tscn": return "the docks"
+		"res://stealth.tscn": return "pier 9"
 		"res://trail.tscn": return "the trail"
-		"res://arena.tscn": return "the arena"
+		"res://arena.tscn": return "the rat pit"
+		"res://city.tscn": return "the city"
 	return path.get_file().get_basename()
+
+
+# ------------------------------------------------------------------ lobby room
+
+## host a lan / direct ip game from the menu (same thing as starting with -- --net-host)
+func host_lan(port: int = NetEnetTransport.PORT) -> bool:
+	if steam and steam.in_lobby():
+		steam.leave_lobby()
+	leave_server()
+	var et := NetEnetTransport.new()
+	et.hosting = true
+	et.port = port
+	_switch_to(et)
+	if transport != et:
+		_set_status("couldn't host on udp port %d (something else using it?)" % port)
+		_switch_to(steam if steam and steam.ready_ok else null)
+		return false
+	_room_reset()
+	_set_status("hosting on lan, udp port %d. friends join with your ip" % port)
+	return true
+
+
+func hosting_lan() -> bool:
+	return transport is NetEnetTransport and (transport as NetEnetTransport).hosting and server == null
+
+
+## in a lobby room: a steam lobby, or a lan game (hosting or joined one). not a dedicated server
+func in_room() -> bool:
+	if steam and steam.in_lobby() and transport == steam:
+		return true
+	if hosting_lan():
+		return true
+	return on_server() and server_info.is_empty()
+
+
+func on_dedicated() -> bool:
+	return on_server() and not server_info.is_empty()
+
+
+func host_id() -> int:
+	if transport == steam and steam and steam.in_lobby():
+		return steam.lobby_owner
+	if transport is NetEnetTransport:
+		return 1
+	return my_id()
+
+
+func is_host() -> bool:
+	if transport == steam and steam and steam.in_lobby():
+		return steam.lobby_owner == steam.my_id
+	return hosting_lan()
+
+
+func host_peer() -> NetPeer:
+	return peers.get(host_id()) if not is_host() else null
+
+
+## leave whatever group you're in (steam lobby, lan game, server)
+func leave() -> void:
+	if steam and steam.in_lobby():
+		steam.leave_lobby()
+	leave_server()
+	_room_reset()
+	changed.emit()
+
+
+func set_ready(on: bool) -> void:
+	me_ready = on
+	_send_lobby_to(transport.members() if transport else [])
+	changed.emit()
+
+
+func set_level(path: String) -> void:
+	level = path
+	_send_lobby_to(transport.members() if transport else [])
+	changed.emit()
+
+
+## coat for this game: the cat you're playing now + the next level's cat
+func set_style(st: String) -> void:
+	Engine.set_meta("cat_style", st)
+	for p in get_tree().get_nodes_in_group("player"):
+		if p is CatPlayer and (p as CatPlayer).bot.is_empty():
+			(p as CatPlayer).set_style(st)
+	_send_lobby_to(transport.members() if transport else [])
+	changed.emit()
+
+
+func my_style() -> String:
+	if is_instance_valid(_player) and _player.get("style"):
+		return str(_player.get("style"))
+	return str(Engine.get_meta("cat_style", "block_black"))
+
+
+func everyone_ready() -> bool:
+	if transport == null:
+		return me_ready
+	for id in transport.members():
+		var p: NetPeer = peers.get(id)
+		if p == null or not p.ready:
+			return false
+	return me_ready
+
+
+## host: send everyone (and yourself) to the picked level
+func start_match(path: String = "") -> void:
+	if not is_host():
+		return
+	if path != "":
+		level = path
+	playing = true
+	var b := StreamPeerBuffer.new()
+	b.put_u8(CatNetState.T_START)
+	b.put_utf8_string(level)
+	if transport:
+		for id in transport.members():
+			transport.send(id, b.data_array, true)
+	_send_lobby_to(transport.members() if transport else [])
+	_go_match(level)
+
+
+## late joiner: go to wherever the host is playing
+func jump_in() -> void:
+	var hp := host_peer()
+	if hp and hp.playing and hp.level != "":
+		_go_match(hp.level)
+
+
+func _go_match(path: String) -> void:
+	if not ResourceLoader.exists(path):
+		_flash("don't have that level (%s), update the game" % path)
+		return
+	print("net: match on, loading %s" % scene_label(path))
+	me_ready = false
+	_close_title()
+	if ui and ui.visible and ui.has_method("close"):
+		ui.close()
+	match_started.emit(path)
+	var st := my_style()
+	if path == _scene_path():
+		changed.emit()
+		return
+	if not Hub.travel(get_tree(), path, "", st):
+		Engine.set_meta("cat_style", st)
+		get_tree().change_scene_to_file.call_deferred(path)
+	changed.emit()
+
+
+## the title screen sits over the farm: a match (or a server's level) takes over from it
+func _close_title() -> void:
+	for t in get_tree().get_nodes_in_group("title_screen"):
+		if t.has_method("_close"):
+			t.call("_close", "match")
+
+
+func _room_reset() -> void:
+	me_ready = false
+	playing = false
+	for p in peers.values():
+		(p as NetPeer).ready = false
+
+
+func _lobby_bytes() -> PackedByteArray:
+	var b := StreamPeerBuffer.new()
+	b.put_u8(CatNetState.T_LOBBY)
+	b.put_u8((1 if me_ready else 0) | (2 if playing else 0) | (4 if is_host() else 0))
+	b.put_utf8_string(my_style())
+	b.put_utf8_string(level if is_host() else "")
+	return b.data_array
+
+
+func _send_lobby_to(ids: Array) -> void:
+	if transport == null or ids.is_empty():
+		return
+	var bytes := _lobby_bytes()
+	for id in ids:
+		transport.send(id, bytes, true)
+
+
+func _on_lobby(from: int, data: PackedByteArray) -> void:
+	if data.size() < 2:
+		return
+	var b := StreamPeerBuffer.new()
+	b.data_array = data
+	b.seek(1)
+	var flags := b.get_u8()
+	var p := _peer(from)
+	p.last_heard = NetPeer.now()
+	p.lobby_seen = true
+	p.ready = flags & 1 != 0
+	p.playing = flags & 2 != 0
+	var st := b.get_utf8_string()
+	if st != "":
+		p.style = st
+	p.level = b.get_utf8_string()
+	changed.emit()
 
 
 func _notification(what: int) -> void:

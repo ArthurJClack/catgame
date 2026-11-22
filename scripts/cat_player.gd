@@ -2734,7 +2734,7 @@ func _catch(n: Object) -> void:
 	catches += 1
 	rig.pin = 1.0
 	paws.pin()
-	_event("caught a %s! (%d caught · e to drop)" % [_prey_name(n), catches])
+	_event("caught a %s! (%d caught · %s to drop)" % [_prey_name(n), catches, CatKeys.describe("interact").get_slice(" / ", 0)])
 
 
 func _drop_carried() -> void:

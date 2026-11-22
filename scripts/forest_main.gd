@@ -161,7 +161,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -112
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the forest: deer + rabbits in the meadow, ducks + fish on the pond, crows, a hawk overhead, hedgehogs, lizards on the rocks, grasshoppers + mice to hunt\nsneak (ctrl / c) up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nh hide help · walk out the gate behind you (or f5) = back to the yard"
+	CatKeys.help(help_label, "the forest: deer + rabbits in the meadow, ducks + fish on the pond, crows, a hawk overhead, hedgehogs, lizards on the rocks, grasshoppers + mice to hunt\nsneak ({crouch}) up on things, rushing spooks them · trees, logs, stumps and the deer stand ladder are climbable\nh hide help · walk out the gate behind you (or f5) = back to the yard")
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.mouse_filter = Control.MOUSE_FILTER_IGNORE

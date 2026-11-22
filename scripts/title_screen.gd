@@ -4,7 +4,7 @@ extends CanvasLayer
 ## (main.tscn) while the camera circles the cat, so there's no separate menu scene and the farm
 ## is already loaded when you hit play. buttons: continue (last save, says where + how long),
 ## new game / load (3 save slots, save_game.gd), settings (the pause menu's page), play online
-## (the m lobby), quit. shows once per run (Engine meta "title_done"), never in tests / previews
+## (the online lobby over the title, lobby_ui.gd), quit. shows once per run (Engine meta "title_done"), never in tests / previews
 ## (any `--` user arg or a --script run) or on the dedicated server.
 ## test: xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/title_test.gd
 
@@ -82,6 +82,26 @@ func _process(dt: float) -> void:
 		player.orb_pitch = -0.22 + sin(_t * 0.21) * 0.06
 	if not _closing and not (_al("GameMenu") and _al("GameMenu").is_open) and Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	# play online sits on top of the title (the farm keeps circling behind it): hide our menu
+	# while it's up, bring it back if they close it without starting a game
+	var ui = _al("Net").ui if _al("Net") else null
+	var lobby_up: bool = ui != null and ui.visible
+	if not _closing and not (_al("GameMenu") and _al("GameMenu").is_open) and _root.visible == lobby_up:
+		_root.visible = not lobby_up
+		if not lobby_up:
+			CatKeys.blocked = true
+			show_page(page)
+
+
+func _input(event: InputEvent) -> void:
+	# esc / pad B on the save slots page goes back (the main page has nowhere to go back to)
+	if _closing or page == "main" or not _root.visible:
+		return
+	var esc: bool = event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_ESCAPE
+	var pad_b: bool = event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B
+	if esc or pad_b:
+		show_page("main")
+		get_viewport().set_input_as_handled()
 
 
 func _menu_closed() -> void:
@@ -294,9 +314,9 @@ func _settings() -> void:
 
 
 func _online() -> void:
-	_close("online")
-	if _al("Net").ui and _al("Net").ui.has_method("toggle") and not _al("Net").ui.visible:
-		_al("Net").ui.toggle()
+	# the lobby opens over the title. starting a match (or "jump in") closes the title (net.gd)
+	if _al("Net").ui and _al("Net").ui.has_method("open"):
+		_al("Net").ui.open()
 
 
 func _close(how: String) -> void:

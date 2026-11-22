@@ -150,6 +150,28 @@ static func describe(action: String) -> String:
 	return " / ".join(parts) if parts.size() > 0 else "unbound"
 
 
+## "{swat} swat" -> "mouse1 swat": help text that follows rebinds (plain text, no bbcode)
+static func fill(text: String) -> String:
+	var out := text
+	for a in ACTIONS:
+		out = out.replace("{%s}" % a[0], describe(a[0]))
+	return out
+
+
+## a help label that rewrites itself when keys change (game_menu.gd calls refresh_help)
+static func help(l: Label, template: String) -> void:
+	l.set_meta("keys_template", template)
+	l.text = fill(template)
+	if not l.is_in_group("key_help"):
+		l.add_to_group("key_help")
+
+
+static func refresh_help(tree: SceneTree) -> void:
+	for l in tree.get_nodes_in_group("key_help"):
+		if l is Label and l.has_meta("keys_template"):
+			(l as Label).text = fill(l.get_meta("keys_template"))
+
+
 static func to_dict() -> Dictionary:
 	_ensure()
 	var d := map.duplicate(true)

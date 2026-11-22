@@ -389,7 +389,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the rat pit: rats only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nmouse1 swat (hold = rake) · hold space = pounce · mouse2 / g grab + pin · alt dodge out of the recovery · watch your stamina\ntab lock on (wasd circles, flick the mouse = next rat) · r restart · h hide help · f5 back to the farm"
+	CatKeys.help(help_label, "the rat pit: rats only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\n{swat} swat (hold = rake) · hold {jump} = pounce · {grab} grab + pin · {dash} dodge out of the recovery · watch your stamina\n{lock_on} lock on (move keys circle, flick the mouse = next rat) · r restart · h hide help · f5 back to the farm")
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)
