@@ -282,6 +282,10 @@ var _lean := 0.0
 var _hear_age := 9.0
 ## the living layer: breathing, loose skin, whiskers, ears, pupils, idle acts, startle (cat_soma.gd)
 var soma := CatSoma.new()
+## how it fights: swat styles + combos, threat pose, fight crouch, rear up batting, fur up (cat_fight_anim.gd)
+var fight_anim := CatFightAnim.new()
+## owner: 0..1 how much of a fight the cat is in (CatFightAnim.level for the player). synced dial
+var fight := 0.0
 var chin: MeshInstance3D
 var whiskers := []   # [node, rest transform, root point, side] per whisker
 
@@ -318,7 +322,7 @@ func apply_life(ev: Array) -> void:
 		"t":
 			_twitch(float(ev[1]))
 		"s":
-			swat(int(ev[1]), ev[2])
+			swat(int(ev[1]), ev[2], str(ev[3]) if ev.size() > 3 else "hook")
 		"q":
 			grip_squeeze()
 		"h":
@@ -826,12 +830,16 @@ func _process(dt: float) -> void:
 ## one quick swat with a fore paw (0 = left, 1 = right) at a world space point within reach:
 ## winds out to its own side (0.07 s), whips across to the target (hits at about 0.12 s,
 ## there by 0.15 s), back on the ground by 0.32 s. the other three paws keep standing
-func swat(side: int, target: Vector3) -> void:
+## style: one of CatFightAnim.STYLES ("" = the cat picks one: combos, low targets, rear up batting)
+func swat(side: int, target: Vector3, style := "") -> void:
 	if climb > 0.5 or clamber > 0.5:
 		return
 	if remote_life and not _net_apply:
 		return
-	_log(["s", side, target])
+	if style == "":
+		style = fight_anim.pick(to_local(target), false)
+	_log(["s", side, target, style])
+	fight_anim.begin(style)
 	_swat_i = clampi(side, 0, 1)
 	_swat_target = target
 	# held in body space: the strike goes out in front of the cat and travels with it through the lunge
@@ -858,6 +866,7 @@ func _setup_gait() -> void:
 	add_to_group("cat_ears")
 	gait.rig = self
 	soma.setup(self)
+	fight_anim.setup(self)
 	gait.max_stance = MAX_STANCE * 0.74
 	gait.max_stance_gallop = MAX_STANCE * 0.78
 	# don't let the paws stand on whatever body carries the rig (the player capsule)
@@ -906,6 +915,10 @@ func animate(dt: float) -> void:
 		_swat_t += dt
 		if _swat_t > 0.32:
 			_swat_t = -1.0
+	# fighting: rearing up to bat goes in on top of the owner's rear for this frame only
+	fight_anim.pre(dt)
+	var in_rear := rear
+	rear = maxf(rear, fight_anim.rear_add)
 
 	# sitting and lying down go in stages, never as one blend: the hind end goes down first,
 	# then the front paws walk back / fold under. getting up runs the other way
@@ -935,7 +948,8 @@ func animate(dt: float) -> void:
 		if spd > 0.05:
 			var fwdness := clampf((-lv.z + 0.5 * absf(lv.x)) / maxf(0.35 * spd, 0.02), -1.0, 1.0)
 			ty = clampf(atan2(-lv.x, absf(lv.z)), -1.0, 1.0) * fwdness * smoothstep(0.15, 0.6, spd)
-		_tyaw = LowPoly.damp(_tyaw, ty, 5.0, dt)
+		# (standing its ground in a fight the body turns side on to the threat, head still on it)
+		_tyaw = LowPoly.damp(_tyaw, ty + fight_anim.side_yaw, 5.0, dt)
 	yaw_off = (-yd + _tyaw) * lagw
 
 	# airborne blend + landing. cats land front first: the forelegs take the hit and fold,
@@ -1325,7 +1339,7 @@ func animate(dt: float) -> void:
 	var ra := rear * 1.02 + clamber * lerpf(1.3, 0.0, pull_e)
 	var hz := pelvis_z
 	var base_y := BODY_H - crouch * 0.085 - charge * 0.03 - sit_h * 0.075 + gal_bob * (1.0 - _air_w) - stretch * 0.02 - climb * lerpf(0.07, 0.145, climb_splay) - slide * (1.0 - climb) * 0.13
-	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y + soma.dip
+	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y + soma.dip + fight_anim.lift - fight_anim.lowc * 0.025
 	base_y = lerpf(base_y, BODY_H * 0.4 + (_fgy + _hgy) * 0.5, (loaf_h + loaf_f) * 0.5)
 	pivot.position.y = base_y + hz * sin(ra)
 	pivot.position.z = -sit_h * 0.035 + hz * (1.0 - cos(ra)) - clamber * (1.0 - pull_e) * 0.15 + stretch * 0.03 + _iner.z + soma.zoff
@@ -1335,11 +1349,13 @@ func animate(dt: float) -> void:
 	# lean into turns at speed
 	_lean = LowPoly.damp(_lean, clampf(_yaw_rate * speed_s * 0.02, -0.28, 0.28) * (1.0 - _air_w) * nc, 6.0, dt)
 	pivot.rotation.z = _lean + _tum_p
-	chest.rotation.x = flex + air_flex - arch * 0.5 - sit_h * 0.14
+	# (threat pose: the back humped right up, the halloween cat)
+	var fa_arch: float = fight_anim.arch
+	chest.rotation.x = flex + air_flex - arch * 0.5 - sit_h * 0.14 - fa_arch
 	chest.position.y = 0.012 - stretch * 0.03
-	pelvis.rotation.x = -flex - air_flex + arch * 0.5 + sit_h * 0.25 + stretch * 0.1
+	pelvis.rotation.x = -flex - air_flex + arch * 0.5 + sit_h * 0.25 + stretch * 0.1 + fa_arch * 0.85
 	# a rounded back is a shorter back: the hips slide up toward the chest
-	pelvis.position.z = pelvis_z + clampf(_flex_s + air_flex - arch, -0.45, 0.3) * 0.035
+	pelvis.position.z = pelvis_z + clampf(_flex_s + air_flex - arch, -0.45, 0.3) * 0.035 - fa_arch * 0.035
 	if dodge > 0.0:
 		_dodge_body()
 	# girdles follow their paws: the hip / shoulder on the reaching side goes forward with it,
@@ -1360,8 +1376,8 @@ func animate(dt: float) -> void:
 	chest.rotation.y = -yaw_off * 0.35 + twist * 0.5 + _yaw_c
 	chest.rotation.z = _roll_c + (_tum_c - _tum_p) + soma.roll_c + float(_groll[0])
 	# butt wiggle before a pounce
-	pelvis.rotation.z = sin(_t * 19.0) * 0.14 * charge + _roll_p + soma.roll_p + float(_groll[1])
-	pelvis.rotation.y = sin(_t * 19.0) * 0.06 * charge + yaw_off * 0.2 - twist * 0.5 + _yaw_p + still_w * sin(_t * 0.41) * 0.035
+	pelvis.rotation.z = sin(_t * 19.0) * 0.14 * maxf(charge, fight_anim.wiggle) + _roll_p + soma.roll_p + float(_groll[1])
+	pelvis.rotation.y = sin(_t * 19.0) * 0.06 * maxf(charge, fight_anim.wiggle) + yaw_off * 0.2 - twist * 0.5 + _yaw_p + still_w * sin(_t * 0.41) * 0.035
 	# breathing (slower + deeper when loafing)
 	var br := 1.0 + sin(_t * lerpf(2.4, 1.5, loaf)) * lerpf(0.012, 0.02, loaf) * (1.0 - move_amt * 0.5)
 	chest.scale = Vector3(br, br, 1.0)
@@ -1683,33 +1699,12 @@ func animate(dt: float) -> void:
 					gp += Vector3(-side * 0.012, -0.012, 0.018) * k
 				foot = foot.lerp(gp, grip)
 				prot = lerpf(prot, 0.65, grip)
-			# swat: wind out to the side, whip across, recover
+			# swat: the strike's style (cat_fight_anim.gd: hook / backhand / double bop / chop / scoop /
+			# rake / reared bat). each winds up, hits at ~0.12-0.15 s and is back by 0.32 s
 			if _swat_t >= 0.0 and _swat_i == i:
-				var wind := Vector3(side * 0.105, BODY_H * 0.62, home.z - 0.07)
-				var strike := _swat_local
-				var sw_p: Vector3
-				var sw_r: float
-				if _swat_t < 0.07:
-					var u := _swat_t / 0.07
-					sw_p = foot.lerp(wind, u * (2.0 - u))
-					sw_r = lerpf(prot, -0.9, u)
-				elif _swat_t < 0.15:
-					var u := (_swat_t - 0.07) / 0.08
-					sw_p = wind.lerp(strike, u * u)
-					sw_r = lerpf(-0.9, 0.55, u)
-				elif _swat_t < 0.24:
-					# the scratch: claws hooked in, the paw drags down and back toward the chest
-					var u := smoothstep(0.0, 1.0, (_swat_t - 0.15) / 0.09)
-					sw_p = strike.lerp(strike + Vector3(-side * 0.015, -0.05, 0.075), u)
-					sw_r = lerpf(0.55, 0.95, u)
-				else:
-					var rk := strike + Vector3(-side * 0.015, -0.05, 0.075)
-					var u := smoothstep(0.0, 1.0, (_swat_t - 0.24) / 0.08)
-					sw_p = rk.lerp(foot, u)
-					sw_p.y += sin(PI * u) * 0.015
-					sw_r = lerpf(0.95, prot, u)
-				foot = sw_p
-				prot = sw_r
+				var sp: Array = fight_anim.pose(_swat_t, side, foot, prot, home, _swat_local, BODY_H)
+				foot = sp[0]
+				prot = sp[1]
 			# vr: a raised hand carries this paw (wins over the canned swat: the swing IS the swat)
 			var vw: float = vr_paw_w[i] * (1.0 - maxf(climb, clamber))
 			if vw > 0.001 and vr_paw[i] != Vector3.INF:
@@ -1753,6 +1748,7 @@ func animate(dt: float) -> void:
 	# ---------- tail ----------
 	_update_tail(dt, ww, wt, wg, move_amt)
 	soma.post(dt)
+	rear = in_rear
 	sit = in_pose[0]
 	loaf = in_pose[1]
 	groom = in_pose[2]
@@ -2376,12 +2372,17 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	var hangp := PackedFloat32Array([-1.05, 0.02, 0.22, 1.7, 0.0])
 	var strp := PackedFloat32Array([0.75, -0.02, 0.04, 1.0, 0.0])
 	var balp := PackedFloat32Array([0.28, -0.012, 0.03, 1.1, 0.0])
+	# fight: threat pose = straight up and hooked over at the top; fight crouch = low and thrashing
+	var threatp := PackedFloat32Array([1.62, -0.105, 0.025, 1.4, 0.0])
+	var lowfp := PackedFloat32Array([-0.2, 0.025, 0.4, 3.3, 0.0])
 	var target := PackedFloat32Array([0, 0, 0, 0, 0])
 	var nc := 1.0 - climb
 	for k in 5:
 		var moving := (ww * walk[k] + wt * trot[k] + wg * gal[k]) / maxf(nc, 0.001)
 		var v := lerpf(idle[k], moving, move_amt)
 		v = lerpf(v, stalk[k], maxf(crouch, charge))
+		v = lerpf(v, threatp[k], fight_anim.threat)
+		v = lerpf(v, lowfp[k], fight_anim.lowc)
 		if _air_w > 0.0:
 			var airv: float = [0.45 + clampf(-_vy_s * 0.12, -0.3, 0.5), 0.0, 0.03, 2.0, 0.0][k]
 			v = lerpf(v, airv, _air_w)
@@ -2449,7 +2450,7 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	var qm := move_amt * ww / maxf(ww + wt + wg, 0.001) * (1.0 - maxf(crouch, charge)) * (1.0 - _air_w) * nc
 	var p := to_local(tail_base.global_position)
 	var pb := global_transform.basis.orthonormalized().inverse() * tail_base.global_transform.basis.orthonormalized()
-	var lash := 1.0 + charge * 2.5
+	var lash := 1.0 + maxf(charge, fight_anim.lowc) * 2.5
 	var tail_floor := on_floor and climb < 0.1 and clamber < 0.1 and _air_w < 0.1
 	var floor_y := _hgy + 0.011 * float(S_.tail_r)
 	var curl := 0.0
