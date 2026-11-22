@@ -593,6 +593,9 @@ func on_packet(from: int, data: PackedByteArray) -> void:
 				var xd = b.get_var()
 				var e: Ent = entities.get(h)
 				if e == null or not is_instance_valid(e.node):
+					# something new on their side (next wave, a spawn): look for it now, not on the next 1 s scan,
+					# or its first packets are all that ever lands and it stands frozen here
+					_scan_t = minf(_scan_t, 0.1)
 					continue
 				if e.owner != from:
 					continue     # stale: the owners list will sort it out
