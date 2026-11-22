@@ -6,6 +6,7 @@ extends Node3D
 ##                ones skid, a stop cut short by moving off doesn't pop, no camera / body jolts
 ##   --film       side camera + caption, for clips (with --write-movie)
 ##   --fp         film in first person (looking down at the paws)
+##   --plain      let plain stops (no animation) happen like in the game
 ##   --legs=n     how many run ups (default 16 test, 12 film)
 ##   CAT_OFF=stops  the before (the one stop it always did)
 
@@ -51,6 +52,7 @@ func _ready() -> void:
 	film = "--film" in args
 	fp = "--fp" in args
 	test = "--stoptest" in args
+	CatStop.plain_stops = "--plain" in args   # the lab wants to see a stop every time
 	legs = 12 if film else 16
 	for a in args:
 		if a.begins_with("--legs="):

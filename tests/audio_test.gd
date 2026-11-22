@@ -110,7 +110,7 @@ func _run() -> void:
 	# walk on the wooden floor
 	CatSfx.played.clear()
 	_key(KEY_W, true)
-	for i in 8:
+	for i in 16:   # wasd strolls at 1.25 m/s now: walk a bit longer
 		await _wait(0.2)
 		print("  floor %s spd %.2f pos %s played %d" % [p.is_on_floor(), Vector2(p.velocity.x, p.velocity.z).length(), p.global_position, CatSfx.played.size()])
 	_key(KEY_W, false)

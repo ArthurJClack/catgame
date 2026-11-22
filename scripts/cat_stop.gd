@@ -174,8 +174,20 @@ func begin_brake(v: float) -> void:
 		_brake_rel = 1.0
 
 
+## often a cat just stops and stands there: no stop animation at all, it settles straight into
+## idle. always for a gentle amble to a stop, else this chance by tier [walk, trot, run].
+## `plain_stops` false = always pick one (stoplab / tests that want to see them all)
+const NONE_CHANCE := [0.55, 0.4, 0.25]
+const GENTLE := 0.8     # m/s: stopping from slower than this never plays a stop
+static var plain_stops := true
+var skipped := 0        # stops that were just a plain stop (tests)
+
+
 ## pick a stop for how fast the cat was going (only the owner does this)
 func _pick() -> void:
+	if plain_stops and (_peak < GENTLE or randf() < float(NONE_CHANCE[_tier])):
+		skipped += 1
+		return
 	var tot := 0.0
 	var opts := []
 	for k in KINDS:

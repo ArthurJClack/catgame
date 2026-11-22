@@ -358,3 +358,23 @@ func _solve() -> void:
 	z._play("crash", gate.global_position, 0.35, 2.6)     # the gate clacks shut
 	z._spill(at, 7, 0.55, 0.0)
 	z._solve("herd", at)
+
+
+# ---------------------------------------------------------------- online (world_sync.gd)
+
+func net_pack() -> Dictionary:
+	var ps := []
+	for c in chicks:
+		ps.append(c.global_position)
+		ps.append(snappedf(c.rotation.y, 0.01))
+	return {"c": ps, "done": done}
+
+
+func net_apply(d: Dictionary) -> void:
+	var ps: Array = d.get("c", [])
+	for i in mini(chicks.size(), ps.size() / 2):
+		chicks[i].global_position = ps[i * 2]
+		chicks[i].rotation.y = float(ps[i * 2 + 1])
+		chicks[i].velocity = Vector3.ZERO
+	if bool(d.get("done", false)) and not done:
+		_solve()

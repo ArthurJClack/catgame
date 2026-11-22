@@ -10,6 +10,7 @@ signal opened
 signal closed
 
 const PANEL_W := 560
+const ROW_LABEL_W := 250
 
 var is_open := false
 var page := ""
@@ -270,6 +271,7 @@ func _scroll() -> VBoxContainer:
 	var sc := ScrollContainer.new()
 	sc.custom_minimum_size = Vector2(PANEL_W, 520)
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.follow_focus = true      # gamepad / arrow keys: scroll to whatever has focus
 	_body.add_child(sc)
 	var v := VBoxContainer.new()
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -284,7 +286,10 @@ func _row(text: String) -> HBoxContainer:
 	h.add_theme_constant_override("separation", 12)
 	var l := Label.new()
 	l.text = text
-	l.custom_minimum_size = Vector2(200, 0)
+	# fixed width + wrap: long labels used to shove their buttons / sliders out of line
+	l.custom_minimum_size = Vector2(ROW_LABEL_W, 0)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	l.add_theme_font_size_override("font_size", 16)
 	h.add_child(l)
 	_body_target().add_child(h)
@@ -397,7 +402,7 @@ func _page_settings() -> void:
 	_check("invert look up / down", "invert_y")
 	_slider("field of view", "fov", 60.0, 110.0, 1.0, func(x): return "%d°" % roundi(x))
 	_check("head bob (first person)", "head_bob")
-	_check("photo cam (v also cycles a free orbit camera)", "photo_cam")
+	_check("photo cam (%s also cycles a free orbit camera)" % CatKeys.describe("toggle_view"), "photo_cam")
 	_section("display")
 	if not OS.has_feature("web"):
 		_check("fullscreen", "fullscreen")
@@ -498,7 +503,7 @@ func _page_controls() -> void:
 	pad.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	pad.custom_minimum_size.x = PANEL_W - 30
 	pad.add_theme_font_size_override("font_size", 13)
-	pad.text = "left stick move (tilt = speed), right stick look, L3 run / gallop, A hop (tap) / leap + pounce (hold), B dodge, X scratch / drop, Y meow, RT swat, LT grab, RB crouch / sneak, R3 lock on (rat pit), d-pad left first / third person, start = this menu"
+	pad.text = "left stick move (tilt = speed), right stick look, L3 run / gallop, A hop (tap) / leap + pounce (hold), B dodge, X scratch / drop, Y meow, RT swat, LT grab, RB crouch / sneak, LB cat vision (hold), R3 lock on (rat pit), d-pad left first / third person, start = this menu"
 	_scroll_box.add_child(pad)
 	_section("other keys")
 	var other := Label.new()
@@ -513,7 +518,11 @@ func _page_controls() -> void:
 	_body.add_child(h2)
 	var back := _button(h2, "back", show_page.bind("main"))
 	back.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var r := _button(h2, "reset keys", func(): CatKeys.reset(); GameSettings.save_file(); show_page("controls"))
+	var r := _button(h2, "reset keys", func():
+		CatKeys.reset()
+		GameSettings.save_file()
+		CatKeys.refresh_help(get_tree())
+		show_page("controls"))
 	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	back.grab_focus.call_deferred()
 
@@ -598,6 +607,13 @@ func _start_rebind(action: String, slot: int, b: Button) -> void:
 func _rebind_input(event: InputEvent) -> void:
 	var action: String = _rebind[0]
 	var slot: int = _rebind[1]
+	if event is InputEventJoypadButton and event.pressed:
+		# pads can't bind keys: B / start backs out instead of leaving the button stuck
+		get_viewport().set_input_as_handled()
+		if event.button_index in [JOY_BUTTON_B, JOY_BUTTON_START]:
+			_rebind = []
+			show_page("controls")
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		get_viewport().set_input_as_handled()
 		if event.physical_keycode == KEY_ESCAPE:
@@ -626,4 +642,5 @@ func _rebind_input(event: InputEvent) -> void:
 func _finish_rebind() -> void:
 	_rebind = []
 	GameSettings.save_file()
+	CatKeys.refresh_help(get_tree())
 	show_page.call_deferred("controls")

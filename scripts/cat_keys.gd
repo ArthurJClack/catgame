@@ -21,7 +21,8 @@ const ACTIONS := [
 	["dash", "dodge"],
 	["meow", "meow"],
 	["toggle_view", "first / third person"],
-	["lock_on", "lock on (rat pit)"],
+	["lock_on", "lock on (rat pit / play fight)"],
+	["vision", "cat vision (hold: light up stuff worth a look)"],
 ]
 
 ## bump when the default layout changes: older saved binds are dropped so nobody keeps a
@@ -43,6 +44,7 @@ const DEFAULTS := {
 	"meow": [{"k": KEY_N}],
 	"toggle_view": [{"k": KEY_V}],
 	"lock_on": [{"k": KEY_TAB}],
+	"vision": [{"k": KEY_Q}],
 }
 
 ## keys the game keeps for itself (menus, level keys): can't be bound
@@ -150,6 +152,28 @@ static func describe(action: String) -> String:
 	return " / ".join(parts) if parts.size() > 0 else "unbound"
 
 
+## "{swat} swat" -> "mouse1 swat": help text that follows rebinds (plain text, no bbcode)
+static func fill(text: String) -> String:
+	var out := text
+	for a in ACTIONS:
+		out = out.replace("{%s}" % a[0], describe(a[0]))
+	return out
+
+
+## a help label that rewrites itself when keys change (game_menu.gd calls refresh_help)
+static func help(l: Label, template: String) -> void:
+	l.set_meta("keys_template", template)
+	l.text = fill(template)
+	if not l.is_in_group("key_help"):
+		l.add_to_group("key_help")
+
+
+static func refresh_help(tree: SceneTree) -> void:
+	for l in tree.get_nodes_in_group("key_help"):
+		if l is Label and l.has_meta("keys_template"):
+			(l as Label).text = fill(l.get_meta("keys_template"))
+
+
 static func to_dict() -> Dictionary:
 	_ensure()
 	var d := map.duplicate(true)
@@ -172,3 +196,16 @@ static func from_dict(d: Dictionary) -> void:
 				if b.has("m"): nb.m = int(b.m)
 				arr.append(nb)
 		map[a] = arr
+	# actions added since this file was saved keep their defaults, minus any key the player
+	# already uses for something else (no double binds)
+	for a in DEFAULTS:
+		if d.has(a):
+			continue
+		var mine: Array = map[a]
+		for i in range(mine.size() - 1, -1, -1):
+			for o in map:
+				if o == a:
+					continue
+				for b in map[o]:
+					if i < mine.size() and same(b, mine[i]):
+						mine.remove_at(i)

@@ -10,11 +10,56 @@ extends CharacterBody3D
 ## forelegs with the elbow back, long plantigrade hind feet with the knee forward, a low head,
 ## a long thick tail carried low. it trots on diagonal pairs (the gait rats use from a fast walk
 ## up), its stride solved from its own speed so planted feet don't slide, and steps on the spot
-## when it turns. scale 1 = a big sewer rat (~0.3 m body), 1.6 = the arena's brute.
+## when it turns. scale 1 = a big sewer rat (~0.3 m body), 1.6 = the arena's brute, 2.2+ = the
+## rat king (boss: darker, scarred, long combos with perilous tail sweeps and leaps).
+##
+## COMBOS (sekiro style, 2026-11-22): a bite is one step of a combo, a chain of strikes on a
+## rhythm (COMBOS). each step = WINDUP (the tell) -> LUNGE (the strike) and the next step's tell
+## starts straight after, so the hits come in a beat you can learn: snap.. snap, snap-swipe-snap,
+## a delayed third bite that catches early presses. every strike shows a ParryCue above the head:
+## a glint + closing ring (deflect it: dodge + swat, cat_parry.gd) or a red ! (perilous: a leap or
+## a tail sweep, dodge it). deflects fill its POSTURE (bar under the cue); full = BROKEN, it
+## slumps for a couple of seconds and the next swat is a finishing blow. the last hit of a combo
+## deflected leaves it open a little longer.
+##
+## online (host authoritative): the host runs the brain, net_pack() -> snapshots, clients put
+## the rat in puppet mode (net_puppet) and net_apply() them. the combo table is the same
+## everywhere, so a puppet plays the same strikes on the same beat from (combo id, step, st_t) and
+## each game resolves the hits on its own local cat (deflects included); a client's deflect fires
+## `deflected` so the sync layer can hand the posture to the host (add_posture).
 
 signal killed(rat: SoulsRat)
+signal combo_started(id: String)
+signal deflected(by: Node3D, posture_add: float)
 
-enum { IDLE, CHASE, WINDUP, LUNGE, RECOVER, STAGGER, DEAD }
+enum { IDLE, CHASE, WINDUP, LUNGE, RECOVER, STAGGER, DEAD, BROKEN }
+
+## each step: [tell (s, cue -> strike), kind, perilous]. step 0's tell is the rat's windup_t
+## (bigger rats wind up longer), later ones x tempo. kinds: bite (snap in front), swipe (rears,
+## forepaw sweep, wider), leap (long lunge from range, perilous), sweep (whips round, the tail
+## hits all round it, perilous)
+const COMBOS := {
+	"snap": [[0.5, "bite", false]],
+	"double": [[0.5, "bite", false], [0.3, "bite", false]],
+	"triple": [[0.5, "bite", false], [0.28, "swipe", false], [0.28, "bite", false]],
+	"delay": [[0.5, "bite", false], [0.26, "bite", false], [0.62, "bite", false]],
+	"leap": [[0.6, "leap", true]],
+	"snap_leap": [[0.5, "bite", false], [0.3, "swipe", false], [0.55, "leap", true]],
+	"sweep": [[0.45, "bite", false], [0.3, "bite", false], [0.55, "sweep", true]],
+	"frenzy": [[0.55, "swipe", false], [0.26, "bite", false], [0.26, "swipe", false], [0.45, "bite", false], [0.26, "bite", false]],
+}
+## per kind: [strike length (s), hit at (fraction of it), damage x, posture a deflect deals x]
+const STRIKES := {
+	"bite": [0.2, 0.35, 1.0, 1.0],
+	"swipe": [0.2, 0.4, 0.8, 0.8],
+	"leap": [0.38, 0.5, 1.3, 1.0],
+	"sweep": [0.32, 0.45, 1.2, 1.0],
+}
+const POOL_SMALL := ["snap", "double", "double", "triple", "snap"]
+const POOL_BRUTE := ["double", "triple", "delay", "sweep"]
+const POOL_KING := ["triple", "delay", "sweep", "frenzy", "frenzy"]
+const LEAPS_SMALL := ["leap"]
+const LEAPS_BIG := ["snap_leap", "leap"]
 
 var s := 1.0                  # size scale
 var kind := "rat"
@@ -71,22 +116,53 @@ var _death := 0.0
 var _mats: Array[MeshInstance3D] = []
 var _t := 0.0
 var _rng := RandomNumberGenerator.new()
+# combos + posture
+var combos: Array = []        # override the combo pool (tests: ["snap"] = the old single bite)
+var leaps_on := true          # may open with a leap from range
+var combo_id := ""
+var step := 0
+var strike := "bite"
+var perilous := false
+var tempo := 1.0
+var posture_v := 0.0
+var posture_max := 3.0
+var broken_t := 2.0
+var deathblows := 0
+var deflected_n := 0          # tests
+var combos_done := 0
+var _posture_hold := 0.0
+var _leap_cd := 1.5
+var _open := 0.0              # extra recovery after a deflected last hit
+var _defl := 0.0              # deflect recoil (anim)
+var _spin := 0.0              # tail sweep spin (anim)
+var cue: ParryCue
+var net_puppet := false       # online client: the host runs the brain, net_apply() drives this one
+var king := false
 
 
 func _ready() -> void:
 	add_to_group("prey")
 	add_to_group("enemy")
 	_rng.randomize()
-	max_hp = 4.0 if s < 1.3 else 11.0
+	king = s >= 2.0
+	max_hp = 4.0 if s < 1.3 else (11.0 if not king else 24.0)
 	hp = max_hp
-	poise = 2.0 if s < 1.3 else 4.0
+	poise = 2.0 if s < 1.3 else (4.0 if not king else 7.0)
+	posture_max = 3.0 if s < 1.3 else (5.0 if not king else 8.0)
+	broken_t = 2.0 if s < 1.3 else 2.6
+	tempo = 1.0 if s < 1.3 else (1.12 if not king else 1.05)
+	if king:
+		fur = Color(0.24, 0.21, 0.2)
+		fur_dark = Color(0.14, 0.12, 0.12)
+		skin = Color(0.62, 0.42, 0.42)
 	turn_rate = 3.0 / sqrt(s)
 	run_speed = 2.2 * sqrt(s)
 	reach = 0.42 * s
 	bite_w = 0.16 * s
-	bite_dmg = 22.0 if s < 1.3 else 38.0
-	windup_t = 0.5 if s < 1.3 else 0.8
+	bite_dmg = 22.0 if s < 1.3 else (38.0 if not king else 34.0)
+	windup_t = 0.5 if s < 1.3 else (0.8 if not king else 0.75)
 	recover_t = 0.7 if s < 1.3 else 1.0
+	_rng.seed = hash(str(position)) if not net_puppet else 0
 	floor_snap_length = 0.05
 	var cs := CollisionShape3D.new()
 	var b := BoxShape3D.new()
@@ -96,6 +172,10 @@ func _ready() -> void:
 	add_child(cs)
 	_build()
 	rotation.y = yaw
+	cue = ParryCue.new()
+	cue.scale_k = sqrt(s)
+	cue.position = Vector3(0, 0.27 * s + 0.05, -0.04 * s)
+	add_child(cue)
 
 
 func _part(parent: Node, c: Color, pos: Vector3, scl: Vector3, rot := Vector3.ZERO, emission := 0.0) -> MeshInstance3D:
@@ -130,6 +210,10 @@ func _build() -> void:
 		_ears.append(ear)
 		# whiskers
 		_part(head, Color(0.75, 0.72, 0.68), Vector3(sd * 0.04, -0.004, -0.098), Vector3(0.06, 0.0015, 0.0015), Vector3(0, sd * 0.25, 0))
+	if s >= 2.0:
+		# the rat king: a pale scar over the left eye, a torn right ear, a ridge of hackles
+		_part(head, Color(0.75, 0.6, 0.55), Vector3(-0.031, 0.026, -0.05), Vector3(0.004, 0.03, 0.022), Vector3(0, 0, 0.5))
+		_part(torso, fur_dark, Vector3(0, 0.07, 0.0), Vector3(0.02, 0.025, 0.2), Vector3(-0.1, 0, 0))
 	jaw = Node3D.new()
 	jaw.position = Vector3(0, -0.02, -0.06) * s
 	head.add_child(jaw)
@@ -168,12 +252,20 @@ func _build() -> void:
 func stun(_t: float) -> void:
 	if target == null:
 		return
-	take_hit(1.0, target.global_position)
+	take_hit(1.0, target.global_position)   # (online: target is always this game's own cat)
 
 
 ## a pounce landed on it
 func pin_hit(by: Node3D) -> void:
 	take_hit(2.5, by.global_position, true)
+
+
+## online: a rat someone else's game runs shows the hit at once, the owner applies it (world_sync.gd)
+func _net_forward(args: Array) -> bool:
+	if NetWorld.forward(self, "take_hit", args):
+		_hit_flash = 1.0
+		return true
+	return false
 
 
 func pinned() -> void:
@@ -195,9 +287,25 @@ func behind(from: Vector3) -> bool:
 func take_hit(dmg: float, from: Vector3, heavy := false, poise_mul := 1.0) -> void:
 	if state == DEAD:
 		return
+	if _net_forward([dmg, from, heavy, poise_mul]):
+		return
 	var back := behind(from)
-	if back:
+	if state == BROKEN and poise_mul > 0.0:
+		# posture broken: this one is the finishing blow
+		deathblows += 1
+		dmg = hp if s < 1.3 else maxf(max_hp * 0.4, 4.0)
+		heavy = true
+		back = false
+		posture_v = 0.0
+		cue.broken = false
+		SlashFx.sparks(self, global_position + Vector3.UP * 0.12 * s, Vector3.UP, true, 30)
+		if target and target.has_method("_event"):
+			target.call("_event", "finishing blow!")
+	elif back:
 		dmg *= 2.0
+	# hits wear its posture down a little too (deflects do the real work)
+	if state != BROKEN:
+		posture_v = minf(posture_v + 0.25 * poise_mul, posture_max - 0.01)
 	hp -= dmg
 	hits += 1
 	_hit_flash = 1.0
@@ -214,6 +322,7 @@ func take_hit(dmg: float, from: Vector3, heavy := false, poise_mul := 1.0) -> vo
 		pass     # it's pinned already
 	elif _poise >= poise or ((back or heavy) and poise_mul > 0.0):
 		_poise = 0.0
+		_end_combo()
 		state = STAGGER
 		st_t = 0.0
 		_stagger_t = 0.55 if not heavy else 0.9
@@ -223,10 +332,12 @@ func take_hit(dmg: float, from: Vector3, heavy := false, poise_mul := 1.0) -> vo
 func grab(by: Node3D) -> void:
 	if state == DEAD:
 		return
+	NetWorld.hold(self)
 	held_by = by
 	held_t = 0.0
 	hold_point = global_position
 	break_t = 1.6 / s
+	_end_combo()
 	state = STAGGER
 	st_t = 0.0
 
@@ -250,6 +361,9 @@ func _break_free(struggled: bool) -> void:
 
 func _die() -> void:
 	held_by = null
+	_end_combo()
+	cue.broken = false
+	cue.posture_frac = 0.0
 	state = DEAD
 	st_t = 0.0
 	remove_from_group("prey")
@@ -274,6 +388,15 @@ func _physics_process(dt: float) -> void:
 	st_t += dt
 	_hit_flash = maxf(_hit_flash - dt * 4.0, 0.0)
 	_poise = maxf(_poise - dt * 0.25, 0.0)
+	_defl = maxf(_defl - dt * 5.0, 0.0)
+	if state != BROKEN:
+		if _posture_hold > 0.0:
+			_posture_hold -= dt
+		else:
+			# like sekiro: it gets its breath back quicker the healthier it is
+			posture_v = maxf(posture_v - dt * (0.25 + 0.45 * hp / max_hp) * (0.6 if king else 1.0), 0.0)
+	if cue:
+		cue.posture_frac = posture_v / posture_max
 	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
 	var to := Vector3.ZERO
 	var dist := 99.0
@@ -328,30 +451,62 @@ func _physics_process(dt: float) -> void:
 			var face := clampf(1.0 - absf(ang) / 1.2, 0.0, 1.0)
 			var spd := run_speed * face * smoothstep(0.4 * s, 0.9 * s, dist)
 			want_v = fwd * spd
-			if dist < reach + 0.28 * s and absf(ang) < 0.45 and st_t > 0.3:
-				state = WINDUP
-				st_t = 0.0
-				_bit = false
+			_leap_cd -= dt
+			if net_puppet:
+				pass      # the host picks the combos (net_apply)
+			elif dist < reach + 0.28 * s and absf(ang) < 0.45 and st_t > 0.3:
+				_start_combo(_pick(combos if not combos.is_empty() else (POOL_SMALL if s < 1.3 else (POOL_BRUTE if not king else POOL_KING))))
+			elif leaps_on and combos.is_empty() and _leap_cd <= 0.0 and dist < reach * 2.4 + 0.35 * s and absf(ang) < 0.3 and st_t > 0.5:
+				_leap_cd = 2.5
+				if _rng.randf() < 0.55:
+					_start_combo(_pick(LEAPS_SMALL if s < 1.3 else LEAPS_BIG))
 		WINDUP:
-			# tracks you for most of the wind up, then it's committed
-			var track := 1.4 if st_t < windup_t * 0.6 else 0.0
+			# tracks you for most of the tell, then it's committed. later steps of a combo
+			# re-aim quicker (it follows you round between bites)
+			var track := (1.4 if step == 0 else 2.6) if st_t < windup_t * 0.6 else 0.0
 			yaw += clampf(ang, -track * dt, track * dt)
+			if strike == "leap":
+				want_v = -fwd * 0.3 * smoothstep(0.0, windup_t, st_t)   # sinks back on its haunches
 			if st_t >= windup_t:
 				state = LUNGE
 				st_t = 0.0
 		LUNGE:
-			want_v = fwd * 3.2 * sqrt(s) * (1.0 - st_t / lunge_t * 0.5)
-			if not _bit and st_t > lunge_t * 0.35:
+			var sk: Array = STRIKES[strike]
+			var len: float = sk[0]
+			match strike:
+				"leap":
+					want_v = fwd * 5.4 * sqrt(s) * (1.0 - st_t / len * 0.6)
+				"sweep":
+					want_v = Vector3.ZERO
+					yaw += TAU * dt / len      # whips round, the tail sweeps the ground
+				"swipe":
+					want_v = fwd * 1.6 * sqrt(s) * (1.0 - st_t / len)
+				_:
+					want_v = fwd * 3.2 * sqrt(s) * (1.0 - st_t / len * 0.5)
+			if not _bit and st_t > len * float(sk[1]):
 				_bite(fwd)
-			if st_t >= lunge_t:
-				state = RECOVER
-				st_t = 0.0
+			if st_t >= len:
+				step += 1
+				if step < (COMBOS[combo_id] as Array).size():
+					_enter_step()
+				else:
+					combos_done += 1
+					combo_id = ""
+					state = RECOVER
+					st_t = -_open
+					_open = 0.0
 		RECOVER:
 			if st_t >= recover_t:
 				state = CHASE
 				st_t = 0.0
 		STAGGER:
 			if st_t >= _stagger_t:
+				state = CHASE
+				st_t = 0.0
+		BROKEN:
+			if st_t >= broken_t:
+				posture_v = 0.0
+				cue.broken = false
 				state = CHASE
 				st_t = 0.0
 		DEAD:
@@ -382,18 +537,170 @@ func _physics_process(dt: float) -> void:
 	_speed = LowPoly.damp(_speed, Vector2(velocity.x, velocity.z).length(), 12.0, dt)
 
 
-## the snap: only lands on what's in front of the snout, about one head length out
+## the strike lands: only on what its hitbox covers. bite = in front of the snout, about one
+## head length out. swipe = wider, a touch shorter. leap = the bite at the end of a long lunge.
+## sweep = the tail, all round it. every local cat it covers gets a chance to deflect first
 func _bite(fwd: Vector3) -> void:
 	_bit = true
 	bites += 1
-	if not is_instance_valid(target) or not target.has_method("is_invulnerable"):
+	var sk: Array = STRIKES[strike]
+	var dmg: float = bite_dmg * float(sk[2]) * (1.0 if (COMBOS.get(combo_id, [[]]) as Array).size() <= 1 else 0.7)
+	for c in _victims():
+		var d: Vector3 = (c as Node3D).global_position - global_position
+		if absf(d.y) > 0.3 * s:
+			continue
+		var along := d.dot(fwd)
+		var lat := (d - fwd * along)
+		lat.y = 0.0
+		var hit := false
+		match strike:
+			"swipe":
+				hit = along > -0.02 and along < reach + 0.04 and lat.length() < bite_w * 2.2 + 0.085
+			"leap":
+				hit = along > 0.0 and along < reach + 0.14 and lat.length() < bite_w + 0.1
+			"sweep":
+				hit = Vector2(d.x, d.z).length() < reach * 1.25 + 0.1
+			_:
+				hit = along > 0.0 and along < reach + 0.09 and lat.length() < bite_w + 0.085
+		if not hit:
+			continue
+		var pr = c.get("parry")
+		if pr != null and pr.try_deflect(self, global_position, perilous):
+			_on_deflected(c, pr.posture_dealt() * float(sk[3]))
+		else:
+			c.health.damage(dmg, global_position, 2.0 + s)
+
+
+## the local cats this strike can hit: its target plus every local player cat (online: each
+## game resolves hits on its own cat, see net_apply)
+func _victims() -> Array:
+	var out := []
+	if is_instance_valid(target) and target.has_method("is_invulnerable") and target.get("health") != null:
+		out.append(target)
+	for c in get_tree().get_nodes_in_group("player"):
+		if c != target and c.has_method("is_invulnerable") and c.get("health") != null:
+			out.append(c)
+	return out
+
+
+func _on_deflected(by: Node3D, amount: float) -> void:
+	deflected_n += 1
+	_defl = 1.0
+	_hit_flash = 0.5
+	var away := global_position - by.global_position
+	away.y = 0.0
+	if away.length() > 0.01:
+		velocity += away.normalized() * 0.9
+	if step >= (COMBOS.get(combo_id, [[]]) as Array).size() - 1:
+		_open = 0.35          # deflected the last one: it's left open a beat longer
+	deflected.emit(by, amount)
+	add_posture(amount)
+
+
+## posture damage (deflects). full = broken: it slumps, the next swat finishes it
+func add_posture(x: float) -> void:
+	if state == DEAD or state == BROKEN:
 		return
-	var d: Vector3 = target.global_position - global_position
-	var along := d.dot(fwd)
-	var lat := (d - fwd * along)
-	lat.y = 0.0
-	if along > 0.0 and along < reach + 0.09 and lat.length() < bite_w + 0.085 and absf(d.y) < 0.3 * s:
-		target.health.damage(bite_dmg, global_position, 2.0 + s)
+	posture_v += x
+	_posture_hold = 1.4
+	if posture_v >= posture_max:
+		posture_v = posture_max
+		_end_combo()
+		state = BROKEN
+		st_t = 0.0
+		cue.broken = true
+		SlashFx.sparks(self, global_position + Vector3.UP * 0.15 * s, Vector3.UP, false, 34)
+		CatSfx.play_at("deflect", global_position, 1.1, 0.7)
+		if target and target.has_method("_event"):
+			target.call("_event", "posture broken!")
+
+
+func _pick(pool: Array) -> String:
+	return pool[_rng.randi() % pool.size()]
+
+
+func _start_combo(id: String) -> void:
+	combo_id = id
+	step = 0
+	_enter_step()
+	combo_started.emit(id)
+
+
+## the tell of step `step`: the cue goes up timed to the moment the strike lands
+func _enter_step() -> void:
+	var st: Array = (COMBOS[combo_id] as Array)[step]
+	strike = st[1]
+	perilous = st[2]
+	windup_t = (0.5 if s < 1.3 else (0.8 if not king else 0.75)) * float(st[0]) / 0.5 if step == 0 else float(st[0]) * tempo
+	state = WINDUP
+	st_t = 0.0
+	_bit = false
+	var sk: Array = STRIKES[strike]
+	cue.cue(windup_t + float(sk[0]) * float(sk[1]), perilous)
+
+
+func _end_combo() -> void:
+	combo_id = ""
+	step = 0
+	_open = 0.0
+	if cue:
+		cue.cancel()
+
+
+## seconds until the current strike lands (-1 = none coming): tests + bots
+func time_to_hit() -> float:
+	if combo_id == "" or _bit:
+		return -1.0
+	var sk: Array = STRIKES[strike]
+	var at: float = float(sk[0]) * float(sk[1])
+	if state == WINDUP:
+		return windup_t - st_t + at
+	if state == LUNGE:
+		return at - st_t
+	return -1.0
+
+
+# ---------------------------------------------------------------- online
+
+func net_pack() -> Dictionary:
+	return {"p": global_position, "y": yaw, "v": velocity, "st": state, "t": st_t, "c": combo_id,
+		"k": step, "hp": hp, "po": posture_v}
+
+
+## a host snapshot (puppet mode). a new combo step starts the same tell + cue here, so the
+## strike lands on this cat on the host's beat; hits are then resolved locally (_bite)
+func net_apply(d: Dictionary) -> void:
+	net_puppet = true
+	global_position = d.get("p", global_position)
+	yaw = d.get("y", yaw)
+	velocity = d.get("v", velocity)
+	hp = d.get("hp", hp)
+	posture_v = d.get("po", posture_v)
+	var st: int = d.get("st", state)
+	var c: String = d.get("c", "")
+	var k: int = d.get("k", 0)
+	if st == DEAD and state != DEAD:
+		_die()
+		return
+	if st == BROKEN and state != BROKEN:
+		posture_v = posture_max
+		_end_combo()
+		state = BROKEN
+		st_t = d.get("t", 0.0)
+		cue.broken = true
+		return
+	if c != "" and COMBOS.has(c) and (c != combo_id or k != step):
+		combo_id = c
+		step = k
+		_enter_step()
+		state = st
+		st_t = d.get("t", 0.0)
+		return
+	if c == "" and combo_id != "":
+		_end_combo()
+	if st != state and c == "":
+		state = st
+		st_t = d.get("t", 0.0)
 
 
 # ---------------------------------------------------------------- animation
@@ -416,10 +723,15 @@ func _process(dt: float) -> void:
 			jaw_t = 0.25 + 0.75 * k
 			ear_t = 1.0
 		LUNGE:
-			var k := st_t / lunge_t
-			ext_t = 1.0
+			var k := st_t / float(STRIKES[strike][0])
+			ext_t = 1.0 if strike != "swipe" else 0.2
+			if strike == "swipe":
+				rear_t = 0.8 * (1.0 - k)
 			jaw_t = 1.0 if k < 0.4 else 0.0     # snaps shut on the bite
 			ear_t = 1.0
+		BROKEN:
+			ear_t = 0.2
+			jaw_t = 0.35
 		RECOVER:
 			ext_t = 0.35 * (1.0 - st_t / recover_t)
 			jaw_t = 0.15 * (0.5 + 0.5 * sin(_t * 22.0))   # panting
@@ -447,11 +759,17 @@ func _process(dt: float) -> void:
 	var stg := 0.0
 	if state == STAGGER:
 		stg = sin(st_t * 30.0) * exp(-st_t * 4.0)
+	var slump := 0.0
+	if state == BROKEN:
+		# posture broken: sags low, sways, head hanging
+		slump = smoothstep(0.0, 0.2, st_t) * (1.0 - smoothstep(broken_t - 0.3, broken_t, st_t))
+		stg = sin(st_t * 5.0) * 0.35 * slump
 	_roll = LowPoly.damp(_roll, stg * 0.35 + _death * 1.45, 12.0 if not dead else 5.0, dt)
 	_pitch = LowPoly.damp(_pitch, -0.08 * moving * clampf(v / 2.0, 0.0, 1.0), 8.0, dt)
-	torso.position = Vector3(0, (0.1 + 0.03 * _rear - 0.01 * _ext - 0.035 * _death) * s + bounce, (0.03 * _rear - 0.06 * _ext) * s)
-	torso.rotation = Vector3(_pitch + _rear * 0.42 - _ext * 0.12, clampf(-_yaw_rate * 0.05, -0.2, 0.2), _roll)
-	head.rotation = Vector3(_rear * -0.25 + _ext * 0.2 + (sin(_t * 1.7) * 0.05 if state == IDLE else 0.0), stg * 0.4 + clampf(-_yaw_rate * 0.08, -0.3, 0.3), 0)
+	torso.position = Vector3(0, (0.1 + 0.03 * _rear - 0.01 * _ext - 0.035 * _death - 0.03 * slump) * s + bounce, (0.03 * _rear - 0.06 * _ext + 0.02 * _defl) * s)
+	torso.rotation = Vector3(_pitch + _rear * 0.42 - _ext * 0.12 + _defl * 0.25 - slump * 0.1, clampf(-_yaw_rate * 0.05, -0.2, 0.2), _roll)
+	# a deflected strike snaps the head back up and to the side
+	head.rotation = Vector3(_rear * -0.25 + _ext * 0.2 + (sin(_t * 1.7) * 0.05 if state == IDLE else 0.0) - _defl * 0.5 + slump * 0.45, stg * 0.4 + clampf(-_yaw_rate * 0.08, -0.3, 0.3) + _defl * 0.3, 0)
 	head.position.z = (-0.09 - 0.03 * _ext) * s
 
 	# legs (root space)
@@ -474,6 +792,14 @@ func _process(dt: float) -> void:
 		if front:
 			foot.z -= (0.03 * _rear + 0.07 * _ext) * s
 			lift += 0.03 * _rear * s
+			if state == LUNGE and strike == "swipe":
+				# one forepaw rakes across in front of it
+				var k := clampf(st_t / float(STRIKES["swipe"][0]), 0.0, 1.0)
+				var sd: float = leg.side
+				if sd > 0.0:
+					foot.x += lerpf(0.07, -0.08, smoothstep(0.1, 0.6, k)) * s
+					foot.z -= 0.06 * s * sin(k * PI)
+					lift += 0.035 * s * sin(k * PI)
 		else:
 			foot.z += 0.02 * _ext * s
 		foot.y = lift

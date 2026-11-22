@@ -34,6 +34,14 @@ global uniform float psx_affine;
 // perspective correct uvs. real psx games subdivided near polys for the same reason: a vert
 // right next to (or behind) the lens makes screen space uvs collapse, so textures shrink and smear
 uniform float affine_near = 1.5;
+// and per pixel: textures are perspective correct up to affine_fade.x m away and fade into the
+// affine warp by affine_fade.y m. at cat height the floor and walls are right at the lens, and a
+// big poly with one corner near you warps (and swims as you move) across the whole thing.
+// far polys keep the wobble, so the retro look stays where it reads as a look, not a glitch
+uniform vec2 affine_fade = vec2(1.5, 5.0);
+// vertex snapping fades in the same way: verts closer than snap_fade.x m don't snap at all, full
+// snap past snap_fade.y m. near verts jumping a grid cell made walls next to your face jitter
+uniform vec2 snap_fade = vec2(0.6, 3.0);
 varying vec3 aff;
 
 void vertex() {
@@ -45,7 +53,8 @@ void vertex() {
 	if (clip.w > 0.05 && psx_snap > 0.0) {
 		vec2 grid = vec2(psx_snap * VIEWPORT_SIZE.x / VIEWPORT_SIZE.y, psx_snap) * 0.5;
 		vec2 ndc = clip.xy / clip.w;
-		ndc = floor(ndc * grid + 0.5) / grid;
+		vec2 snapped = floor(ndc * grid + 0.5) / grid;
+		ndc = mix(ndc, snapped, smoothstep(snap_fade.x, snap_fade.y, clip.w));
 		clip.xy = ndc * clip.w;
 	}
 	POSITION = clip;
@@ -56,9 +65,10 @@ void vertex() {
 }
 
 void fragment() {
-	vec2 persp = aff.xy / aff.z;
-	vec2 uv = mix(UV, persp, psx_affine);
-	if (psx_affine < 0.5) { uv = UV; }
+	vec2 warped = aff.xy / aff.z;
+	float k = psx_affine * smoothstep(affine_fade.x, affine_fade.y, -VERTEX.z);
+	vec2 uv = mix(UV + scroll * TIME, warped, k);
+	if (psx_affine < 0.5) { uv = UV + scroll * TIME; }
 	vec4 t = texture(tex, uv);
 	if (cutout && t.a < 0.5) { discard; }
 	vec3 c = t.rgb * tint.rgb * COLOR.rgb;

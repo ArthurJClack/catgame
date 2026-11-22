@@ -32,7 +32,8 @@ static func _mat(col: Color, additive := true) -> StandardMaterial3D:
 ## a swipe from a to b, bowed toward `bow` (world offset at the middle). side = the across
 ## direction the three claws are spread along. follow: the streak rides along with that node
 ## (the cat: a strike thrown on the move stays out in front of it instead of hanging in the air behind)
-static func streak(host: Node, a: Vector3, b: Vector3, bow: Vector3, col := Color(1.0, 0.95, 0.85), follow: Node3D = null) -> void:
+## lines: 3 = the claw scratch, 1 = a single soft stroke (harmless play swats, cat_spar.gd)
+static func streak(host: Node, a: Vector3, b: Vector3, bow: Vector3, col := Color(1.0, 0.95, 0.85), follow: Node3D = null, lines := 3) -> void:
 	if not _ok(host):
 		return
 	var cam := host.get_viewport().get_camera_3d()
@@ -49,9 +50,11 @@ static func streak(host: Node, a: Vector3, b: Vector3, bow: Vector3, col := Colo
 	if spread.length() < 0.5:
 		spread = Vector3.UP
 	var n := 10
-	for k in 3:
-		var off := spread * (float(k) - 1.0) * 0.016
-		var lag := absf(float(k) - 1.0) * 0.06          # outer claws trail the middle one a touch
+	var soft := lines == 1
+	for k in lines:
+		var ck := float(k) - float(lines - 1) * 0.5
+		var off := spread * ck * 0.016
+		var lag := absf(ck) * 0.06          # outer claws trail the middle one a touch
 		var pts: Array[Vector3] = []
 		for i in n + 1:
 			var u := lerpf(lag, 1.0, float(i) / n)
@@ -63,6 +66,10 @@ static func streak(host: Node, a: Vector3, b: Vector3, bow: Vector3, col := Colo
 			# thin at the start, fat then sharp at the tip, like a claw tearing through
 			var w0 := 0.0065 * sin(PI * pow(u0, 0.7))
 			var w1 := 0.0065 * sin(PI * pow(u1, 0.7))
+			if soft:
+				# one rounder, fatter stroke with blunt ends: a paw pad, not claws
+				w0 = 0.011 * sin(PI * u0)
+				w1 = 0.011 * sin(PI * u1)
 			var t := (pts[i + 1] - pts[i]).normalized()
 			var side0 := t.cross((eye - pts[i]).normalized()).normalized()
 			var side1 := t.cross((eye - pts[i + 1]).normalized()).normalized()

@@ -97,6 +97,19 @@ func _ready() -> void:
 		build_puzzles()
 
 
+## online (NetWorld): the authority's mill / drift state goes to everyone in the level.
+## props (wedge, tumbleweeds, snowball) and the wildlife sync on their own as rigidbodies / critters
+func net_level_pack() -> Dictionary:
+	var b = puzzles.get_node_or_null("BiomePuzzles") if puzzles else null
+	return b.net_state() if b is BiomePuzzles else {}
+
+
+func net_level_apply(d: Dictionary) -> void:
+	var b = puzzles.get_node_or_null("BiomePuzzles") if puzzles else null
+	if b is BiomePuzzles:
+		b.net_apply(d)
+
+
 ## static callables would outlive the level (and crash godot at quit): let go of them here
 func _exit_tree() -> void:
 	Beast.ground = Callable()

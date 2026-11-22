@@ -330,3 +330,23 @@ func _eat_tick(p: CatPlayer, dt: float) -> void:
 
 func reset_max() -> void:
 	max_alert = alert
+
+
+# ---------------------------------------------------------------- online (world_sync.gd)
+
+func net_pack() -> Dictionary:
+	return {"alert": snappedf(alert, 0.01), "awake": awake, "up": snappedf(_up, 0.01), "eat": snappedf(eat_t, 0.05),
+		"done": done, "p": dog.position, "ry": snappedf(dog.rotation.y, 0.01), "mv": dog.get_meta("moving", false)}
+
+
+func net_apply(d: Dictionary) -> void:
+	alert = float(d.get("alert", alert))
+	awake = bool(d.get("awake", awake))
+	_up = float(d.get("up", _up))
+	eat_t = float(d.get("eat", eat_t))
+	dog.position = d.get("p", dog.position)
+	dog.rotation.y = float(d.get("ry", dog.rotation.y))
+	dog.set_meta("moving", bool(d.get("mv", false)))
+	if bool(d.get("done", false)) and not done:
+		done = true
+		_bowl_food.visible = false

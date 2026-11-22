@@ -7,6 +7,7 @@ extends Node3D
 ## preview: `-- --arenatest` (headless rules check), `-- --arenashow` (bot fight for the video),
 ## `-- --combattest` / `-- --combatshow` (paw combat: swats, rakes, two paw grip; combat_test.gd)
 ## `-- --locktest` / `-- --lockshow` (tab lock on: pick, strafe, dodges, flick switch; lock_test.gd)
+## `-- --parrytest` / `-- --parryshow` (deflects, rat combos, cues, posture, the rat king; parry_test.gd)
 
 const R := 6.0                # pit radius
 const WAVES := [
@@ -14,6 +15,7 @@ const WAVES := [
 	[1.0, 1.0],
 	[1.0, 1.0, 1.0],
 	[1.6, 1.0],
+	[2.3],          # the rat king (souls_rat.gd: long combos, perilous tail sweeps + leaps)
 ]
 
 var player: CatPlayer
@@ -38,8 +40,8 @@ var spawn := Vector3(0, 0.02, 4.4)
 func _ready() -> void:
 	process_priority = 10
 	var args := OS.get_cmdline_user_args()
-	test_mode = "--arenatest" in args or "--combattest" in args or "--locktest" in args
-	show_mode = "--arenashow" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--lockshow" in args or "--landshow" in args or "--reachshow" in args
+	test_mode = "--arenatest" in args or "--combattest" in args or "--locktest" in args or "--parrytest" in args
+	show_mode = "--arenashow" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--lockshow" in args or "--landshow" in args or "--reachshow" in args or "--parryshow" in args or "--dodgeshow" in args
 	_setup_env()
 	_build_pit()
 	player = CatPlayer.new()
@@ -60,6 +62,8 @@ func _ready() -> void:
 		var t: ArenaTest = CombatTest.new() if ("--combattest" in args or "--combatshow" in args or "--pounceshow" in args or "--commitshow" in args or "--landshow" in args or "--reachshow" in args) else ArenaTest.new()
 		if "--locktest" in args or "--lockshow" in args:
 			t = LockTest.new()
+		if "--parrytest" in args or "--parryshow" in args or "--dodgeshow" in args:
+			t = ParryTest.new()
 		t.arena = self
 		add_child(t)
 		return
@@ -72,8 +76,12 @@ func _ready() -> void:
 
 # ---------------------------------------------------------------- waves
 
+var _round := 0                # every wave start (also a restart of the same wave) is a new round
+
+
 func _start_wave(i: int) -> void:
 	wave = i
+	_round += 1
 	for r in rats:
 		if is_instance_valid(r):
 			r.queue_free()
@@ -85,10 +93,17 @@ func _start_wave(i: int) -> void:
 		var a := PI + (float(k) - (n - 1) * 0.5) * 0.5
 		spawn_rat(Vector3(sin(a) * (R - 1.2), 0.02, cos(a) * (R - 1.2)), sizes[k])
 	wave_label.text = "wave %d" % (i + 1)
-	player._event("wave %d · %d rat%s" % [i + 1, n, "" if n == 1 else "s"])
+	if sizes.max() >= 2.0:
+		player._event("wave %d · the rat king" % (i + 1))
+		player.toast = "the rat king"
+		player.toast_t = 0.0
+	else:
+		player._event("wave %d · %d rat%s" % [i + 1, n, "" if n == 1 else "s"])
 
 
 func _endless(i: int) -> Array:
+	if (i + 1) % 5 == 0:
+		return [2.3, 1.0]
 	var a := [1.6]
 	for k in mini(i - 2, 5):
 		a.append(1.0)
@@ -98,6 +113,8 @@ func _endless(i: int) -> Array:
 func spawn_rat(pos: Vector3, size := 1.0) -> SoulsRat:
 	var r := SoulsRat.new()
 	r.s = size
+	# online: the same rat in every game (world_sync.gd matches them by this)
+	r.set_meta("net_key", "r%d_%d" % [_round, rats.size()])
 	r.position = pos
 	r.yaw = atan2(pos.x, pos.z)   # facing the middle
 	r.target = player
@@ -135,7 +152,24 @@ func _on_died(lives_left: int) -> void:
 func restart() -> void:
 	player.health.lives = 9
 	_put_back()
-	_start_wave(0)
+	if not NetWorld.level_puppet():
+		_start_wave(0)
+
+
+## online (world_sync.gd): the host's wave, so everyone fights the same rats
+func net_level_pack() -> Dictionary:
+	return {"wave": wave, "round": _round}
+
+
+func net_level_apply(d: Dictionary) -> void:
+	if test_mode or show_mode:
+		return
+	var rd := int(d.get("round", _round))
+	if rd != _round:
+		if int(d.get("wave", wave)) != wave:
+			player.health.heal_full()
+		_round = rd - 1
+		_start_wave(int(d.get("wave", wave)))
 
 
 func _put_back() -> void:
@@ -154,6 +188,8 @@ func _physics_process(dt: float) -> void:
 		_torches[i].light_energy = 1.6 + 0.25 * sin(_t * 9.0 + i * 1.7) + 0.15 * sin(_t * 23.0 + i)
 	if test_mode or show_mode:
 		return
+	if _between > 0.0 and NetWorld.level_puppet():
+		_between = 0.0             # online: the waves come from the host (net_level_apply)
 	if _between > 0.0:
 		_between -= dt
 		if _between <= 0.0:
@@ -167,7 +203,8 @@ func _physics_process(dt: float) -> void:
 				restart()
 			else:
 				_put_back()
-				_start_wave(wave)
+				if not NetWorld.level_puppet():
+					_start_wave(wave)
 	else:
 		_fade_a = maxf(_fade_a - dt * 1.2, 0.0)
 	fade.color.a = _fade_a
@@ -389,7 +426,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -92
 	help_label.offset_left = 18
 	_style(help_label, 15)
-	help_label.text = "the rat pit: rats only bite what's in front of them. circle round, bait the bite, swat them from behind (double damage)\nmouse1 swat (hold = rake) · hold space = pounce · mouse2 / g grab + pin · alt dodge out of the recovery · watch your stamina\ntab lock on (wasd circles, flick the mouse = next rat) · r restart · h hide help · f5 back to the farm"
+	CatKeys.help(help_label, "the rat pit: rats bite in combos. glint + closing ring = deflect it ({dash} + {swat} as the ring closes), red ! = dodge it\n{swat} swat (hold = rake) · {dash} dodge · {dash} + {swat} deflect (keep {dash} held for the next hit) · fill a rat's posture bar, then swat to finish it\n{lock_on} lock on (move keys circle, flick the mouse = next rat) · r restart · h hide help · f5 back to the farm")
 	hud.add_child(help_label)
 	var ch := ColorRect.new()
 	ch.color = Color(1, 1, 1, 0.7)
