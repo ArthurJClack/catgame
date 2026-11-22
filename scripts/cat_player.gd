@@ -434,6 +434,7 @@ var stamina: CatStamina        # souls style stamina bar (cat_stamina.gd)
 var health: CatHealth          # hits from enemies (souls_rat.gd), nine lives (cat_health.gd)
 var souls_hud: SoulsHud        # health + stamina bars, top left
 var dash: CatDash              # souls style dodge: dart / side leap / whirl / backstep (cat_dash.gd)
+var parry: CatParry            # dodge + swat = sekiro style deflect (cat_parry.gd)
 var prev_dash := false
 var lock: CatLockOn            # souls style tab lock on (cat_lock_on.gd)
 var prev_lock := false
@@ -497,6 +498,9 @@ func _ready() -> void:
 	dash = CatDash.new()
 	dash.player = self
 	add_child(dash)
+	parry = CatParry.new()
+	parry.player = self
+	add_child(parry)
 	combat = CatCombat.new()
 	combat.player = self
 	add_child(combat)
@@ -694,6 +698,7 @@ func _read_input() -> Dictionary:
 func _human_buttons(d: Dictionary) -> void:
 	var sw: bool = d.get("swat", false)
 	d.erase("swat")
+	d.swat_raw = sw     # the deflect (cat_parry.gd) reads the button itself: dodge held + swat
 	if sw and not _swat_prev:
 		_swat_paw = 1 - _swat_paw
 	_swat_prev = sw
@@ -797,7 +802,7 @@ func _physics_process(dt: float) -> void:
 	if combat.locks_move():
 		# both fore paws are holding something: a cat can't walk, hop or dodge on its hind legs alone
 		inp = inp.duplicate()
-		for k in ["jump", "aim", "dash", "scratch", "sprint", "canter", "crouch"]:
+		for k in ["jump", "aim", "dash", "deflect", "scratch", "sprint", "canter", "crouch"]:
 			inp[k] = false
 		inp["move"] = Vector2.ZERO
 	# the dodge reads the real stick even mid attack (a roll out of a recovery goes where you hold)
@@ -913,7 +918,10 @@ func _physics_process(dt: float) -> void:
 	stamina.infinite = not bot.is_empty() and not bot.get("stamina", false)
 	dash.tick(dt)
 	var dash_in: bool = inp.get("dash", false)
-	if dash_in and not prev_dash and combat.dodge_pressed():
+	# dodge + swat = deflect (cat_parry.gd). the dodge press still goes through; its gather waits
+	# out the chord window and is called off if a swat comes in it
+	var dash_rise := parry.input(dt, dash_in, inp.get("swat_raw", false) or (inp.get("swat", false) and not bot.is_empty() and dash_in), inp.get("deflect", false))
+	if dash_rise and combat.dodge_pressed():
 		dash.press()      # mid attack it waits for the move's cancel point (combat._atk_step)
 	prev_dash = dash_in
 	var raw_mv: Vector2 = dodge_mv
@@ -944,6 +952,10 @@ func _physics_process(dt: float) -> void:
 	# paws: left mouse = left paw, right mouse = right paw ("swat" = left paw for old bot scripts)
 	var paw_l: bool = inp.get("paw_l", false) or inp.get("swat", false)
 	var paw_r: bool = inp.get("paw_r", false)
+	if parry.eat_swat:
+		# dodge key held: the swat button is the deflect (cat_parry.gd), the paws stay put
+		paw_l = false
+		paw_r = false
 	combat.tick(dt, paw_l, paw_r, inp.get("grab", false), inp.get("pounce", false))
 	if _swat_hit_t >= 0.0:
 		_swat_hit_t -= dt
@@ -1509,11 +1521,17 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	var dland := smoothstep(0.0, 0.05, _dodge_land_t) * (1.0 - smoothstep(0.08, 0.3, _dodge_land_t))
 	crouch_t = maxf(crouch_t, 0.6 * dland)
 	rig.dodge = move_toward(rig.dodge, 1.0 if dash.state == CatDash.AIR else 0.0, (16.0 if dash.state == CatDash.AIR else 7.0) * dt)
+	var rinv := global_transform.basis.inverse()
 	if dash.state == CatDash.AIR:
 		rig.dodge_kind = dash.kind
 		rig.dodge_u = clampf(dash.air_t / dash.air_total, 0.0, 1.0)
-		var ld := global_transform.basis.inverse() * dash.dir
+		var ld := rinv * dash.dir
 		rig.dodge_lat = clampf(ld.x * 1.4, -1.0, 1.0)
+	# procedural dodge (cat_rig _dodge_proc_body): the real motion drives the pose
+	rig.dodge_vel = rig.dodge_vel.lerp(rinv * velocity, clampf(dt * 30.0, 0.0, 1.0)) if dash.state == CatDash.AIR else rig.dodge_vel.lerp(Vector3.ZERO, clampf(dt * 8.0, 0.0, 1.0))
+	rig.dodge_gather = dash.gather
+	if dash.state != CatDash.IDLE:
+		rig.dodge_dir = rinv * dash.dir
 	rig.dodge_land = dland
 	rig.crouch = move_toward(rig.crouch, crouch_t, (16.0 if dland > 0.0 else 10.0) * dt) if soft_air else crouch_t
 	rig.charge = charge
@@ -2632,6 +2650,8 @@ func fall_hurts() -> bool:
 
 func _on_land() -> void:
 	var dodge_land := dash.state == CatDash.AIR
+	if dodge_land:
+		rig.dodge_touch(global_transform.basis.inverse() * Vector3(velocity.x, prev_vy, velocity.z))
 	dash.on_land()
 	var impact := -prev_vy
 	land_dip_v -= clampf(impact * 0.12, 0.0, 0.9)

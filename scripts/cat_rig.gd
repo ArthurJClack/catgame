@@ -66,6 +66,21 @@ var dodge_kind := 0
 var dodge_u := 0.0
 var dodge_lat := 0.0
 var dodge_land := 0.0
+## procedural dodge (2026-11-22): the pose comes from how the body is actually moving, not from
+## a pose per kind. the player feeds the velocity (rig space: +x right, +y up, -z forward), the
+## gather (0..1 before the push) and the push direction; touchdown kicks a settle spring
+## (dodge_touch). false = the old per kind poses (kept for the before / after reel)
+static var proc_dodge := true
+var dodge_vel := Vector3.ZERO
+var dodge_gather := 0.0
+var dodge_dir := Vector3.ZERO
+var _ds := Vector3.ZERO          # landing settle spring: x sway (m), y squat (m), z nod (rad)
+var _dsv := Vector3.ZERO
+var _tw_c := 0.0                 # spine twist: the chest leads the turn ...
+var _tw_p := 0.0                 # ... the hips follow on a spring (overshoots a little)
+var _tw_pv := 0.0
+var _dlean := 0.0
+var _dpitch := 0.0
 ## a pounce's four landing spots (world, LF RF LH RH), the ones its aim circles show: in the air
 ## each paw reaches for its spot and the pin pose plants it exactly there. empty = none
 var pounce_spots: Array = []
@@ -1356,7 +1371,10 @@ func animate(dt: float) -> void:
 	pelvis.rotation.x = -flex - air_flex + arch * 0.5 + sit_h * 0.25 + stretch * 0.1 + fa_arch * 0.85
 	# a rounded back is a shorter back: the hips slide up toward the chest
 	pelvis.position.z = pelvis_z + clampf(_flex_s + air_flex - arch, -0.45, 0.3) * 0.035 - fa_arch * 0.035
-	if dodge > 0.0:
+	if proc_dodge:
+		_dodge_springs(dt)
+		_dodge_proc_body()
+	elif dodge > 0.0:
 		_dodge_body()
 	# girdles follow their paws: the hip / shoulder on the reaching side goes forward with it,
 	# and the swing side drops a little
@@ -1613,7 +1631,7 @@ func animate(dt: float) -> void:
 				af = af.lerp(hp, _hop_w)
 				arot = lerpf(arot, lerpf(0.12, -0.45, up_k) if front else lerpf(0.0, -0.5, up_k), _hop_w)
 			if dodge > 0.0:
-				var dl := _dodge_leg(i, side, front, home)
+				var dl := _dodge_leg_proc(i, side, front, home) if proc_dodge else _dodge_leg(i, side, front, home)
 				af = af.lerp(dl[0], dl[2])
 				arot = lerpf(arot, dl[1], dl[2])
 			var afw := yb * af
@@ -1786,6 +1804,99 @@ func _dodge_leg(i: int, side: float, front: bool, home: Vector3) -> Array:
 				return [Vector3(side * 0.04, lerpf(0.0, 0.1, up), home.z - 0.07), lerpf(0.2, -0.7, up), w]
 			return [Vector3(side * 0.05, -0.03, home.z + 0.06), 0.0, w]
 	return [home, 0.0, 0.0]
+
+
+## procedural dodge leg: leading legs (the ones on the side it's travelling to) fold up off the
+## push and then reach out along the flight for the ground, trailing legs stay straight back
+## where they shoved from and swing through late. scaled by how fast it's going, nudged by the
+## vertical speed (rising tucks, falling reaches down). hands over to the landing spots at the end
+func _dodge_leg_proc(_i: int, _side: float, front: bool, home: Vector3) -> Array:
+	var u := dodge_u
+	var land_w := smoothstep(0.55, 0.9, u) if land_known else 0.0
+	var w := dodge * (1.0 - land_w)
+	var v := dodge_vel
+	var flat := Vector3(v.x, 0.0, v.z)
+	var hs := flat.length()
+	var d := flat / hs if hs > 0.4 else (dodge_dir if dodge_dir.length() > 0.1 else Vector3.FORWARD)
+	var k := clampf(hs / 5.0, 0.35, 1.0)
+	var hp := Vector2(home.x * 2.5, home.z).normalized()
+	var a := hp.dot(Vector2(d.x, d.z))
+	var push := 1.0 - smoothstep(0.12, 0.55, u)
+	var reach := smoothstep(0.2, 0.7, u)
+	var foot := home
+	var rot := 0.0
+	var lead := clampf(a * 2.0 + 0.5, 0.0, 1.0)
+	# leading: up off the push, then out along the flight
+	var lf := home + d * (0.13 if front else 0.09) * k * (0.35 + 0.65 * reach)
+	lf.y += 0.05 * k * (1.0 - reach) - 0.01 * reach
+	var lr := lerpf(-0.9, 0.25, reach)
+	# trailing: straight back along the shove, swings through under the body late
+	var tf := home - d * (0.16 if not front else 0.11) * k * push + d * 0.03 * (1.0 - push)
+	tf.y += lerpf(0.02, 0.07, push) * k
+	var tr := lerpf(-0.3, -1.2, push)
+	foot = tf.lerp(lf, lead)
+	rot = lerpf(tr, lr, lead)
+	foot.y += clampf(v.y * 0.012, -0.02, 0.03)
+	return [foot, rot, w]
+
+
+## procedural dodge body (every frame: the springs keep settling after the dodge is over)
+func _dodge_springs(dt: float) -> void:
+	# landing settle: under-damped so a big dodge squats, sways and nods a couple of times
+	var kk := 220.0
+	var cc := 2.0 * 0.32 * sqrt(kk)
+	_dsv += (-kk * _ds - cc * _dsv) * dt
+	_ds += _dsv * dt
+	_ds = _ds.clamp(Vector3(-0.03, -0.04, -0.3), Vector3(0.03, 0.02, 0.3))
+	var v := dodge_vel
+	var fz := -v.z
+	var w := dodge
+	# twist: the chest turns toward where the body is flying first, the hips follow
+	var tw := clampf(atan2(v.x, maxf(absf(fz), 0.6)) * 0.55, -0.4, 0.4) * w if Vector2(v.x, v.z).length() > 0.4 else 0.0
+	_tw_c = LowPoly.damp(_tw_c, tw, 18.0, dt)
+	var kt := 120.0
+	_tw_pv += (kt * (tw - _tw_p) - 2.0 * 0.45 * sqrt(kt) * _tw_pv) * dt
+	_tw_p += _tw_pv * dt
+	# lean into the sideways speed, nose follows the vertical speed (rearing on a backstep)
+	var lean := -clampf(v.x * 0.07, -0.3, 0.3) * w
+	var pt := (clampf(v.y * 0.08, -0.22, 0.25) + clampf(-fz * 0.035, -0.06, 0.14)) * w
+	# the gather before the push: weight shifts away from where it's about to go
+	lean += dodge_dir.x * 0.08 * dodge_gather
+	_dlean = LowPoly.damp(_dlean, lean, 16.0, dt)
+	_dpitch = LowPoly.damp(_dpitch, pt, 14.0, dt)
+
+
+func _dodge_proc_body() -> void:
+	var rm := (1.0 - climb) * (1.0 - clamber)
+	var w := dodge * rm
+	var u := dodge_u
+	var fz := -dodge_vel.z
+	pivot.rotation.z += _dlean * rm - _ds.x * 2.5 * rm
+	pivot.rotation.x += _dpitch * rm + _ds.z * rm
+	pivot.position.y += _ds.y * rm
+	pivot.position.x += _ds.x * rm - dodge_dir.x * 0.012 * dodge_gather * rm
+	pivot.position.z -= dodge_dir.z * 0.012 * dodge_gather * rm
+	chest.rotation.y += _tw_c * 0.8 * rm
+	pelvis.rotation.y -= _tw_p * 0.6 * rm
+	if w <= 0.0:
+		return
+	# the spine stretches long off a fast push and gathers up for the landing
+	var st := (1.0 - smoothstep(0.35, 0.8, u)) * clampf(fz / 5.0, 0.0, 1.0) * w
+	var gth := smoothstep(0.55, 0.95, u) * w
+	chest.rotation.x += 0.2 * st - 0.12 * gth
+	pelvis.rotation.x -= 0.2 * st - 0.12 * gth
+	pelvis.position.z += 0.012 * st
+	# going up sideways / back the back arches (the startled spring), more the higher it goes
+	var arch := clampf(dodge_vel.y * 0.12, 0.0, 0.25) * (1.0 - clampf(fz / 4.0, 0.0, 1.0)) * w
+	chest.rotation.x -= arch
+	pelvis.rotation.x += arch
+
+
+## touchdown out of a dodge: v = the landing velocity in rig space. kicks the settle spring
+func dodge_touch(v: Vector3) -> void:
+	if not proc_dodge:
+		return
+	_dsv += Vector3(v.x * 0.12, minf(v.y, 0.0) * 0.16, v.z * 0.21)
 
 
 ## dodge body pose, added on top of the normal air pose (the legs are in the air pose block)
