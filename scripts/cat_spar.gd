@@ -263,6 +263,15 @@ func _send(to: Node3D, ev: Array) -> void:
 	if s != null:
 		s._inbox.append([player, ev])
 		return
+	if to.has_method("play_tag"):
+		# a farm cat (NpcCat): it takes the bop, scampers off, and the answer comes straight back.
+		# online the cat's owner runs it (NetWorld.forward), everyone sees it through world sync
+		if str(ev[0]) == "tag":
+			var kind := str(ev[2])
+			if not NetWorld.forward(to, "play_tag", [kind, player.global_position]):
+				to.play_tag(kind, player.global_position)
+			_inbox.append([to, ["res", ev[1], kind, "hit"]])
+		return
 	if to is RemoteCat:
 		var rig = player.get("rig")
 		if rig and rig.net_record and rig.life_log.size() < 64:

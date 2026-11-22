@@ -1991,9 +1991,11 @@ func set_view(m: int) -> void:
 ## inside them), no viewmodel. old style (head_cam off): the body only casts a shadow and the
 ## paws you see are the viewmodel (tracks the real planted paws, sits in body space, see paw_anchor)
 func _apply_rig_view() -> void:
-	var real := third_person or head_cam
+	# only the cat you're looking out of loses its head: bots (the practice cat) always show theirs
+	var mine := not spar_dummy
+	var real := third_person or head_cam or not mine
 	rig.set_shadow_only(not real)
-	rig.set_head_hidden(not third_person and head_cam)
+	rig.set_head_hidden(mine and not third_person and head_cam)
 	if paws:
 		paws.visible = not real
 
