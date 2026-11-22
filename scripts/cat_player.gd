@@ -771,7 +771,7 @@ func _physics_process(dt: float) -> void:
 	_sc_off_prev = step_cam_off
 	_vis_prev = global_position + _vis_off()
 	var inp := _read_input()
-	inp = spar.filter(inp, dt)     # play fighting another cat eats the paws / grab (cat_spar.gd)
+	inp = spar.filter(inp, dt)     # play fighting: practice cat brain, tags landing, flinches (cat_spar.gd)
 	if combat.locks_move():
 		# both fore paws are holding something: a cat can't walk, hop or dodge on its hind legs alone
 		inp = inp.duplicate()
@@ -1739,7 +1739,7 @@ func _orient_rig() -> void:
 	if voff != Vector3.ZERO:
 		rig.global_position += voff
 	if spar:
-		spar.orient(rig)   # play fight poses + hit reactions (goes over the wire with the rig)
+		spar.orient(rig)   # play fight flinches (goes over the wire with the rig)
 
 
 func _orient_rig_base() -> void:
@@ -2664,6 +2664,7 @@ func _on_land() -> void:
 		rig.pin = 1.0
 		paws.pin()
 		_pin_check()
+		spar.pounce_land()   # came down on the cat you're playing with: bowled over
 
 
 ## the four spots a pounce's paws come down on (the same ones the aim circles show)
@@ -3086,6 +3087,7 @@ var _swat_pt := Vector3.ZERO      # world point the paw strikes (for the slash f
 func _do_swat(paw := -1, rake := false) -> void:
 	if paw < 0:
 		paw = randi() % 2
+	spar.strike_start()
 	_swat_rake = rake
 	_swat_side = -1.0 if paw == 0 else 1.0
 	var t := _paw_target(SWAT_RANGE, 0.5)
@@ -3149,6 +3151,7 @@ func _swat_impact() -> void:
 	if prey_hit:
 		_hit_prey(_swat_prey)
 	_hit_bodies(hits, dir, sweep)
+	spar.swat_check(_swat_rake)   # locked on to a cat: a soft play bop if it's in the hitbox
 
 
 ## the hitbox is still out: anything the lunge carries it onto gets hit too (once per strike)
@@ -3164,6 +3167,7 @@ func _swat_sweep() -> void:
 	for rb in _box_bodies():
 		hits.append(rb)
 	_hit_bodies(hits, dir, sweep)
+	spar.swat_check(_swat_rake)
 
 
 ## rigid bodies inside the strike's hitbox (not hit yet this strike)
@@ -3249,6 +3253,10 @@ func _slash_fx(dir: Vector3, sweep: Vector3, prey: Node3D, hits: Array[RigidBody
 		c = q + (eye - q).normalized() * 0.04
 	var a := c - sweep * 0.17 + Vector3.UP * 0.07
 	var b := c + sweep * 0.14 - Vector3.UP * 0.05
+	if spar.play_mode():
+		# locked on to a cat: no claws. one soft rounded line, no scratches (cat_spar.gd)
+		SlashFx.streak(self, a, b, -dir * 0.05 + Vector3.UP * 0.015, Color(0.85, 0.93, 1.0), self, 1)
+		return
 	SlashFx.streak(self, a, b, -dir * 0.05 + Vector3.UP * 0.015, Color(1.0, 0.82, 0.78) if prey != null else Color(1.0, 0.95, 0.85), self)
 	var n := (eye - c).normalized()
 	if prey != null:

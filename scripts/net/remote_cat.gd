@@ -60,6 +60,7 @@ func _process(dt: float) -> void:
 		return
 	rig.visible = true
 	_started = true
+	global_position = s.xf.origin   # the node follows the cat (lock on / pounce aim duck type it)
 	s.apply(rig, dt)
 	for ev in peer.due_events(rt):
 		if str(ev[0]) == "S":

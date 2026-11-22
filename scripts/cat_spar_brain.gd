@@ -1,29 +1,26 @@
 class_name CatSparBrain
 extends RefCounted
-## the practice cat's head: drives a bot CatPlayer (its CatSpar.filter calls think() every tick
-## and the result is the bot's input). it squares up to you, keeps a bop's distance, throws
-## strings and mixups at you, and reads what you're winding up: guards highs, ducks lows and
-## highs, counters, breaks throws, kicks like mad in a wrestle. `style` pins one behaviour for
-## tests / films: "auto" (sparring partner), "guard", "duck", "idle", "counter", "script"
-## (plays `plan` = [[t, action], ...] once, actions: swat, low, lunge, hold, grab, guard, duck,
-## side_l, side_r, counter).
+## the practice cat's head: drives a bot CatPlayer with the normal controls (its CatSpar.filter
+## calls think() every tick and the result is the bot's input). while you're locked on to it it
+## squares up, keeps a swat's distance, bops you (strings of swats, a held rake now and then, the
+## odd pounce or grab) and dodges some of yours. when you're not playing it just sits there
+## watching you. `style` pins one behaviour for tests / films: "auto", "idle", "dodge" (dodges
+## every swat it sees coming), "script" (plays `plan` = [[t, action], ...] once; actions: swat,
+## rake, pounce, grab, dodge).
 
 var spar: CatSpar
 var style := "auto"
-var skill := 0.55             # 0..1: how often it reads you right
+var skill := 0.5              # 0..1: how often it dodges what it sees coming
 var plan: Array = []
 var rng := RandomNumberGenerator.new()
 
 var _t := 0.0
-var _next := 0.6
-var _queue: Array = []        # [time, action] for the current string
+var _next := 0.8
+var _queue: Array = []        # actions still to throw in this string
 var _qt := 0.0
-var _press := {}              # button -> ticks left held
-var _hold := {}               # button -> seconds left held
-var _guard_t := 0.0
-var _duck_t := 0.0
-var _read_seq := ""
-var _mash := 0.0
+var _press := {}              # input -> ticks left held
+var _hold := {}               # input -> seconds left held
+var _read_t := -1.0
 
 
 func _init() -> void:
@@ -42,60 +39,50 @@ func think(dt: float) -> Dictionary:
 	var dist := to.length()
 	if dist > 0.05:
 		d.yaw = atan2(-to.x, -to.z)
-	var os := CatSpar.spar_of(opp)
 	if style == "idle":
 		return d
-	if not spar.in_match() and style == "auto":
-		# not playing: sit tight, just keep an eye on you when you're close
+	# only plays while you're locked on to it (or a test / film says so)
+	var os := CatSpar.spar_of(opp)
+	var playing: bool = style != "auto" or (os != null and os.playmate() == p)
+	if not playing:
 		if dist > 4.0:
 			d.yaw = p.yaw
 		return d
-	# footsies: hold a bop's distance
 	var mv := Vector2.ZERO
-	if not spar.busy() and style != "script":
-		if dist > 1.05:
+	if style != "script" and spar.stun <= 0.0:
+		if dist > 0.95:
 			mv.y = 1.0
 		elif dist < 0.5:
 			mv.y = -0.7
-	_guard_t -= dt
-	_duck_t -= dt
 	match style:
-		"guard":
-			_guard_t = 1.0
-		"duck":
-			_duck_t = 1.0
-		"counter":
-			if os and os.exposed() and os.move != "throw" and spar.counter_rec <= 0.0 and os.move != _read_seq:
-				_read_seq = os.move
-				_tap("dash", 10)
-				_queue = [[0.0, "swat"]]
-				_qt = 0.03
+		"dodge":
+			_dodge_read(opp, 1.0)
 		"script":
 			for s in plan.duplicate():
 				if _t >= float(s[0]):
 					plan.erase(s)
-					_queue.append([0.0, s[1]])
+					_queue.append(s[1])
 		"auto":
-			_auto(dt, dist, os)
-	if style == "counter" and (os == null or not os.exposed()):
-		_read_seq = ""
-	# wrestle: kick like mad
-	if spar.wrestle > 0.0:
-		_mash += dt * lerpf(6.0, 11.0, skill)
-		if _mash >= 1.0:
-			_mash -= 1.0
-			_tap("swat", 1)
-	# string playback
+			_dodge_read(opp, skill)
+			if _queue.is_empty() and _t >= _next and dist < 1.2 and spar.stun <= 0.0:
+				_next = _t + rng.randf_range(0.5, 1.2)
+				var r := rng.randf()
+				if r < 0.45:
+					_queue = ["swat", "swat"]
+				elif r < 0.65:
+					_queue = ["swat", "swat", "swat"]
+				elif r < 0.75:
+					_queue = ["rake"]
+				elif r < 0.87:
+					_queue = ["grab"]
+				else:
+					_queue = ["pounce"]
 	if not _queue.is_empty():
 		_qt -= dt
 		if _qt <= 0.0:
-			var a = _queue.pop_front()
-			_act(str(a[1]))
-			_qt = 0.16 if not _queue.is_empty() else 0.0
-	if _guard_t > 0.0 and not spar.busy():
-		mv = Vector2(0, -1.0)
-	if _duck_t > 0.0:
-		d.crouch = true
+			var a: String = _queue.pop_front()
+			_act(a)
+			_qt = 0.3
 	for k in _hold.keys():
 		_hold[k] -= dt
 		d[k] = true
@@ -107,100 +94,37 @@ func think(dt: float) -> Dictionary:
 			_press[k] -= 1
 		else:
 			_press.erase(k)
-	if d.get("fwd_hold", false):
-		mv.y = 1.0
-	if d.get("side", false):
-		mv = Vector2(float(_hold_side), 0.0)
-		d.erase("side")
+	if d.get("side_l", false):
+		mv = Vector2(-1, 0)
+		d.erase("side_l")
 	d.move = mv
-	if d.has("swat"):
-		d.paw_l = d.swat
-		d.erase("swat")
 	return d
 
 
-func _auto(_dt: float, dist: float, os: CatSpar) -> void:
-	# read what's coming
-	if os and os.exposed() and os.move != _read_seq:
-		_read_seq = os.move
-		if rng.randf() < skill:
-			var lvl: String = CatSpar.MOVES[os.move].lvl
-			var r := rng.randf()
-			if lvl == "throw":
-				if r < 0.5:
-					_duck_t = 0.35
-				else:
-					_tap("grab", 2)
-			elif r < 0.22 and spar.counter_rec <= 0.0:
-				_tap("dash", 10)
-				_queue = [[0.0, "swat"]]
-				_qt = 0.02
-			elif r < 0.38 and lvl != "low":
-				_act("side_l" if rng.randf() < 0.5 else "side_r")
-			elif lvl == "low" or (lvl == "high" and r < 0.7):
-				_duck_t = 0.45
-			else:
-				_guard_t = 0.45
-	if os == null or not os.exposed():
-		_read_seq = ""
-	if not spar.fighting() or spar.busy() or not _queue.is_empty():
+## the other cat is winding up a swat: sometimes side step it (the normal dodge)
+func _dodge_read(opp: Node3D, chance: float) -> void:
+	var c = opp.get("combat")
+	if c == null:
 		return
-	if _t < _next:
-		return
-	_next = _t + rng.randf_range(0.45, 1.1)
-	if dist > 1.15:
-		return
-	var r := rng.randf()
-	if r < 0.18:
-		_queue = [[0.0, "swat"], [0.0, "swat"], [0.0, "swat"]]
-	elif r < 0.32:
-		_queue = [[0.0, "swat"], [0.0, "swat"], [0.0, "low"]]
-	elif r < 0.44:
-		_queue = [[0.0, "low"]]
-	elif r < 0.54:
-		_queue = [[0.0, "lunge"]]
-	elif r < 0.64:
-		_queue = [[0.0, "hold"]]
-	elif r < 0.74:
-		_queue = [[0.0, "grab"]]
-	elif r < 0.82:
-		_queue = [[0.0, "swat"], [0.0, "grab"]]
-	elif r < 0.92:
-		_guard_t = 0.7
-	else:
-		_duck_t = 0.5
-
-
-func _tap(btn: String, ticks := 2) -> void:
-	_press[btn] = ticks
+	var winding: bool = c.atk in ["swat", "rake"] and c.atk_phase == CatCombat.A_WIND
+	if winding and _read_t < 0.0:
+		_read_t = 0.0
+		if rng.randf() < chance:
+			_act("dodge")
+	elif not winding:
+		_read_t = -1.0
 
 
 func _act(a: String) -> void:
 	match a:
 		"swat":
-			_tap("swat", 2)
-		"low":
-			_duck_t = maxf(_duck_t, 0.12)
-			_tap("swat", 2)
-			_hold["crouch"] = 0.1
-		"lunge":
-			_hold["fwd_hold"] = 0.08
-			_tap("swat", 2)
-		"hold":
-			_hold["swat"] = CatSpar.HOLD_T + 0.08
+			_press["paw_l" if rng.randf() < 0.5 else "paw_r"] = 2
+		"rake":
+			_hold["paw_r"] = CatCombat.HOLD_T + CatCombat.RAKE_EVERY * 2.5
+		"pounce":
+			_hold["pounce"] = 0.35
 		"grab":
-			_tap("grab", 2)
-		"guard":
-			_guard_t = 0.8
-		"duck":
-			_duck_t = 0.8
-		"side_l", "side_r":
-			_hold["side"] = 0.06
-			_tap("dash", 2)
-			_hold_side = -1 if a == "side_l" else 1
-		"counter":
-			_tap("dash", 10)
-			_queue.push_front([0.0, "swat"])
-			_qt = 0.03
-
-var _hold_side := 0
+			_hold["grab"] = 0.6
+		"dodge":
+			_hold["side_l"] = 0.05
+			_press["dash"] = 3

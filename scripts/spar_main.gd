@@ -1,8 +1,8 @@
 extends Node3D
 ## the play mat (res://spar.tscn): a sunny room with a rug and a practice cat to play fight with.
-## tab locks on to it and the rounds start (cat_spar.gd). r = new match, f5 = back to the farm.
-## `-- --spartest` runs the rules check (spar_test.gd), `-- --sparshow` films a bot vs bot bout,
-## `-- --sparstyle guard|duck|counter|idle|auto` pins what the practice cat does.
+## tab on it and your normal attacks turn into safe play ones (cat_spar.gd). r = reset spots,
+## f5 = back to the farm. `-- --spartest` runs the check (spar_test.gd), `-- --sparshow` films a
+## bot vs bot bout, `-- --sparstyle auto|idle|dodge` pins what the practice cat does.
 
 var player: CatPlayer
 var dummy: CatPlayer
@@ -59,8 +59,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R:
 				player.global_position = spawn
 				dummy.global_position = dummy_spawn
-				player.spar._end_match("")
-				dummy.spar._end_match("")
 			KEY_F5:
 				if has_method("go_scene"):
 					call("go_scene", "res://main.tscn")

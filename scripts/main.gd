@@ -52,7 +52,7 @@ func _ready() -> void:
 		add_child(n)
 		npcs.append(n)
 
-	# a tabby to play fight with: tab on it and the rounds start (cat_spar.gd). online, the
+	# a tabby to play fight with: tab on it and your attacks go soft, no claws (cat_spar.gd). online, the
 	# other players' cats work the same way
 	if not "--preview" in OS.get_cmdline_user_args():
 		practice_cat = preload("res://scripts/spar_main.gd").make_dummy(self, Vector3(-1.5, 0.05, 1.1), player, "block")
