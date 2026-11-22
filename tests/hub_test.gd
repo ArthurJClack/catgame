@@ -11,10 +11,14 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 
+## waits `sec` of wall clock AND sec * 60 frames, whichever is longer: software gl under xvfb can
+## drop the heavier levels to ~1 fps, and the fade counts frames (dt is capped)
 func _wait(sec: float, until: Callable = func(): return false) -> bool:
 	var end := Time.get_ticks_msec() + int(sec * 1000.0)
-	while Time.get_ticks_msec() < end:
+	var frames := int(sec * 60.0)
+	while Time.get_ticks_msec() < end or frames > 0:
 		await process_frame
+		frames -= 1
 		if until.call():
 			return true
 	return until.call()

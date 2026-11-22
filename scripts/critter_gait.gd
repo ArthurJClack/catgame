@@ -46,6 +46,10 @@ const SPECIES := {
 	"bird": {"m": 0.03, "h": 0.04, "gaits": ["biped_hop"], "fore": 0.5, "lift": 0.3},
 	# small lacertid lizards: ~14 strides a second at a 2.6 m/s sprint, feet down about half the stride
 	"lizard": {"m": 0.01, "h": 0.03, "gaits": ["sprawl"], "fore": 0.5, "lift": 0.5, "freq": [14.0, 2.6], "duty": [0.45, 0.7]},
+	# desert + mountain (beasts.gd): mountain goat ~70 kg, 0.85 m hips; hoary marmot ~5 kg; pika ~0.15 kg; jackrabbit ~2.5 kg
+	"goat": {"m": 70.0, "h": 0.85, "gaits": ["walk", "trot", "rotary"], "fore": 0.6, "lift": 0.28},
+	"marmot": {"m": 5.0, "h": 0.1, "gaits": ["walk", "half_bound"], "fore": 0.5, "lift": 0.35},
+	"pika": {"m": 0.15, "h": 0.03, "gaits": ["half_bound"], "fore": 0.5, "lift": 0.4},
 }
 
 var spec: Dictionary

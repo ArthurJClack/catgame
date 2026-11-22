@@ -52,6 +52,13 @@ const LIST := {
 	"crow_shiny": ["the crow's shiny", "the forest"],
 	"trail_boulder": ["the boulder", "the trail"],
 	"warm_vent": ["the warm vent", "the city"],
+	# desert + mountain (biome/biome_puzzles.gd)
+	"windmill": ["the windmill", "the desert"],
+	"tumbleweed": ["catch a tumbleweed", "the desert"],
+	"box": ["if it fits", "the ranch"],
+	"snowball": ["the snowball", "the mountain hut"],
+	"marmot": ["sneak up on the marmot", "the mountain"],
+	"summit": ["the summit", "the mountain top"],
 }
 
 static var treats_eaten := 0

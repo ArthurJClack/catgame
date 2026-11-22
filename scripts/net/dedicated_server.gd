@@ -14,7 +14,7 @@ extends Node
 ## --no-steam) it's a direct-ip / lan server.
 ##
 ## flags (after the `--`):
-##   --name <text>      server name on the list            --map <house|forest|docks|trail|arena|res://..>
+##   --name <text>      server name on the list            --map <house|forest|docks|trail|arena|city|desert|mountain|res://..>
 ##   --port <udp>       game port (24680)                  --query-port <udp>  steam query port (27016)
 ##   --max <n>          max cats (16)                      --motd <text>       shown to players when they join
 ##   --token <gslt>     steam game server login token (keeps the same server id across restarts)
@@ -22,7 +22,8 @@ extends Node
 
 const MAPS := {
 	"house": "res://main.tscn", "forest": "res://forest.tscn", "docks": "res://stealth.tscn",
-	"trail": "res://trail.tscn", "arena": "res://arena.tscn",
+	"trail": "res://trail.tscn", "arena": "res://arena.tscn", "city": "res://city.tscn",
+	"desert": "res://desert.tscn", "mountain": "res://mountain.tscn",
 }
 
 var server_name := "cat server"

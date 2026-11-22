@@ -285,6 +285,31 @@ static func _texel(kind: String, x: int, y: int) -> Color:
 				c = Color(0.08, 0.08, 0.08)
 			if x > 14 and x < 18 and y > 21 and y < 25:
 				c = Color(0.08, 0.08, 0.08)
+		# desert + mountain (biome levels): near white so the vertex colours / tint carry the hue
+		"grain":
+			var g := 0.84 + n * 0.12 + _h(x / 3, y / 3, 21) * 0.05
+			c = Color(g, g, g)
+			if _h(x, y, 22) > 0.93:
+				c = c.darkened(0.22)    # pebbles / grit
+		"rock":
+			# weathered stone: blotchy, faint strata, a few dark cracks + light flecks
+			var band := sin(float(y) * 0.45 + _h(x / 8, 0, 23) * 3.0)
+			var g := 0.7 + n * 0.14 + band * 0.04 + _h(x / 4, y / 4, 27) * 0.1
+			c = Color(g, g, g)
+			if (y + x / 9) % 13 == 0 and _h(x / 3, y, 28) > 0.4:
+				c = c.darkened(0.28)
+			elif _h(x, y, 29) > 0.95:
+				c = c.lightened(0.18)
+		"adobe":
+			var g := 0.8 + n * 0.08 + _h(x / 5, y / 4, 24) * 0.06
+			c = Color(g, g * 0.97, g * 0.94)
+			if _h(x / 2, y / 2, 25) > 0.95:
+				c = c.darkened(0.25)     # straw / chips
+		"snow":
+			var g := 0.93 + n * 0.06
+			c = Color(g, g, minf(g * 1.04, 1.0))
+			if _h(x / 2, y / 2, 26) > 0.9:
+				c = Color(0.82, 0.86, 0.95)   # blue shadowed crust
 		_:
 			var g := 0.6 + n * 0.1
 			c = Color(g, g, g)
