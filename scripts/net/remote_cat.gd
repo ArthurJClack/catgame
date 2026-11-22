@@ -15,6 +15,7 @@ var _started := false
 
 
 func _ready() -> void:
+	add_to_group("cat")   # cat vision lights other cats up (cat_vision.gd)
 	tag = Label3D.new()
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	tag.pixel_size = 0.0011
