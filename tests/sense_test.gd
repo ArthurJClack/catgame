@@ -1,7 +1,7 @@
 extends SceneTree
 ## cat sense (cat_sense.gd) + the puzzle tally page: on the farm, crouching (real ctrl press) and
 ## keeping still makes unsolved puzzles nearby shimmer; walking kills it; a solved puzzle stops
-## showing; the pause menu lists x / 7 puzzles. `-- out/dir` saves a screenshot of the motes.
+## showing; the pause menu lists x / N puzzles. `-- out/dir` saves a screenshot of the motes.
 ##   xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/sense_test.gd
 
 var bad := 0
@@ -95,11 +95,11 @@ func _run() -> void:
 	await _game(3)
 	var found := false
 	for b in menu.find_children("*", "Button", true, false):
-		if (b as Button).text == "cat puzzles (2 / 7)":
+		if (b as Button).text == "cat puzzles (2 / %d)" % Puzzles.LIST.size():
 			found = true
 			(b as Button).pressed.emit()
 	await _game(3)
-	_ok(found, "pause menu: cat puzzles (2 / 7)")
+	_ok(found, "pause menu: cat puzzles (2 / %d)" % Puzzles.LIST.size())
 	_ok(menu.page == "puzzles", "the puzzle page opens")
 	var names := []
 	for l in menu.find_children("*", "Label", true, false):

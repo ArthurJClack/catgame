@@ -498,7 +498,7 @@ func _page_controls() -> void:
 	pad.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	pad.custom_minimum_size.x = PANEL_W - 30
 	pad.add_theme_font_size_override("font_size", 13)
-	pad.text = "left stick move (tilt = speed), right stick look, L3 run / gallop, A hop (tap) / leap + pounce (hold), B dodge, X scratch / drop, Y meow, RT swat, LT grab, RB crouch / sneak, R3 lock on (rat pit), d-pad left first / third person, start = this menu"
+	pad.text = "left stick move (tilt = speed), right stick look, L3 run / gallop, A hop (tap) / leap + pounce (hold), B dodge, X scratch / drop, Y meow, RT swat, LT grab, RB crouch / sneak, LB cat vision (hold), R3 lock on (rat pit), d-pad left first / third person, start = this menu"
 	_scroll_box.add_child(pad)
 	_section("other keys")
 	var other := Label.new()

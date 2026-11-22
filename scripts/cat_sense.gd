@@ -65,6 +65,8 @@ func open_points() -> Array:
 func sensing() -> bool:
 	if not is_instance_valid(player) or not player.bot.is_empty() and not player.bot.get("sense", false):
 		return false
+	if player.vision_held:
+		return true    # cat vision (q / LB) shows the motes too, right away
 	var spd := Vector2(player.velocity.x, player.velocity.z).length()
 	return player.crouch_amt > 0.7 and spd < STILL_SPEED and player.is_on_floor()
 
@@ -75,7 +77,7 @@ func _physics_process(dt: float) -> void:
 		_still_t += dt
 	else:
 		_still_t = 0.0
-	if _still_t >= WAIT:
+	if _still_t >= WAIT or (sensing() and player.vision_held):
 		level = minf(level + dt / RISE, 1.0)
 	else:
 		level = maxf(level - dt / FALL, 0.0)

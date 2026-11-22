@@ -22,6 +22,7 @@ const ACTIONS := [
 	["meow", "meow"],
 	["toggle_view", "first / third person"],
 	["lock_on", "lock on (rat pit)"],
+	["vision", "cat vision (hold: light up stuff worth a look)"],
 ]
 
 ## bump when the default layout changes: older saved binds are dropped so nobody keeps a
@@ -43,6 +44,7 @@ const DEFAULTS := {
 	"meow": [{"k": KEY_N}],
 	"toggle_view": [{"k": KEY_V}],
 	"lock_on": [{"k": KEY_TAB}],
+	"vision": [{"k": KEY_Q}],
 }
 
 ## keys the game keeps for itself (menus, level keys): can't be bound
@@ -172,3 +174,16 @@ static func from_dict(d: Dictionary) -> void:
 				if b.has("m"): nb.m = int(b.m)
 				arr.append(nb)
 		map[a] = arr
+	# actions added since this file was saved keep their defaults, minus any key the player
+	# already uses for something else (no double binds)
+	for a in DEFAULTS:
+		if d.has(a):
+			continue
+		var mine: Array = map[a]
+		for i in range(mine.size() - 1, -1, -1):
+			for o in map:
+				if o == a:
+					continue
+				for b in map[o]:
+					if i < mine.size() and same(b, mine[i]):
+						mine.remove_at(i)

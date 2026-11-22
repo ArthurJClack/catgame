@@ -170,7 +170,7 @@ func _build_hud() -> void:
 	help_label.add_theme_font_size_override("font_size", 15)
 	help_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	help_label.add_theme_constant_override("outline_size", 5)
-	help_label.text = "wasd move (the cat turns to run where you look) · shift run, double tap = gallop · ctrl / c sneak\nspace: tap = hop · hold = leap / pounce (aim the line, let go) · jump at trees, posts and fences holding w to climb\nmouse1 swat (hold = hook with your claws) · mouse2 / g grab · e scratch / drop · alt dodge · n meow · v first / third person\nwalk out the yard gates to travel · h hide help · esc menu (settings, coats, keys)"
+	help_label.text = "wasd move (the cat turns to run where you look) · shift run, double tap = gallop · ctrl / c sneak\nspace: tap = hop · hold = leap / pounce (aim the line, let go) · jump at trees, posts and fences holding w to climb\nmouse1 swat (hold = hook with your claws) · mouse2 / g grab · e scratch / drop · alt dodge · n meow · v first / third person · hold q cat vision\nwalk out the yard gates to travel · h hide help · esc menu (settings, coats, keys)"
 	if OS.has_feature("web"):
 		help_label.text = "click the game to grab the mouse (in a browser use c to crouch, ctrl+w closes the tab!)\n" + help_label.text.replace("ctrl / c", "c")
 		help_label.offset_top = -152
