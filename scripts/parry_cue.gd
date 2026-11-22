@@ -12,7 +12,7 @@ extends Node3D
 ##
 ## all billboards, drawn on top (no depth test) so you can read them mid fight. no-op headless.
 
-const STAR_SIZE := 0.07
+const STAR_SIZE := 0.1
 const RING_FROM := 4.5        # ring starts this many star sizes out
 const FLARE_T := 0.14         # after the hit: the star flares and fades
 

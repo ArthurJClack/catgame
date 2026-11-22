@@ -248,6 +248,12 @@ func _ptest() -> void:
 # ---------------------------------------------------------------- show (video)
 
 func _cam_setup() -> void:
+	p.set_style("block")      # the black default coat vanishes in the dark pit on video
+	var fill := OmniLight3D.new()
+	fill.omni_range = 4.0
+	fill.light_energy = 1.4
+	fill.position = Vector3(0.6, 1.4, 0.8)
+	arena.add_child(fill)
 	cam = Camera3D.new()
 	cam.fov = 55
 	arena.add_child(cam)
@@ -255,13 +261,13 @@ func _cam_setup() -> void:
 	var hud := CanvasLayer.new()
 	arena.add_child(hud)
 	caption = Label.new()
-	caption.position = Vector2(30, 24)
+	caption.position = Vector2(30, 120)
 	caption.add_theme_font_size_override("font_size", 30)
 	caption.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	caption.add_theme_constant_override("outline_size", 8)
 	hud.add_child(caption)
 	sub = Label.new()
-	sub.position = Vector2(30, 66)
+	sub.position = Vector2(30, 162)
 	sub.add_theme_font_size_override("font_size", 20)
 	sub.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	sub.add_theme_constant_override("outline_size", 6)
