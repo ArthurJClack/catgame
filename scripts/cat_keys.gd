@@ -21,7 +21,7 @@ const ACTIONS := [
 	["dash", "dodge"],
 	["meow", "meow"],
 	["toggle_view", "first / third person"],
-	["lock_on", "lock on (rat pit)"],
+	["lock_on", "lock on (rat pit / play fight)"],
 ]
 
 ## bump when the default layout changes: older saved binds are dropped so nobody keeps a

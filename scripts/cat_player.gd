@@ -435,6 +435,8 @@ var souls_hud: SoulsHud        # health + stamina bars, top left
 var dash: CatDash              # souls style dodge: dart / side leap / whirl / backstep (cat_dash.gd)
 var prev_dash := false
 var lock: CatLockOn            # souls style tab lock on (cat_lock_on.gd)
+var spar: CatSpar              # cat vs cat play fighting (cat_spar.gd): on while locked on to another cat
+var spar_dummy := false        # set before adding: this bot is the practice cat (CatSparBrain drives it)
 var prev_lock := false
 var _lock_r := -1.0             # radius being circled while strafing a lock (-1 = not circling)
 const LOCK_STRAFE := 0.8       # x trot: circling / strafing a locked target
@@ -461,7 +463,8 @@ func _ready() -> void:
 				var sc: Script = load("res://scripts/" + f)
 				if sc.get(nm) != null:
 					sc.set(nm, false)
-	add_to_group("player")
+	if not spar_dummy:
+		add_to_group("player")   # (the practice cat isn't "the player": wildlife etc look that up)
 	GameSettings.apply_player.call_deferred(self)   # sens / fov / invert / head bob (no-op for bots)
 	(func(): if bot.is_empty() or Engine.get_write_movie_path() != "": CatSfx.attach(self)).call_deferred()   # the cat's own sounds (cat_sfx.gd)
 	floor_snap_length = 0.06
@@ -503,6 +506,10 @@ func _ready() -> void:
 	lock = CatLockOn.new()
 	lock.player = self
 	add_child(lock)
+	spar = CatSpar.new()
+	spar.player = self
+	spar.dummy = spar_dummy
+	add_child(spar)
 
 	cam_pivot = Node3D.new()
 	cam_pivot.position.y = EYE_STAND
@@ -697,8 +704,8 @@ func _human_buttons(d: Dictionary) -> void:
 	_int_prev = it
 	d.drop = it and _int_drop
 	d.scratch = it and not _int_drop
-	if not combat_on():
-		d.lock_on = false
+	if not combat_on() and not (spar and spar.playmate_near()):
+		d.lock_on = false   # lock on is for the rat pit, and for play fighting other cats
 
 
 ## space / A on the ground: hop when it's let go (higher the longer it was held), or held past
@@ -764,6 +771,7 @@ func _physics_process(dt: float) -> void:
 	_sc_off_prev = step_cam_off
 	_vis_prev = global_position + _vis_off()
 	var inp := _read_input()
+	inp = spar.filter(inp, dt)     # play fighting another cat eats the paws / grab (cat_spar.gd)
 	if combat.locks_move():
 		# both fore paws are holding something: a cat can't walk, hop or dodge on its hind legs alone
 		inp = inp.duplicate()
@@ -1570,7 +1578,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.gravity = G
 	# multiplayer: hand this tick's rig inputs to the network (no-op when nobody else is here)
 	var net := get_node_or_null("/root/Net")
-	if net:
+	if net and not spar_dummy:
 		net.capture(self, dt)
 
 
@@ -1730,6 +1738,8 @@ func _orient_rig() -> void:
 	var voff := _vis_off()
 	if voff != Vector3.ZERO:
 		rig.global_position += voff
+	if spar:
+		spar.orient(rig)   # play fight poses + hit reactions (goes over the wire with the rig)
 
 
 func _orient_rig_base() -> void:
