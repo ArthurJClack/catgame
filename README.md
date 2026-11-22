@@ -24,6 +24,7 @@ boot = **title screen** (`title_screen.gd`) over the live farm while the camera 
 | v | first / third person (settings -> photo cam adds the orbit cam) |
 | tab | lock on (rat pit only) |
 | q (hold) | cat vision: puzzles (gold), prey (orange), cats (blue), loose stuff (white), things to climb (green) light up |
+| j | explore map |
 | esc / h | menu / help |
 
 pad: L3 run, A hop / leap, B dodge, X interact, Y meow, RT swat, LT grab, RB crouch, LB cat vision, R3 lock on, d-pad left view.
@@ -146,11 +147,18 @@ still describe how each system works; where they name old keys, the table wins.
   - tests: `xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/hub_test.gd` (every gate there and back). `tests/hub_show.gd` renders the tour clip, `tests/hub_map.gd` the labelled map
 
 ## the city (res://city.tscn, f4 from the farm)
-- the city street from secret (the pnw cyberpunk crpg): Pioneer Square, Seattle from real OpenStreetMap streets, footprints, heights and elevation (`data/city/pioneer_square.json`, map data (c) OpenStreetMap contributors, ODbL), built by secret's city builder (`scripts/city/city_builder.gd`, `mesh_kit.gd`, `terrain.gd`, `city_props.gd`, psx shader `psx_world.gdshader`) at full real scale, so for a cat it's enormous
-- ~90 parked Shitbox Rally cars (wagon / sedan / hatch glbs in `assets/city/cars/`, `city_cars.gd`) as static colliders: hop onto hoods + roofs, hide underneath
-- cyberpunk night on top (`city_neon.gd`): neon tubes round the shop fronts, vertical blade signs, rooftop ad boards (placeholder cat ad copy), puddles catching the neon, cables + lanterns strung across the streets, steam out of manholes, dumpsters + crates in the alleys (step stools up), rain following the camera, magenta smog sky
-- keys: r back to the start · t next spot · f5 / the farm sign back. preview: `-- --still x,y,z,tx,ty,tz` (heights above the street), `-- --tour` (clip), `-- --citytest` (one line, exit code)
-- no traffic / people here (secret's sims are tied to its own game); the json can be swapped for another bake (a tacoma district once secret has one)
+- one dense crossroads at cat scale (`scripts/city/city_block.gd`, 92 x 92 m, rebuilt small 2026-11-22; the old full size pioneer square osm map is gone). main st + cross st meet in the middle; around them: neko ramen, apartments, a laundromat, the alley, a back lot with a loading dock (nw) · the deli, apartments, the arcade, hotel neko, a parking lot with a carport, backyards with a treehouse (ne) · a bodega, the noodle bar, a hotel, a construction site (unfinished concrete floors + scaffold), a plaza with a food truck + the cat cafe (sw) · the park: climbable trees with limbs, benches, a raised pond with a cat statue fountain + stepping stones, a playground (slide, swings, climbing frame, seesaw), a gazebo (se)
+- built for a cat: window sills (26 cm), window ac units and flower boxes, awnings (fabric, climb + walk them, crates / vending machines / newspaper boxes step you up), drain pipes on the corners all the way to the roof, switchback fire escapes (ramps, landings, a drop ladder off a dumpster, a wall ladder to the roof), cornices + parapets to walk, roof clutter (ac boxes, hatch huts, water towers with ladders, billboards on climbable lattice), wooden fences with cat holes (climbable, walk the top rail), chain-link, pallets, crate stacks, an old car on blocks. crawl spaces under the loading dock, the porch deck, the gazebo and the footbridge stairs, under parked cars and dumpsters. roof to roof: gaps, planks, the WHISKR sign bridge over cross st, the footbridge over main st
+- one merged mesh per 12 m cell with one shader (`city_block.gdshader`: brick, concrete, planks, grating, glow, glass, water, asphalt, awning stripes, leaves, tiles in world space, soot + rain streaks, wet shiny street), colliders grouped per surface / climbable / cell. a dark skyline with lit windows past the edges
+- **traffic** (`city_traffic.gd`): cars (the three shitbox rally models), buses (stop at the bus shelter) and bikes on both streets, traffic lights + walk signals with countdowns on every crosswalk. cars don't stop for cats: get hit and you're bonked back onto the curb you came from (a yowl, a toss, a honk). wait for WALK or go over / under. online: nothing is sent, the lights and every car are a pure function of the shared clock (unix time, fixed 30 hz steps from a hashed spawn schedule, 90 s warm up), so everyone sees the same traffic
+- pigeons on the pavements, plaza and roofs, sparrows in the park and yards (`wildlife.gd` birds with `ground_cb` / `perch_list` / `pigeon`): they flush up to ledges, wires, lamps and branches when you get close. rats in the alleys, dumpsters, the loading dock, construction site and park come from the hunting update (`hunt_prey.gd`, spawned only if it's there)
+- the warm vent puzzle sits on the s main st sidewalk in front of the noodle bar. parked cars along both curbs + in the lot (`city_cars.gd`)
+- keys: j map · r back to the start · t next spot · f5 / the farm sign back. preview: `-- --still x,y,z,tx,ty,tz`, `-- --tour` (83 s camera flythrough), `-- --citytest` (walks, gets bonked, checks it all, one line + exit code), `-- --mapshot out.png`
+
+## explore map (every level)
+- **j** (rebindable, pad back button, or pause menu -> map) opens a map of the level you're in that fills in as you explore (`explore_map.gd`, autoload `ExploreMap`). shows the cat (arrow), place names you've seen, puzzles you've found (gold = solved) and the ways out. the picture is a top down shot of the live level taken the first time you open it, the fog is a byte per cell on top (a bit more reveal from up high)
+- a level can give its size + place names with `map_info()` on its root (the city does), otherwise the map frames the level's meshes
+- saved per level in `Save.data.explore[scene_path] = {v, rect, cell, w, h, fog (base64)}`; `ExploreMap.merge(path, entry)` folds another copy in (max per cell) for world sync, `revealed` fires as it fills. test: `--script res://tests/explore_map_test.gd` (xvfb)
 
 ## forest (res://forest.tscn)
 walk out the gap in the west yard fence (or f6 from the main map). f5 / the gate behind you goes back.
