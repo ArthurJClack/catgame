@@ -275,28 +275,6 @@ func my_id() -> int:
 	return int(transport.my_id) if transport else 0
 
 
-## who runs the shared world bits (prey) in my level: the lobby host when they're here, else the
-## lowest player id in the level. a dedicated server only relays and never loads a level, so it
-## is never it. offline = me.
-func authority_here() -> int:
-	var me := my_id()
-	if transport == null:
-		return me
-	var here := _scene_path()
-	if has_method("host_id"):
-		var h := int(call("host_id"))
-		if h == me:
-			return me
-		if peers.has(h) and (peers[h] as NetPeer).hello_seen and (peers[h] as NetPeer).scene == here:
-			return h
-	var best := me
-	for id in peers:
-		var p: NetPeer = peers[id]
-		if p.hello_seen and p.scene == here and int(id) < best:
-			best = int(id)
-	return best
-
-
 # ------------------------------------------------------------------ sending
 
 ## called by CatPlayer at the end of every physics tick, after it has set up its rig
