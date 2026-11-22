@@ -304,7 +304,11 @@ func pre(dt: float) -> void:
 				wi = i
 		act("pawshake", wi)
 		return
-	if not _rest and still_t > _sit_at and rig.balance < 0.3 and rig._bal_auto < 0.5 and exertion < 0.6:
+	# (balancing along a beam it doesn't sit, but perched on a post / box / fence top it does,
+	# and soon: a cat up on something small settles into a sit rather than standing bunched)
+	var perched: bool = CatPerch.perch and rig.perch.w > 0.5
+	var sit_wait := minf(_sit_at, 2.5 + 0.2 * _sit_at) if perched and rig.perch.bunch > 0.3 else _sit_at
+	if not _rest and still_t > sit_wait and rig.balance < 0.3 and (rig._bal_auto < 0.5 or perched) and exertion < 0.6:
 		_sit_at = randf_range(7.0, 12.0)
 		act("sit")
 		_next_act = randf_range(1.5, 3.0)

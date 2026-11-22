@@ -408,6 +408,9 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				_st_t[i] = 0.0
 				touched[i] = true
 			elif i < 2 or not on_floor:
+				# (landing on a post / rail: a fore paw that would come down past its edge goes on it)
+				if on_floor and rig != null and rig.get("perch") != null:
+					p = rig.perch.land_spot(i, p, xf, homes)
 				pos[i] = _ground(p, xf.origin.y, i)
 				mode[i] = PLANTED
 				_st_t[i] = 0.0
@@ -450,7 +453,7 @@ func update(dt: float, xf: Transform3D, vel: Vector3, yaw_rate: float, homes: Ar
 				st_s[i] = 0.5
 				# standing: settle paws that ended up away from their spot, one at a time
 				# (a diagonal pair at once when the body turned a lot)
-				if e > 0.042 or stretch[i] > 0.97:
+				if e > 0.042 or stretch[i] > 0.97 or (rig != null and rig.get("perch") != null and rig.perch.outside(pos[i], xf)):
 					_idle_t[i] += dt
 					if _idle_t[i] > 0.1 and e > worst_err:
 						worst_err = e

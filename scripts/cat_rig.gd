@@ -282,6 +282,7 @@ var _lean := 0.0
 var _hear_age := 9.0
 ## the living layer: breathing, loose skin, whiskers, ears, pupils, idle acts, startle (cat_soma.gd)
 var soma := CatSoma.new()
+var perch := CatPerch.new()     # fitting the paws onto small / narrow tops (cat_perch.gd)
 var chin: MeshInstance3D
 var whiskers := []   # [node, rest transform, root point, side] per whisker
 
@@ -857,6 +858,7 @@ func _setup_gait() -> void:
 	_loaf_s = loaf
 	add_to_group("cat_ears")
 	gait.rig = self
+	perch.rig = self
 	soma.setup(self)
 	gait.max_stance = MAX_STANCE * 0.74
 	gait.max_stance_gallop = MAX_STANCE * 0.78
@@ -998,6 +1000,7 @@ func animate(dt: float) -> void:
 	_ipitch += _ipitch_v * dt
 	_listen(dt)
 	_check_narrow(dt, gx.origin, gb)
+	perch.update(dt, Transform3D(gb, gx.origin), on_floor, speed_s, climb > 0.05 or clamber > 0.05 or slide > 0.05 or not use_planting)
 
 	# ---------- gait timing (real cat numbers, see cat_gait.gd) ----------
 	gait.plan(speed_s, dt)
@@ -1043,6 +1046,8 @@ func animate(dt: float) -> void:
 			home.z = lerpf(home.z, 0.07 * pelvis_z / 0.095, loaf_h)
 			home.z += rear * 0.02
 		homes.append(yb * home)
+	# on a small top (post, rail, box, branch): the paws bunch onto it, toes over the edges
+	perch.fit(homes)
 	var all_free := (not on_floor) or climb > 0.02 or clamber > 0.02 or slide > (0.5 if slide_out else 0.02) or not use_planting
 	var want_free := [all_free, all_free, all_free, all_free]
 	if paw_free:
@@ -1289,7 +1294,7 @@ func animate(dt: float) -> void:
 			_groll[h] = LowPoly.damp(_groll[h], float(groll_t[h]) * plantw, 10.0, dt)
 	# lean over the paws that are carrying the weight
 	_cx = LowPoly.damp(_cx, (cx_sum / cx_w if cx_w > 0.01 else 0.0) * 0.45 * plantw, 9.0, dt)
-	_bal_s = LowPoly.damp(_bal_s, maxf(balance, _bal_auto) * plantw, 4.0, dt)
+	_bal_s = LowPoly.damp(_bal_s, maxf(maxf(balance, _bal_auto), perch.w) * plantw, 4.0, dt)
 	# standing around: the weight wanders from side to side
 	var still_w := smoothstep(1.0, 3.0, _still_t) * (1.0 if idle_life else 0.0) * (1.0 - _sit_s) * (1.0 - _loaf_s)
 	var idle_x := still_w * (sin(_t * 0.41) * 0.005 + sin(_t * 0.97 + 1.3) * 0.002)
@@ -1320,17 +1325,26 @@ func animate(dt: float) -> void:
 	var air_flex := (0.26 * _launch - 0.2 * (1.0 - smoothstep(-0.5, 0.3, rise)) * (1.0 - _launch)) * _air_w * nc
 	# landing rounds the back
 	var arch := clampf((_land_f + _land) * 2.2, 0.0, 0.3)
+	# perched with the paws bunched up: the back humps up between them
+	var perch_sq := perch.squeeze * perch.w * plantw
+	var perch_st := perch_sq * (1.0 - sit_h) * (1.0 - loaf_h)
+	arch = maxf(arch, perch_st * 0.95)
+	# sitting up there: the rump goes on the top (not hanging off behind it), the body more upright
+	var perch_sit := perch.bunch * perch.w * plantw * sit_f * (1.0 - loaf_h)
 	# rearing up rotates the spine about the hips (scratching, hanging off a ledge)
 	var pull_e := smoothstep(0.3, 1.0, clamber_pull)
 	var ra := rear * 1.02 + clamber * lerpf(1.3, 0.0, pull_e)
 	var hz := pelvis_z
 	var base_y := BODY_H - crouch * 0.085 - charge * 0.03 - sit_h * 0.075 + gal_bob * (1.0 - _air_w) - stretch * 0.02 - climb * lerpf(0.07, 0.145, climb_splay) - slide * (1.0 - climb) * 0.13
-	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y + soma.dip
+	base_y += (cdy + pdy) * 0.5 + (_fgy + _hgy) * 0.5 + _iner.y + soma.dip - perch_st * 0.05
 	base_y = lerpf(base_y, BODY_H * 0.4 + (_fgy + _hgy) * 0.5, (loaf_h + loaf_f) * 0.5)
 	pivot.position.y = base_y + hz * sin(ra)
 	pivot.position.z = -sit_h * 0.035 + hz * (1.0 - cos(ra)) - clamber * (1.0 - pull_e) * 0.15 + stretch * 0.03 + _iner.z + soma.zoff
 	pivot.rotation.x = air_pitch + sit_h * 0.62 - charge * 0.05 + gait_pitch * (1.0 - sit_h) - stretch * 0.36 - pin * 0.24 + ra + _ipitch + (loaf_h - loaf_f) * 0.22 + soma.pitch
-	pivot.position.x = _cx + _iner.x + idle_x
+	pivot.position.x = _cx + _iner.x + idle_x + clampf(perch.cx, -0.04, 0.04) * perch.w * 0.6
+	# (the weight goes over the top it's on, not out past its edge)
+	pivot.position.z += clampf(perch.cz, -0.05, 0.05) * perch.bunch * 0.5 - perch_sit * 0.055
+	pivot.rotation.x += perch_sit * 0.22
 	pivot.rotation.y = yaw_off
 	# lean into turns at speed
 	_lean = LowPoly.damp(_lean, clampf(_yaw_rate * speed_s * 0.02, -0.28, 0.28) * (1.0 - _air_w) * nc, 6.0, dt)
@@ -2368,6 +2382,14 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 	var stalk := PackedFloat32Array([-0.12, 0.035, 0.32, 2.8, 0.0])
 	var sitp := PackedFloat32Array([-1.1, 0.16, 0.05, 1.0, 0.22])
 	var loafp := PackedFloat32Array([-0.5, 0.05, 0.03, 0.8, 0.27])
+	# perched on something small there's nothing to wrap the tail round: it hangs straight
+	# down off the top (the weight below the perch steadies the cat), swaying a little
+	if perch.w > 0.01:
+		var hang_s := PackedFloat32Array([-0.9, 0.0, 0.04, 0.6, 0.0])
+		var hang_l := PackedFloat32Array([-0.6, 0.02, 0.04, 0.6, 0.0])
+		for k in 5:
+			sitp[k] = lerpf(sitp[k], hang_s[k], perch.w)
+			loafp[k] = lerpf(loafp[k], hang_l[k], perch.w)
 	# climbing: hangs down the wall off the rump, curving back in toward it, swinging slowly
 	var climbp := PackedFloat32Array([0.32, -0.06, 0.07, 0.9, 0.0])
 	var rearp := PackedFloat32Array([-0.95, 0.05, 0.08, 1.2, 0.0])
@@ -2462,7 +2484,8 @@ func _update_tail(dt: float, ww: float, wt: float, wg: float, move_amt: float) -
 		var dir := pb * Vector3(sin(y) * cos(a), sin(a), cos(y) * cos(a))
 		var np := p + dir * TAIL_SEG
 		# the tail lies on the floor, it does not go through it
-		if tail_floor and np.y < floor_y:
+		# (past the edge of a perch there's no floor: it hangs down off it)
+		if tail_floor and np.y < floor_y and perch.over(np.x, np.z):
 			np.y = floor_y
 			np = p + (np - p).normalized() * TAIL_SEG
 		elif (climb > 0.5 or slide > 0.5) and np.y < 0.014:
