@@ -570,7 +570,7 @@ func _send_solved(id: String) -> void:
 
 # ---------------------------------------------------------------- receive
 
-const HIT_OK := ["take_hit", "stun", "pin_hit", "play_tag"]
+const HIT_OK := ["take_hit", "stun", "pin_hit", "play_tag", "play_got_one"]
 
 
 func on_packet(from: int, data: PackedByteArray) -> void:

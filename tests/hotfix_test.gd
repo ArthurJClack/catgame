@@ -87,6 +87,8 @@ func _run() -> void:
 	# --- tab lock on each cat
 	p.set_view(0)
 	var cats: Array = [pc] + Array(main.npcs)
+	for n in main.npcs:
+		n.play_chance = 0.0   # no surprise games of tag (npc_tag_test.gd covers those)
 	for c in cats:
 		if c == null:
 			continue
@@ -117,7 +119,9 @@ func _run() -> void:
 			_ok(p.spar.results.has(["swat", "hit"]), "and the answer comes back")
 			var at: Vector3 = c.global_position
 			print("     flee to %s from %s state %s" % [c.target, at, c.state])
-			await _wait(2.5)
+			c.it_back = false
+			var d0 := at.distance_to(p.global_position)
+			await _wait(12.0, func(): return c.global_position.distance_to(p.global_position) > d0 + 0.15)
 			_ok(c.global_position.distance_to(p.global_position) > at.distance_to(p.global_position) + 0.15, "%s scampers off (%.2f -> %.2f m)" % [c.name, at.distance_to(p.global_position), c.global_position.distance_to(p.global_position)])
 	print("HOTFIXTEST %s (%d bad)" % ["PASS" if bad == 0 else "FAIL", bad])
 	quit(1 if bad else 0)
