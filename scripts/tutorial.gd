@@ -27,7 +27,7 @@ const BAG := Vector3(1.75, 0.0, -3.9)   # the treat bag's cabinet (puzzles.gd kn
 const STEPS := [
 	["move", "{forward} {left} {back} {right}  to walk around", "left stick to walk around"],
 	["look", "move the mouse to look", "right stick to look"],
-	["sense", "hold {crouch} and keep still: the cat notices things worth a look. go and see", "hold RB and keep still: the cat notices things worth a look. go and see"],
+	["sense", "hold {vision} for cat vision: puzzles, prey and things to climb light up. go and see", "hold LB for cat vision: puzzles, prey and things to climb light up. go and see"],
 	["hop", "tap {jump} to hop", "tap A to hop"],
 	["pounce", "hold {jump}: the cat crouches and shows where it'll land. let go to leap there (onto prey = a pounce)", "hold A: aim where to land, let go to leap (onto prey = a pounce)"],
 	["swat", "{swat} swat (hold it to hook things with your claws)", "RT swat (hold to hook with your claws)"],
@@ -329,7 +329,7 @@ func _check(dt: float) -> bool:
 			return p.scratching
 		"sense":
 			var z = main.get_node_or_null("Puzzles") if main else null
-			return z != null and z.sense != null and z.sense.level >= 0.95
+			return (p.vision != null and p.vision.level >= 0.95) or (z != null and z.sense != null and z.sense.level >= 0.95)
 		"climb":
 			return p.climbing
 		"swat":

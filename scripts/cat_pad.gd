@@ -12,6 +12,7 @@ extends RefCounted
 ##   LT           grab / hold in your mouth
 ##   RB (hold)    crouch / sneak
 ##   R3 (click)   lock on (rat pit only)
+##   LB (hold)    cat vision: lights up puzzles, prey, cats, things to climb or knock off
 ##   d-pad left   first / third person
 ## deadzones are radial with the range rescaled past them, so the slowest creep is right at the edge
 ## of the deadzone instead of jumping to 20 percent speed.
@@ -186,6 +187,7 @@ static func read() -> Dictionary:
 		"swat": trigger(true),
 		"grab": trigger(false),
 		"lock_on": btn(JOY_BUTTON_RIGHT_STICK),
+		"vision": btn(JOY_BUTTON_LEFT_SHOULDER),
 	}
 	for k in d:
 		if typeof(d[k]) == TYPE_BOOL and d[k]:

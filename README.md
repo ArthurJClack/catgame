@@ -23,11 +23,12 @@ boot = **title screen** (`title_screen.gd`) over the live farm while the camera 
 | n | meow |
 | v | first / third person (settings -> photo cam adds the orbit cam) |
 | tab | lock on (rat pit only) |
+| q (hold) | cat vision: puzzles (gold), prey (orange), cats (blue), loose stuff (white), things to climb (green) light up |
 | esc / h | menu / help |
 
-pad: L3 run, A hop / leap, B dodge, X interact, Y meow, RT swat, LT grab, RB crouch, R3 lock on, d-pad left view.
+pad: L3 run, A hop / leap, B dodge, X interact, Y meow, RT swat, LT grab, RB crouch, LB cat vision, R3 lock on, d-pad left view.
 lock on, rakes and the health bar only exist in the rat pit (`player.combat_zone`, set by
-arena_main; bots always get them). removed: q / mouse3 aim leap (hold space does it), x / caps lock walk
+arena_main; bots always get them). holding space shows a jump bar under the crosshair: hop height, then leap distance (`CatPlayer.jump_meter()`). removed: q / mouse3 aim leap (hold space does it), x / caps lock walk
 (crouch sneaks), separate left / right paw buttons, d-pad walk / drop. 1-9 coats, f4 / f6 / f7 / f8 / f10
 level jumps and t teleports are dev only (`DevKeys`, off in release exports): coats are in settings.
 test: `--script res://tests/controls_test.gd` (xvfb). the notes below are the detailed history and
