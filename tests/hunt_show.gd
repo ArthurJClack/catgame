@@ -119,6 +119,10 @@ func _run() -> void:
 	main.hud.visible = false
 	p = main.player
 	p.bot = bot
+	# the fox likes to come and watch the cat, and scares the mice off mid stalk: off camera today
+	for c in main.critters:
+		if is_instance_valid(c) and str(c.get("kind")) == "fox":
+			c.queue_free()
 	p.set_view(1)
 	cam = Camera3D.new()
 	cam.fov = 55
