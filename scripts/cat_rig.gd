@@ -39,6 +39,8 @@ var rear := 0.0          # up on the hind legs (scratching, peeking)
 var kick_paws := [Vector3.ZERO, Vector3.ZERO] # wall kick: where the hind paws press on the wall (world)
 var kick_paw_w := 0.0    # 0..1 hind paws held there (legs extend as the body leaves the wall)
 var kick_w := 0.0        # 0..1 in the wall kick pose (tail tucked down the spine line, off the wall)
+var wall_paws := [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO] # wall run / kick off a run: paw spots on the face (world)
+var wall_paw_w := [0.0, 0.0, 0.0, 0.0]   # 0..1 each paw held on its spot (cat_wallrun.gd)
 var scratch := 0.0       # raking claws down a vertical surface in front
 var scratch_dist := 0.16 # distance from the rig root (-z) to the scratched surface
 var climb := 0.0         # claws in, going up a vertical surface. owner rotates the rig onto the wall
@@ -1608,6 +1610,10 @@ func animate(dt: float) -> void:
 				afw = pc + Basis(Vector3(0, 0, 1), troll) * (afw - pc)
 			foot = foot.lerp(afw, aw)
 			prot = lerpf(prot, arot, aw)
+		if wall_paw_w[i] > 0.0:
+			# wall run: paw planted on the face, pad flat on it (the hind ones toes down, pushing)
+			foot = foot.lerp(to_local(wall_paws[i]), wall_paw_w[i])
+			prot = lerpf(prot, 0.35 if front else -0.9, wall_paw_w[i])
 		if not front and kick_paw_w > 0.0:
 			# wall kick: hind paws flat on the wall behind, toes down, until the legs straighten off it
 			foot = foot.lerp(to_local(kick_paws[0 if side < 0.0 else 1]), kick_paw_w)

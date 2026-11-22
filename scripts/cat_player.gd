@@ -292,6 +292,7 @@ var _spots_t := 0.0            # paw spots stay put this long after touch down (
 # low ledge hop / curb step up / round a lip / push off) is cat_climb.gd. these flags are
 # read only views of it (the rig, paws, sounds, tests read them); setting one false resets it
 var climber: CatClimb
+var wallrun: CatWallRun   # short runs along a wall out of a jump + the kick off them (cat_wallrun.gd)
 var climbing: bool:
 	get: return climber != null and climber.is_climbing()
 	set(v):
@@ -360,6 +361,7 @@ var kick_dir := Vector3.ZERO      # where the push goes: the camera / steering d
 var _kick_aim := Vector3.FORWARD  # camera relative steering (or the look direction) this tick
 var _kick_wall_pt := Vector3.ZERO
 var _kick_paws_set := 0
+var _kick_run := false            # this kick came off a wall run (its own pose: cat_wallrun.gd)
 const KICK_LEAN := 0.32           # body tipped back toward the wall so the hind paws reach it (rad)
 # clip guard: the capsule is only as wide as the cat, so its head and rump stick out
 # front and back. the visible body slides back along its spine when either end would go into something
@@ -454,6 +456,7 @@ var _marks: Array[Node3D] = []
 
 func _ready() -> void:
 	climber = CatClimb.new(self)
+	wallrun = CatWallRun.new(self)
 	# debugging: CAT_OFF=soft_air,wall_brake turns named biomechanics switches off in any scene / test
 	if OS.has_environment("CAT_OFF"):
 		for nm in OS.get_environment("CAT_OFF").split(","):
@@ -817,7 +820,7 @@ func _physics_process(dt: float) -> void:
 		# body only comes round once the look goes past what a neck can do
 		if view_mode == 2:
 			pitch = lerpf(pitch, orb_pitch * 0.5, clampf(dt * 6.0, 0, 1))
-		var busy := climbing or clambering or scratching or mantling or dash.busy() or kick_plant_t > 0.0 or _kick_turn_t > 0.0 or combat.locks_move()
+		var busy := climbing or clambering or scratching or mantling or dash.busy() or kick_plant_t > 0.0 or _kick_turn_t > 0.0 or wallrun.posing() or combat.locks_move()
 		var face_look: bool = charging or clawing or combat.any_down() or inp.get("scratch", false) or inp.get("aim", false)
 		_turn_factor = 1.0
 		_brake_ask = false
@@ -867,7 +870,7 @@ func _physics_process(dt: float) -> void:
 		var cap := combat.turn_cap() * dt
 		yaw = prev_yaw + clampf(wrapf(yaw - prev_yaw, -PI, PI), -cap, cap)
 	_kick_turn_t = maxf(_kick_turn_t - dt, 0.0)
-	if _kick_turn_t > 0.0 and Vector2(velocity.x, velocity.z).length() > 0.5:
+	if _kick_turn_t > 0.0 and Vector2(velocity.x, velocity.z).length() > 0.5 and not wallrun.posing():
 		# coming off a wall kick the body twists round to where it's flying, however the keys are held
 		var ky := atan2(-velocity.x, -velocity.z)
 		yaw += clampf(wrapf(ky - yaw, -PI, PI), -16.0 * dt, 16.0 * dt)
@@ -989,6 +992,14 @@ func _physics_process(dt: float) -> void:
 		_kick_plant_step(dt, wish_dir)
 		_post(dt, inp)
 		return
+	if wallrun.active():
+		wallrun.step(dt, wish_dir, jump_pressed)
+		_post(dt, inp)
+		return
+	if wallrun.pushing():
+		wallrun.push_step(dt)
+		_post(dt, inp)
+		return
 
 	var grounded := is_on_floor() and not _hopped_now
 	_hopped_now = false
@@ -998,6 +1009,7 @@ func _physics_process(dt: float) -> void:
 		air_time = 0.0
 		ground_time += dt
 		kicks_left = MAX_KICKS
+		wallrun.reset_air()
 		_air_left = AIR_BUDGET
 		_launch_hv = Vector3.ZERO
 		jumped_this_air = false
@@ -1361,6 +1373,11 @@ func _physics_process(dt: float) -> void:
 	_slide_contact()
 	_push_props()
 
+	# jumped at a wall at an angle with speed: a step or two along it (cat_wallrun.gd)
+	if wallrun.try_start(hv, wish_dir, wish_len):
+		_post(dt, inp)
+		return
+
 	if wall_time < 0.03:
 		var into := -wall_normal
 		var pushing := wish_dir.dot(into) > 0.4 or (leap_lock and Vector3(velocity.x, 0, velocity.z).dot(into) > -0.2)
@@ -1435,6 +1452,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	# wall kick: turns its back to the wall and rears up on the hind legs during the plant,
 	# then stays reared while the hind legs push it off
 	w_kick = LowPoly.damp(w_kick, 1.0 if kick_plant_t > 0.0 else 0.0, 90.0 if kick_plant_t > 0.0 else 7.0, dt)
+	if _kick_run and wallrun.posing():
+		w_kick = 0.0   # kicking off a run: the run pose coils and twists instead of rearing up
 	w_face = maxf(w_climb, maxf(w_clamber, w_scratch))
 
 	# eye: stands up when scratching, peeks over the edge when hanging
@@ -1475,6 +1494,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	_dodge_land_t += dt
 	var dland := smoothstep(0.0, 0.05, _dodge_land_t) * (1.0 - smoothstep(0.08, 0.3, _dodge_land_t))
 	crouch_t = maxf(crouch_t, 0.6 * dland)
+	crouch_t = maxf(crouch_t, wallrun.coil())
 	rig.dodge = move_toward(rig.dodge, 1.0 if dash.state == CatDash.AIR else 0.0, (16.0 if dash.state == CatDash.AIR else 7.0) * dt)
 	if dash.state == CatDash.AIR:
 		rig.dodge_kind = dash.kind
@@ -1520,7 +1540,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 		rig.soma.exertion = maxf(rig.soma.exertion, 0.9)   # ran the bar dry: the cat is visibly blown
 	rig.climb = w_climb
 	rig.carried = 1.0 if climber.active() else move_toward(rig.carried, 0.0, dt * 2.0)
-	rig.on_wall = climber.active() and climber.kind != "step"
+	rig.on_wall = (climber.active() and climber.kind != "step") or wallrun.active() or (wallrun.posing() and kick_plant_t > 0.0)
 	rig.kick_paw_w = clampf(w_kick * 1.6 - 0.25, 0.0, 1.0)
 	rig.kick_w = w_kick
 	rig.clamber = w_clamber
@@ -1650,7 +1670,7 @@ func _lift_tick(dt: float) -> void:
 	# stopped. after that the climb moves it directly)
 	_climb_age = _climb_age + dt if climbing else 0.0
 	var grab: bool = climbing and _climb_age < 0.22
-	var busy: bool = not soft_air or (climbing and not grab) or clambering or wall_sliding or sliding
+	var busy: bool = not soft_air or (climbing and not grab) or clambering or wall_sliding or sliding or wallrun.posing()   # (the wall run poses the body itself)
 	# sideways
 	var hb := global_position + _soft_off
 	hb.y = 0.0
@@ -1658,6 +1678,8 @@ func _lift_tick(dt: float) -> void:
 	_pounce_hold = 0.3 if (pounce_air or dash.state == CatDash.AIR) else maxf(_pounce_hold - dt, 0.0)
 	var h_off: bool = busy or _pounce_hold > 0.0 or not _lag_base.is_finite() or hb.distance_to(_lag_base) > 0.25
 	var hvc := Vector3.ZERO if h_off else (hb - _lag_base) / dt
+	if h_off and wallrun.posing() and _lag_base.is_finite() and hb.distance_to(_lag_base) < 0.25:
+		hvc = (hb - _lag_base) / dt   # (keep the body's speed in step, so it carries on smoothly after)
 	_lag_base = hb
 	if h_off:
 		_lag = _lag.move_toward(Vector3.ZERO, (6.0 if _pounce_hold > 0.0 else 1.5) * dt)
@@ -1681,6 +1703,8 @@ func _lift_tick(dt: float) -> void:
 	var base := global_position.y + _soft_off.y
 	var off_now: bool = busy or is_nan(_lift_base) or absf(base - _lift_base) > 0.15
 	var vc := 0.0 if off_now else (base - _lift_base) / dt
+	if off_now and wallrun.posing() and not is_nan(_lift_base) and absf(base - _lift_base) < 0.15:
+		vc = (base - _lift_base) / dt
 	_lift_base = base
 	if off_now:
 		_lift = move_toward(_lift, 0.0, 1.5 * dt)
@@ -1734,6 +1758,9 @@ func _orient_rig() -> void:
 
 func _orient_rig_base() -> void:
 	_clip_guard()
+	if wallrun.posing() and w_face < 0.002:
+		wallrun.orient(get_physics_process_delta_time())
+		return
 	if w_slide > 0.002 and w_face < 0.002 and w_kick < 0.002:
 		_orient_slide()
 		return
@@ -2227,6 +2254,11 @@ func _try_wall_kick(wish_dir: Vector3) -> void:
 	if not stamina.spend(CatStamina.WALL_KICK):
 		return
 	var same_wall := last_kick_normal != Vector3.ZERO and n.dot(last_kick_normal) > 0.9
+	var from_run := wallrun.kick_ready()
+	if from_run:
+		n = wallrun.n
+		same_wall = false   # the run was the way onto this wall, not a kick off it
+	_kick_run = from_run
 	var hv := Vector3(velocity.x, 0, velocity.z)
 	var into := hv.dot(n)
 	if into < 0.0:
@@ -2237,15 +2269,20 @@ func _try_wall_kick(wish_dir: Vector3) -> void:
 	_kick_hv = hv
 	_kick_same = same_wall
 	kick_n = n
-	kick_plant_t = KICK_PLANT
+	kick_plant_t = CatWallRun.COIL if from_run else KICK_PLANT
 	_snug_to_wall(n)
 	_kick_wall_pt = global_position - n * RADIUS
 	_kick_paws_set = 0
 	kick_dir = _kick_heading(n)
 	# the turn to put its back to the wall happens on the way in: by the time the paws
 	# touch it's done (blending it would sweep the rump and tail through the wall)
-	w_kick = 1.0
-	velocity = hv * 0.25 - n * 0.4 + Vector3.UP * clampf(velocity.y * 0.3, -0.4, 0.6)
+	w_kick = 0.0 if from_run else 1.0
+	if from_run:
+		wallrun.begin_kick()   # stays in its run pose, paws planted, coils onto them
+	if from_run:
+		velocity = hv - n * 0.4 + Vector3.UP * clampf(velocity.y, -1.0, 2.0)   # the plant soaks the run up over the coil
+	else:
+		velocity = hv * 0.25 - n * 0.4 + Vector3.UP * clampf(velocity.y * 0.3, -0.4, 0.6)
 	kicks_left -= 1
 	last_kick_normal = n
 	scramble_t = 0.0
@@ -2274,7 +2311,11 @@ func _kick_plant_step(dt: float, wish_dir: Vector3) -> void:
 	# along the wall the run up bleeds off into the legs, falling stops, a slight press keeps contact
 	var along := Vector3(velocity.x, 0, velocity.z)
 	along -= kick_n * along.dot(kick_n)
-	velocity = along * maxf(1.0 - 18.0 * dt, 0.0) - kick_n * 0.4 + Vector3.UP * move_toward(velocity.y, 0.0, 12.0 * dt)
+	var soak := 18.0
+	if _kick_run:
+		# off a run the paws were already on the wall: the soak builds up instead of hitting at once
+		soak = 16.0 * clampf((CatWallRun.COIL - kick_plant_t) / 0.05, 0.0, 1.0)
+	velocity = along * maxf(1.0 - soak * dt, 0.0) - kick_n * 0.4 + Vector3.UP * move_toward(velocity.y, 0.0, (soak / 18.0 * 12.0) * dt)
 	move_and_slide()
 	_track_walls()
 	if kick_plant_t <= 0.0 or wall_time > 0.06:
@@ -2283,10 +2324,11 @@ func _kick_plant_step(dt: float, wish_dir: Vector3) -> void:
 
 func _kick_release(_wish_dir: Vector3) -> void:
 	kick_plant_t = 0.0
+	var v_coil := velocity
 	kick_dir = _kick_heading(kick_n)
 	# the hind legs drive the body out along the kick direction; a bit of the run up along
 	# the wall survives in the same direction
-	var carry := maxf(_kick_hv.dot(kick_dir), 0.0) * 0.4
+	var carry := maxf(_kick_hv.dot(kick_dir), 0.0) * (CatWallRun.KICK_CARRY if _kick_run else 0.4)
 	var hv := kick_dir * (KICK_OUT + 0.6 + carry)
 	velocity.x = hv.x
 	velocity.z = hv.z
@@ -2296,6 +2338,8 @@ func _kick_release(_wish_dir: Vector3) -> void:
 	rotation.y = yaw
 	_kick_turn_t = 0.15
 	jumped_this_air = true
+	if _kick_run:
+		wallrun.release_kick(v_coil)   # legs straighten over the push, body twists round to the new heading
 	cam.fov += 6.0
 
 
@@ -2303,9 +2347,15 @@ func _kick_release(_wish_dir: Vector3) -> void:
 func _kick_heading(n: Vector3) -> Vector3:
 	var d := Vector3(_kick_aim.x, 0, _kick_aim.z)
 	var dn := d.dot(n)
-	if dn < 0.3:
+	var lo := CatWallRun.KICK_OFF_MIN if _kick_run else 0.3   # off a run: a real change of direction
+	if dn < lo:
 		var t := d - n * dn
-		d = t + n * 0.3 if t.length() > 0.2 else n
+		if t.length() <= 0.2:
+			d = n
+		elif _kick_run:
+			d = t.normalized() * sqrt(1.0 - lo * lo) + n * lo
+		else:
+			d = t + n * lo
 	return d.normalized()
 
 

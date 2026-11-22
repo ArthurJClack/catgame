@@ -25,6 +25,10 @@ extends Node3D
 ##   drop     crouch = let go: falls clean to the floor, doesn't grab straight back on
 ##   kick     space with no direction = kick off the wall
 ##   corner   diagonal up past the top corner of the box: onto the top
+## wall runs (cat_wallrun.gd) on a long smooth wall (third row, face looks -z):
+##   wallrun  gallop in at 35 deg, hop: two paw steps along / up the face, drops off, lands
+##   wr_trot  same at a trot: only the one step
+##   wr_kick  space on the second step, looking away from the wall: coils, kicks off, twists round
 ##
 ## jank checked on every run (CLIMBTEST <run> ... prints them):
 ##   pop   a visible body part (head / chest / pelvis) changes speed more in one frame than a
@@ -34,8 +38,9 @@ extends Node3D
 ##   stuck a scripted move held but the cat hasn't moved 1.5 cm in a second while on a wall /
 ##         in a haul, or a haul / hop lasting over 1.5 s
 
-const RUNS := ["box", "trunk", "inside", "post", "down", "lunge", "stamina", "top", "run_up", "grab", "mantle", "step", "ceiling", "lip", "side", "drop", "kick", "corner"]
+const RUNS := ["box", "trunk", "inside", "post", "down", "lunge", "stamina", "top", "run_up", "grab", "mantle", "step", "ceiling", "lip", "side", "drop", "kick", "corner", "wallrun", "wr_trot", "wr_kick"]
 const SHOW_RUNS := ["run_up", "box", "post", "grab", "lip", "ceiling", "corner", "mantle"]
+const WR_RUNS := ["wallrun", "wr_trot", "wr_kick"]
 const PARTS := ["head", "chest", "pelvis"]
 const STOP_OK := ["ceiling", "side", "box", "inside"]   # runs where standing still against an edge is the right answer
 
@@ -70,11 +75,16 @@ const STEP_C := Vector3(12, 0, -6)     # 0.15 m curb, 3 m deep
 const CEIL_C := Vector3(-4, 0, -6)     # 1.2 m bark wall, slab 0.16 over its top
 const LIP_C := Vector3(-8, 0, -6)      # 1.0 m bark wall, shelf on it sticking out 0.3 m
 const SIDE_C := Vector3(-12, 0, -6)    # bark wall with a smooth block sticking out to the right
+# third row (z +6): a long smooth wall to run along, face at z = WR_Z looking -z
+const WR_Z := 6.0
+const WR_START := Vector3(-5.5, 0.02, 3.6)
+const WR_ANGLE := 0.61                 # run in 35 deg off the face
 
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	show = "--show" in args
+	CatWallRun.off = "--wr-off" in args   # old behaviour, for before / after films
 	process_priority = 100
 	process_physics_priority = 100
 	var k := args.find("--dbg")
@@ -147,6 +157,11 @@ func _build() -> void:
 	_box(LIP_C + Vector3(0, 1.02, -0.15), Vector3(1.0, 0.04, 0.9), Color(0.82, 0.78, 0.72), "carpet", false)   # shelf: overhangs 0.3 m
 	_box(SIDE_C + Vector3(-0.2, 0.9, -0.3), Vector3(1.6, 1.8, 0.6), bark, "bark", false)
 	_box(SIDE_C + Vector3(0.45, 0.9, 0.2), Vector3(0.3, 1.8, 0.4), Color(0.75, 0.75, 0.78), "tile", false)   # smooth block sticking out
+	# row 3: wall run wall (smooth painted wood: no claws in it) on its own patch of floor
+	_box(Vector3(-2, -0.05, 6), Vector3(14, 0.1, 4), Color(0.4, 0.48, 0.31), "grass", false)
+	_box(Vector3(-2, 0.9, WR_Z + 0.1), Vector3(10, 1.8, 0.2), Color(0.8, 0.76, 0.68), "wood", false)
+	for k in 9:
+		_box(Vector3(-2, 0.2 + k * 0.2, WR_Z - 0.001), Vector3(10, 0.012, 0.002), Color(0.7, 0.66, 0.58), "wood", false)
 
 
 func _box(c: Vector3, s: Vector3, col: Color, surf: String, group: bool) -> StaticBody3D:
@@ -240,6 +255,8 @@ func _next() -> void:
 		player.queue_free()
 	seed(hash(r))   # same dice every time (idle life, stop picks) so a run scores the same twice
 	player = CatPlayer.new()
+	if OS.get_environment("CL_STYLE") != "":
+		player.style = OS.get_environment("CL_STYLE")   # (films: a tabby reads better on a grey wall than the black cat)
 	add_child(player)
 	if show:
 		player.set_third_person(not fp)
@@ -250,7 +267,7 @@ func _next() -> void:
 	_ph = {}
 	m = {"turn": 0.0, "prev_n": Vector3.ZERO, "max_y": 0.0, "min_y": 99.0, "off_t": -1.0, "on_t": -1.0, "lunge": false, "dist_err": 0.0, "end_climb": false,
 		"pop": 0, "pop_max": 0.0, "pop_what": "", "snap": 0, "snap_max": 0.0, "clip": 0, "clip_max": 0.0, "clip_what": "", "stuck": 0, "stuck_what": "",
-		"kick_t": 9.0, "hop_t": 9.0, "still_t": 0.0, "still_from": Vector3.INF, "move_t": 0.0, "grab_t": 9.0, "grab_v": 0.0, "regrab": false, "was_wall": false, "ev": [], "speed_after": 0.0, "vmax": 0.0}
+		"kick_t": 9.0, "wr_t": -1.0, "wr_touch": -1.0, "wr_hop": false, "wr_kicked": false, "wr_on": false, "wr_steps": 0, "wr_y0": 0.0, "wr_ymax": 0.0, "wr_kick_dir": Vector3.ZERO, "hop_t": 9.0, "still_t": 0.0, "still_from": Vector3.INF, "move_t": 0.0, "grab_t": 9.0, "grab_v": 0.0, "regrab": false, "was_wall": false, "ev": [], "speed_after": 0.0, "vmax": 0.0}
 	player.bot = {"move": Vector2.ZERO, "yaw": 0.0, "pitch": -0.1}
 	player.climb_cool = 0.0
 	player.mantling = false
@@ -288,13 +305,23 @@ func _next() -> void:
 			_cling(LIP_C, Vector3(0, 0, 1), 0.3)
 		"side":
 			_cling(SIDE_C + Vector3(-0.4, 0, 0), Vector3(0, 0, 1), 0.6)
+		"wallrun", "wr_trot", "wr_kick":
+			_stand(WR_START)
+			# heading in toward +x, WR_ANGLE off the face (forward = (-sin yaw, 0, -cos yaw))
+			var y := atan2(-cos(WR_ANGLE), -sin(WR_ANGLE))
+			player.yaw = y
+			player.orb_yaw = y
+			player.rotation.y = y
+			if r != "wr_trot":
+				player.bot["sprint"] = true
 	player.bot["yaw"] = player.yaw
 	m.prev_n = player.climb_n
 	if caption:
 		var tag := OS.get_environment("CL_TAG")
 		caption.text = (tag + "  -  " if tag != "" else "") + {"box": "round a square trunk", "trunk": "round a tree trunk", "inside": "into an inside corner", "post": "round a thin post, onto the top",
 			"run_up": "jump on, climb, top out", "grab": "grab a ledge, haul up", "lip": "round an overhanging shelf", "ceiling": "top with no headroom",
-			"corner": "over the top corner", "mantle": "onto a low box at a trot"}.get(r, r)
+			"corner": "over the top corner", "mantle": "onto a low box at a trot",
+			"wallrun": "gallop + hop at a wall at an angle", "wr_trot": "same at a trot", "wr_kick": "space on the wall: kick off, look away from it"}.get(r, r)
 
 
 func _script(r: String) -> Dictionary:
@@ -370,6 +397,29 @@ func _script(r: String) -> Dictionary:
 		"corner":
 			mv = Vector2(0.7, 0.7) if (on or t < 0.3) else Vector2.ZERO
 			done = t > 4.0
+		"wallrun", "wr_trot", "wr_kick":
+			var wr: CatWallRun = player.wallrun
+			if m.wr_t < 0.0 and wr.active():
+				m.wr_t = t
+			var gap := WR_Z - player.global_position.z
+			if not m.wr_hop and player.is_on_floor() and gap < (0.62 if r == "wr_trot" else 0.8) and t > 0.3:
+				jump = true
+				m.wr_hop = true
+			# keys held at the wall until the steps are done, then let go (no slide down it)
+			mv = Vector2(0, 1) if (m.wr_t < 0.0 or wr.active() or wr.state == CatWallRun.COIL_ST) else Vector2.ZERO
+			if m.wr_hop and m.wr_touch < 0.0 and not player.is_on_floor() and player.wall_time < 0.02:
+				m.wr_touch = t
+			var kick_now := wr.active() and wr.step_i >= 2
+			if CatWallRun.off:
+				kick_now = m.wr_touch >= 0.0 and t > m.wr_touch + 0.12   # (old build: kick a moment after touching it)
+				if m.wr_touch >= 0.0 and not m.wr_kicked:
+					mv = Vector2.ZERO
+			if r == "wr_kick" and kick_now and not m.wr_kicked:
+				jump = true
+				m.wr_kicked = true
+				# looking away from the wall, ahead: the kick goes off that way
+				player.bot["yaw"] = atan2(-cos(WR_ANGLE), sin(WR_ANGLE)) + 0.3
+			done = t > 3.2
 	return {"move": mv, "jump": jump, "crouch": crouch, "done": done}
 
 
@@ -379,8 +429,8 @@ func _physics_process(dt: float) -> void:
 	t += dt
 	var r: String = runs[ri]
 	var s := _script(r)
-	if player.climbing:
-		player.bot["yaw"] = player.orb_yaw   # bot camera turns round with the climb like a player's would
+	if player.climbing or (player.wallrun.active() and not m.wr_kicked):
+		player.bot["yaw"] = player.orb_yaw if player.climbing else player.yaw   # bot camera turns round with the climb / run like a player's would
 	player.bot["move"] = s.move
 	player.bot["jump"] = s.jump
 	player.bot["crouch"] = s.crouch
@@ -410,8 +460,20 @@ func _physics_process(dt: float) -> void:
 	m.hop_t += dt
 	if player.last_event == "hop" and player.last_event_t <= dt * 1.5:
 		m.hop_t = 0.0
-	if player.last_event == "leap off" and player.last_event_t <= dt * 1.5:
+	if (player.last_event == "leap off" or player.last_event.begins_with("wall kick")) and player.last_event_t <= dt * 1.5:
 		m.kick_t = 0.0
+	# wall run: leaving the wall counts as letting go (the landing after is the gait's business)
+	var wr_on: bool = player.wallrun.posing() and player.wallrun.state != CatWallRun.OUT
+	if wr_on and not m.wr_on:
+		m.wr_y0 = player.global_position.y
+	if wr_on:
+		m.wr_ymax = maxf(m.wr_ymax, player.global_position.y)
+		m.wr_steps = maxi(m.wr_steps, player.wallrun.step_i)
+	elif m.wr_on and m.off_t < 0.0:
+		m.off_t = t
+	if m.wr_kicked and player.kick_plant_t <= 0.0 and m.wr_kick_dir == Vector3.ZERO and not wr_on:
+		m.wr_kick_dir = Vector3(player.velocity.x, 0, player.velocity.z)
+	m.wr_on = wr_on
 	m.was_wall = on
 	if not on and player.is_on_floor() and player.global_position.y > 0.1:
 		m.speed_after = maxf(m.speed_after, Vector2(player.velocity.x, player.velocity.z).length())
@@ -446,7 +508,7 @@ func _jank_phys(dt: float, s: Dictionary, on: bool) -> void:
 		var d: Vector3 = p - _ph.p
 		var exp_d := maxf(player.velocity.length(), float(_ph.vl)) * dt
 		var extra := d.length() - exp_d
-		if extra > 0.02 and (on or _ph.on):
+		if extra > 0.02 and (on or _ph.on or player.wallrun.posing()):
 			m.snap += 1
 			m.snap_max = maxf(m.snap_max, extra)
 			if dbg == "snap":
@@ -546,6 +608,8 @@ func _process(dt: float) -> void:
 						m.pop_what = "%s %.1f m/s @%.2fs %s" % [key, dv, t, player.last_event]
 					if dbg == "pop":
 						print("  pop %s dv=%.1f lim=%.1f t=%.2f climb %s clamb %s mant %s floor %s ev %s" % [key, dv, lim, t, player.climbing, player.clambering, player.mantling, player.is_on_floor(), player.last_event])
+	if dbg == "head":
+		print("  t=%.3f root %s chest %s lag %s lift %.3f head-root %s chest-root %s look %.2f tuck %.2f yaw %.2f ev %s" % [t, rig.global_position.snapped(Vector3.ONE * 0.001), rig.chest.global_position.snapped(Vector3.ONE * 0.001), player._lag.snapped(Vector3.ONE * 0.001), player._lift, (rig.head.global_position - rig.global_position).snapped(Vector3.ONE * 0.001), (rig.chest.global_position - rig.global_position).snapped(Vector3.ONE * 0.001), rig.look_yaw, rig.head_tuck, player.yaw, player.last_event])
 	if dbg == "rig2":
 		print("  t=%.3f fgy %.3f hgy %.3f landf %.3f land %.3f piv %s pivrot %s chest %s pelv %s air %.2f cl %.2f iner %s" % [t, rig._fgy, rig._hgy, rig._land_f, rig._land, rig.pivot.position.snapped(Vector3.ONE * 0.001), rig.pivot.rotation.snapped(Vector3.ONE * 0.01), rig.chest.position.snapped(Vector3.ONE * 0.001), rig.pelvis.position.snapped(Vector3.ONE * 0.001), rig._air_w, rig.climb, str(rig._iner) if "_iner" in rig else ""])
 	if dbg == "rig":
@@ -558,6 +622,19 @@ func _process(dt: float) -> void:
 func _camera(dt: float) -> void:
 	var r: String = runs[ri]
 	var target: Vector3 = player.rig.chest.global_position
+	if r in WR_RUNS:
+		# from out in front of the wall, a little behind the run so the steps read
+		var wt: Vector3 = player.rig.chest.global_position
+		var want_w := Vector3(wt.x + 1.5, wt.y + 0.5, WR_Z - 1.75)
+		if not _cam_init or t < 0.05:
+			_cam_pos = want_w
+			_cam_look = wt
+			_cam_init = true
+		_cam_pos = _cam_pos.lerp(want_w, clampf(dt * 6.0, 0, 1))
+		_cam_look = _cam_look.lerp(wt, clampf(dt * 8.0, 0, 1))
+		cam.global_position = _cam_pos
+		cam.look_at(_cam_look, Vector3.UP)
+		return
 	var centre: Vector3 = {"box": BOX_C, "trunk": TRUNK_C, "inside": L_C + Vector3(-0.3, 0, 0.3), "post": POST_C, "corner": BOX_C, "top": BOX_C}.get(r, Vector3.INF)
 	var want: Vector3
 	if centre.is_finite():
@@ -643,6 +720,16 @@ func _report(r: String) -> void:
 		"corner":
 			ok = ep.y > 2.55 and fl
 			why = "ended at y %.2f (top 2.6), standing %s" % [ep.y, fl]
+		"wallrun", "wr_trot":
+			var want := 2 if r == "wallrun" else 1
+			var gain: float = m.wr_ymax - m.wr_y0
+			ok = m.wr_t >= 0.0 and m.wr_steps == want and gain > 0.08 and fl and ep.y < 0.05 and not m.end_climb
+			why = "ran on the wall %s, %d steps (want %d), up the face %.2f m, landed %s" % [m.wr_t >= 0.0, m.wr_steps, want, gain, fl]
+		"wr_kick":
+			var kd: Vector3 = m.wr_kick_dir
+			var off_deg := rad_to_deg(asin(clampf(kd.normalized().dot(Vector3(0, 0, -1)), -1.0, 1.0))) if kd.length() > 0.1 else 0.0
+			ok = m.wr_t >= 0.0 and m.wr_kicked and off_deg > 25.0 and kd.length() > 3.5 and ep.z < WR_Z - 1.0 and fl
+			why = "kicked off the run %s at %.1f m/s, %.0f deg off the wall, ended %.2f m out, landed %s" % [m.wr_kicked, kd.length(), off_deg, WR_Z - ep.z, fl]
 	var jank := "pop %d%s snap %d%s clip %d%s stuck %d%s" % [m.pop, (" (x%.1f %s)" % [m.pop_max, m.pop_what]) if m.pop > 0 else "", m.snap, (" (%.0f mm)" % (m.snap_max * 1000.0)) if m.snap > 0 else "", m.clip, (" (" + m.clip_what + ")") if m.clip > 0 else "", m.stuck, (" (" + m.stuck_what + ")") if m.stuck > 0 else ""]
 	var clean: bool = m.pop == 0 and m.snap == 0 and m.clip == 0 and m.stuck == 0
 	for k in jank_tot:
