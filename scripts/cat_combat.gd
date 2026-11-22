@@ -374,7 +374,8 @@ func _paw_step(i: int, dt: float, held: bool) -> void:
 		if mode[i] == NONE and age[i] >= HOLD_T:
 			var t: Dictionary = p._paw_target(p.SWAT_RANGE, 0.5)
 			# rakes are a rat pit thing: elsewhere a held paw always hooks (claw hold)
-			if not t.is_empty() and t.get("prey") != null and t.prey != p.carried and p.combat_on():
+			var play: bool = p.get("spar") != null and p.spar.play_mode() and CatSpar.pos_of(p.spar.playmate()).distance_to(p.global_position) < p.SWAT_RANGE + 0.2
+			if play or (not t.is_empty() and t.get("prey") != null and t.prey != p.carried and p.combat_on()):
 				mode[i] = RAKE
 				rake_t[i] = RAKE_EVERY   # first rake right away
 			else:
@@ -492,6 +493,8 @@ func _grip_step(dt: float) -> void:
 			grip_point = grip_target.global_position + Vector3.UP * 0.05
 		if grip_t >= GRIP_REACH_T:
 			var near: bool = valid and grip_target.global_position.distance_to(p.global_position) < GRAB_DIST + 0.16 * float(grip_target.get("s") if "s" in grip_target else 1.0)
+			if not near and p.get("spar") != null and p.spar.grab_reach():
+				near = true      # locked on to a cat: a hug tackle, paws stay down on it
 			if near:
 				p.stamina.spend(CatStamina.GRIP)
 				_slam(valid)

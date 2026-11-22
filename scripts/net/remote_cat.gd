@@ -16,6 +16,7 @@ var _started := false
 
 func _ready() -> void:
 	add_to_group("cat")   # cat vision lights other cats up (cat_vision.gd)
+	add_to_group("spar_cat")   # lock on to it and it's a play fight (cat_spar.gd)
 	tag = Label3D.new()
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	tag.pixel_size = 0.0011
@@ -60,9 +61,13 @@ func _process(dt: float) -> void:
 		return
 	rig.visible = true
 	_started = true
+	global_position = s.xf.origin   # the node follows the cat (lock on / pounce aim duck type it)
 	s.apply(rig, dt)
 	for ev in peer.due_events(rt):
-		rig.apply_life(ev)
+		if str(ev[0]) == "S":
+			CatSpar.net_in(self, ev)   # play fight strike / result / round, meant for one cat
+		else:
+			rig.apply_life(ev)
 	# name tag floats over the head, fades out with distance
 	tag.text = peer.name
 	tag.global_position = rig.global_position + Vector3.UP * 0.42

@@ -21,7 +21,7 @@ const ACTIONS := [
 	["dash", "dodge"],
 	["meow", "meow"],
 	["toggle_view", "first / third person"],
-	["lock_on", "lock on (rat pit)"],
+	["lock_on", "lock on (rat pit / play fight)"],
 	["vision", "cat vision (hold: light up stuff worth a look)"],
 ]
 

@@ -10,6 +10,7 @@ var crosshair: Control
 var hud: CanvasLayer
 var info := {}
 var npcs: Array[NpcCat] = []
+var practice_cat: CatPlayer   # play fight partner (spar_main.gd make_dummy)
 var env: Environment
 var preview_mode := false
 
@@ -51,6 +52,10 @@ func _ready() -> void:
 		add_child(n)
 		npcs.append(n)
 
+	# a tabby to play fight with: tab on it and your attacks go soft, no claws (cat_spar.gd). online, the
+	# other players' cats work the same way
+	if not "--preview" in OS.get_cmdline_user_args():
+		practice_cat = preload("res://scripts/spar_main.gd").make_dummy(self, Vector3(-1.5, 0.05, 1.1), player, "block")
 	_build_hud()
 	Puzzles.farm(self, player)   # knock it off, sunbeam perch, doormat gifts (puzzles.gd)
 	preview_mode = "--preview" in OS.get_cmdline_user_args()
