@@ -78,13 +78,47 @@ func _ready() -> void:
 		Puzzles.forest(self, player)   # the crow's shiny on the deer stand (puzzle_more.gd)
 
 
+## huntable mice + rats (hunt_prey.gd): little colonies round den holes at the foot of logs,
+## stumps, rocks and roots. same spots and order on every machine (online they're shared).
+const MOUSE_HOMES := [Vector2(-3.0, 24.5), Vector2(1.5, 20.5), Vector2(-12.0, -4.0), Vector2(5.0, -2.5), Vector2(-2.0, -9.5), Vector2(8.0, 14.0), Vector2(-7.5, -16.0), Vector2(6.5, -19.5)]
+const RAT_HOMES := [Vector2(-4.6, 20.4), Vector2(-3.2, 20.9), Vector2(12.5, -12.2), Vector2(9.5, 4.2), Vector2(-15.0, 15.4)]
+var prey: Array = []
+
+
 func _spawn_mice() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 808
-	for p in [Vector2(-3.0, 24.0), Vector2(1.5, 21.0), Vector2(-12.0, -5.0), Vector2(5.0, -2.0), Vector2(-2.0, -10.0), Vector2(8.0, 14.0)]:
-		var m := FieldMouse.new()
-		m.position = ForestLevel.ground(p.x, p.y) + Vector3(0, 0.05, 0)
-		add_child(m)
+	var holes := {}
+	var homes := []
+	for h in MOUSE_HOMES:
+		homes.append(["mouse", h])
+	for h in RAT_HOMES:
+		homes.append(["rat", h])
+	for e in homes:
+		var k: String = e[0]
+		var h: Vector2 = e[1]
+		var hides: Array[Vector3] = []
+		var block := []
+		for o in ForestLevel.obstacles:
+			var c: Vector2 = o[0]
+			var r: float = o[1]
+			var d := c.distance_to(h)
+			if d < 16.0:
+				block.append(o)
+			if d < 9.0 and d > 0.05 and r < 2.0:
+				# den mouth at the foot of it, on the side facing the colony
+				var at := c + (h - c).normalized() * (r + 0.03)
+				if ForestLevel.height(at.x, at.y) > ForestLevel.WATER_Y + 0.08:
+					hides.append(ForestLevel.ground(at.x, at.y))
+		# and a couple of their own burrows out in the open
+		for i in 2:
+			var a := float(i) * 2.4 + h.x
+			var at := h + Vector2(cos(a), sin(a)) * (0.9 + i * 0.7)
+			hides.append(ForestLevel.ground(at.x, at.y))
+		for hp in hides:
+			var key := Vector2i(roundi(hp.x * 10.0), roundi(hp.z * 10.0))
+			if not holes.has(key):
+				holes[key] = true
+				HuntPrey.make_burrow(self, hp, 0.05 if k == "rat" else 0.032)
+		prey.append(HuntPrey.spawn(self, k, ForestLevel.ground(h.x, h.y), hides, ForestLevel.height, block))
 
 
 func _setup_env() -> void:

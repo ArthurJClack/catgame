@@ -48,6 +48,7 @@ var _was_floor := true
 var _was_claw := false
 var _join_t := 0.0
 var _map_done := false
+var handlers := {}             # packet type byte -> func(from, data) for other systems (PreySync: 14)
 
 
 func _ready() -> void:
@@ -254,6 +255,28 @@ func my_id() -> int:
 	return int(transport.my_id) if transport else 0
 
 
+## who runs the shared world bits (prey) in my level: the lobby host when they're here, else the
+## lowest player id in the level. a dedicated server only relays and never loads a level, so it
+## is never it. offline = me.
+func authority_here() -> int:
+	var me := my_id()
+	if transport == null:
+		return me
+	var here := _scene_path()
+	if has_method("host_id"):
+		var h := int(call("host_id"))
+		if h == me:
+			return me
+		if peers.has(h) and (peers[h] as NetPeer).hello_seen and (peers[h] as NetPeer).scene == here:
+			return h
+	var best := me
+	for id in peers:
+		var p: NetPeer = peers[id]
+		if p.hello_seen and p.scene == here and int(id) < best:
+			best = int(id)
+	return best
+
+
 # ------------------------------------------------------------------ sending
 
 ## called by CatPlayer at the end of every physics tick, after it has set up its rig
@@ -427,6 +450,10 @@ func _on_packet(from: int, data: PackedByteArray) -> void:
 		CatNetState.T_INFO:
 			if from == 1 and transport is NetEnetTransport:
 				_on_server_info(NetDedicatedServer.read_info(data))
+		_:
+			var h: Callable = handlers.get(data[0], Callable())
+			if h.is_valid():
+				h.call(from, data)
 
 
 func _on_server_info(info: Dictionary) -> void:
