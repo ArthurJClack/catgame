@@ -27,6 +27,7 @@ const DOUBLE_TAP := 0.3
 const FRICTION := 5.0
 # ---- momentum: the cat has weight. speed builds and bleeds instead of snapping ----
 const WALK_SPEED := 1.0       # real cats walk ~0.7-1.0 m/s
+const STROLL_SPEED := 1.25    # wasd without shift: a calm cat stroll (was a 3.2 m/s trot). shift runs
 const CREEP_SPEED := 0.25     # the slowest the stick (just past the deadzone) asks for
 const WALK_TILT := 0.45       # keyboard walk (hold x / caps lock) = this much stick
 const PUSH_ACCEL := 9.0       # m/s2 the legs can shove the body from a stand
@@ -653,6 +654,7 @@ func _read_input() -> Dictionary:
 		"move": mv,
 		"canter": shift and not _galloping,
 		"sprint": shift and _galloping,
+		"stroll": mv != Vector2.ZERO and not shift,   # keys alone = stroll, shift = run
 		"crouch": CatKeys.down("crouch"),
 		"jump": CatKeys.down("jump"),
 		"swat": CatKeys.down("swat"),
@@ -923,6 +925,7 @@ func _physics_process(dt: float) -> void:
 
 	var sprint: bool = inp.get("sprint", false)
 	var canter: bool = inp.get("canter", false)
+	var stroll: bool = inp.get("stroll", false)
 	# running only happens straight ahead
 	if mv.y < 0.5 or absf(mv.x) > 0.3:
 		sprint = false
@@ -1166,6 +1169,8 @@ func _physics_process(dt: float) -> void:
 		target_speed = SPRINT_SPEED
 	elif canter and wish_len > 0.8:
 		target_speed = CANTER_SPEED
+	elif stroll:
+		target_speed = minf(target_speed, STROLL_SPEED)
 	if _backing:
 		target_speed = minf(target_speed, BACKUP_SPEED)
 	if charging:

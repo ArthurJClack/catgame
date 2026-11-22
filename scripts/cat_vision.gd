@@ -27,6 +27,8 @@ const C_CLIMB := Color(0.45, 1.0, 0.5)
 var player: CatPlayer
 var level := 0.0                # 0..1 how strong it is right now (tests + cat sense read it)
 var lit := {}                   # MeshInstance3D -> [old overlay, kind]
+var _clear_mat: StandardMaterial3D
+var _ghosts := {}               # CollisionShape3D -> MeshInstance3D: stand in glow for batched geometry
 var _mats := {}                 # kind -> ShaderMaterial
 var _refresh_t := 0.0
 var _props: Array = []          # rigid bodies found when the button went down
@@ -36,18 +38,24 @@ var _screen_mat: ShaderMaterial
 
 const RIM := """
 shader_type spatial;
-render_mode unshaded, blend_add, depth_draw_never, cull_back, shadows_disabled;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, skip_vertex_transform;
 uniform vec4 tint : source_color = vec4(1.0);
 uniform float strength = 0.0;
 uniform float base = 0.12;
 uniform float rim_k = 1.6;
 void vertex() {
-	VERTEX += NORMAL * 0.004;   // a hair outside the surface so it never z-fights
+	// pulled a few mm toward the camera in view space so it always wins the depth test, however
+	// tiny the mesh is scaled (a mouse's parts are scaled boxes) and however close the near plane
+	VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	NORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	VERTEX -= normalize(VERTEX) * 0.006;
 }
 void fragment() {
 	float f = 1.0 - clamp(abs(dot(NORMAL, VIEW)), 0.0, 1.0);
 	float pulse = 0.85 + 0.15 * sin(TIME * 4.0);
-	ALBEDO = tint.rgb * (base + pow(f, 2.0) * rim_k) * strength * pulse;
+	// mixed over the surface (not added): light things like a pale mouse would just wash out white
+	ALBEDO = tint.rgb;
+	ALPHA = clamp((base + pow(f, 2.0) * rim_k) * strength * pulse, 0.0, 0.85);
 }
 """
 
@@ -85,8 +93,9 @@ func _ready() -> void:
 		var m := ShaderMaterial.new()
 		m.shader = rim
 		m.set_shader_parameter("tint", _color(kind))
+		# low poly boxes face you flat (no rim), so small things get a solid wash too
+		m.set_shader_parameter("base", {"puzzle": 0.45, "prey": 0.5, "cat": 0.22, "prop": 0.3, "climb": 0.22}[kind])
 		if kind == "climb":
-			m.set_shader_parameter("base", 0.04)
 			m.set_shader_parameter("rim_k", 0.9)
 		if kind in ["puzzle", "prey", "cat"]:
 			var x := ShaderMaterial.new()
@@ -218,8 +227,11 @@ func _relight() -> void:
 		for n in t:
 			if t[n] != kind:
 				continue
-			for m in _meshes(n):
-				if not player.is_ancestor_of(m) and not is_ancestor_of(m):
+			var ms := _meshes(n)
+			if ms.is_empty():
+				ms = _ghosts_for(n)    # its looks were merged into one batch mesh: glow its collider
+			for m in ms:
+				if m.has_meta("vision_ghost") or not player.is_ancestor_of(m):
 					want[m] = kind
 	for m in lit.keys():
 		if not want.has(m) or lit[m][1] != want[m]:
@@ -234,7 +246,55 @@ func _relight() -> void:
 func _unlight(m) -> void:
 	if is_instance_valid(m) and lit.has(m):
 		(m as MeshInstance3D).material_overlay = lit[m][0]
+		if m.has_meta("vision_ghost"):
+			_ghosts.erase(m.get_meta("vision_ghost"))
+			m.queue_free()
 	lit.erase(m)
+
+
+## boxes / cylinders / spheres in the shape of a node's colliders (level geometry that was batched
+## into one big mesh has no mesh of its own to light)
+func _ghosts_for(n: Node) -> Array:
+	var out := []
+	var shapes := n.find_children("*", "CollisionShape3D", false, false)
+	for cs in shapes.slice(0, 8):
+		var c := cs as CollisionShape3D
+		if _ghosts.has(c) and is_instance_valid(_ghosts[c]):
+			out.append(_ghosts[c])
+			continue
+		var mesh: Mesh = null
+		var sh := c.shape
+		if sh is BoxShape3D:
+			var bm := BoxMesh.new()
+			bm.size = (sh as BoxShape3D).size
+			mesh = bm
+		elif sh is CylinderShape3D:
+			var cm := CylinderMesh.new()
+			cm.top_radius = (sh as CylinderShape3D).radius
+			cm.bottom_radius = cm.top_radius
+			cm.height = (sh as CylinderShape3D).height
+			mesh = cm
+		elif sh is SphereShape3D:
+			var sm := SphereMesh.new()
+			sm.radius = (sh as SphereShape3D).radius
+			sm.height = sm.radius * 2.0
+			mesh = sm
+		if mesh == null:
+			continue
+		var g := MeshInstance3D.new()
+		g.mesh = mesh
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if _clear_mat == null:
+			_clear_mat = StandardMaterial3D.new()
+			_clear_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			_clear_mat.albedo_color = Color(0, 0, 0, 0)
+			_clear_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		g.material_override = _clear_mat    # the stand in itself is invisible, only its overlay shows
+		g.set_meta("vision_ghost", c)
+		c.add_child(g)     # rides along with its collider (and isn't under the cat, which never lights itself)
+		_ghosts[c] = g
+		out.append(g)
+	return out
 
 
 func _clear() -> void:

@@ -212,4 +212,5 @@ static func merge(kb: Dictionary, pad: Dictionary) -> Dictionary:
 		out.move = pm
 		out.canter = pad.canter
 		out.sprint = pad.sprint
+		out.stroll = false        # the stick's tilt picks the speed
 	return out

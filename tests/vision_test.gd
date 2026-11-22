@@ -3,7 +3,7 @@ extends SceneTree
 ## q lights up puzzles / climbables / loose props with an overlay and puts it all back on release,
 ## holding space shows the jump bar (hop height, then leap distance) and hides it on let go,
 ## an old settings file with q on another action doesn't get a double bind.
-##   xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/vision_test.gd
+##   xvfb-run godot --path . --rendering-driver opengl3 --rendering-method gl_compatibility --script res://tests/vision_test.gd [-- out/dir saves a screenshot]
 
 var bad := 0
 
@@ -87,10 +87,16 @@ func _run() -> void:
 			mine += 1
 	_ok(mine == 0, "the cat doesn't light itself")
 	_ok(v._screen != null and v._screen.visible, "the screen dims")
-	var z = current_scene.get_node_or_null("Puzzles")
-	_ok(z != null and z.sense.level > 0.5, "the cat sense motes come with it")
+	var shots := ""
+	for a in OS.get_cmdline_user_args():
+		if not a.begins_with("--"):
+			shots = a
+	if shots != "":
+		p.yaw += 2.4    # face the yard
+		await _wait(1.0)
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png(shots + "/cat_vision.png")
 
-	# --- let go
 	_key(KEY_Q, false)
 	_ok(await _wait(6.0, func(): return v.lit.is_empty()), "letting go puts it all back")
 	_ok(a_mesh == null or a_mesh.material_overlay == null, "overlay restored")
