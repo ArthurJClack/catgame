@@ -154,7 +154,9 @@ func wind_step(dt: float) -> void:
 	var rate := (absf(wrapf(target_yaw - p.yaw, -PI, PI)) + 0.3) / maxf(wind_t - t, dt)
 	p.yaw += clampf(dy, -rate * dt, rate * dt)
 	p.rotation.y = p.yaw
-	if t >= wind_t:
+	# dodge + swat within the chord window = deflect (cat_parry.gd): the gather holds until the
+	# window shuts so a quick alt + click never leaves the ground
+	if t >= wind_t and not (p.parry != null and p.parry.chord_open() and t < CatParry.CHORD + 0.005):
 		_push()
 
 
@@ -214,6 +216,18 @@ func on_land() -> void:
 		state = IDLE
 		recover = RECOVER
 		slide_d = 0.0
+
+
+## the press turned out to be a deflect (dodge + swat, cat_parry.gd): never happened, stamina back
+func abort_for_parry() -> void:
+	buffer = 0.0
+	if state == WIND:
+		state = IDLE
+		gather = 0.0
+		if not player.stamina.infinite:
+			player.stamina.value = minf(player.stamina.value + (CatStamina.BACKSTEP if kind == Kind.BACK else CatStamina.DASH), CatStamina.MAX)
+			if player.stamina.value >= CatStamina.WINDED_UNTIL:
+				player.stamina.winded = false
 
 
 ## climbing / clambering / mantling took over mid dodge

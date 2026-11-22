@@ -27,6 +27,7 @@ const DOUBLE_TAP := 0.3
 const FRICTION := 5.0
 # ---- momentum: the cat has weight. speed builds and bleeds instead of snapping ----
 const WALK_SPEED := 1.0       # real cats walk ~0.7-1.0 m/s
+const STROLL_SPEED := 1.25    # wasd without shift: a calm cat stroll (was a 3.2 m/s trot). shift runs
 const CREEP_SPEED := 0.25     # the slowest the stick (just past the deadzone) asks for
 const WALK_TILT := 0.45       # keyboard walk (hold x / caps lock) = this much stick
 const PUSH_ACCEL := 9.0       # m/s2 the legs can shove the body from a stand
@@ -418,9 +419,6 @@ var catches := 0
 var leaps := 0                   # aimed leaps taken (tutorial / stats)
 var hunt_info := ""             # hud line: nearest prey while stalking
 var _swat_prey: Node3D = null
-var _auto_t := 0.0
-var _auto_last: Object = null
-var _auto_last_t := 0.0
 var prev_drop := false
 # grip: how hard the paws can push on what's underfoot (m/s^2 before they slip)
 const GRIP := {"wood": 16.0, "tile": 14.0, "carpet": 30.0, "rug": 30.0, "grass": 24.0, "dirt": 19.0, "hay": 20.0, "default": 18.0}
@@ -433,8 +431,11 @@ var stamina: CatStamina        # souls style stamina bar (cat_stamina.gd)
 var health: CatHealth          # hits from enemies (souls_rat.gd), nine lives (cat_health.gd)
 var souls_hud: SoulsHud        # health + stamina bars, top left
 var dash: CatDash              # souls style dodge: dart / side leap / whirl / backstep (cat_dash.gd)
+var parry: CatParry            # dodge + swat = sekiro style deflect (cat_parry.gd)
 var prev_dash := false
 var lock: CatLockOn            # souls style tab lock on (cat_lock_on.gd)
+var spar: CatSpar              # cat vs cat play fighting (cat_spar.gd): on while locked on to another cat
+var spar_dummy := false        # set before adding: this bot is the practice cat (CatSparBrain drives it)
 var prev_lock := false
 var _lock_r := -1.0             # radius being circled while strafing a lock (-1 = not circling)
 const LOCK_STRAFE := 0.8       # x trot: circling / strafing a locked target
@@ -461,7 +462,13 @@ func _ready() -> void:
 				var sc: Script = load("res://scripts/" + f)
 				if sc.get(nm) != null:
 					sc.set(nm, false)
-	add_to_group("player")
+	add_to_group("cat")
+	if not spar_dummy:
+		add_to_group("player")   # (the practice cat isn't "the player": wildlife etc look that up)
+		vision = CatVision.new()
+		vision.name = "CatVision"
+		vision.player = self
+		add_child(vision)
 	GameSettings.apply_player.call_deferred(self)   # sens / fov / invert / head bob (no-op for bots)
 	(func(): if bot.is_empty() or Engine.get_write_movie_path() != "": CatSfx.attach(self)).call_deferred()   # the cat's own sounds (cat_sfx.gd)
 	floor_snap_length = 0.06
@@ -491,6 +498,9 @@ func _ready() -> void:
 	dash = CatDash.new()
 	dash.player = self
 	add_child(dash)
+	parry = CatParry.new()
+	parry.player = self
+	add_child(parry)
 	combat = CatCombat.new()
 	combat.player = self
 	add_child(combat)
@@ -503,6 +513,10 @@ func _ready() -> void:
 	lock = CatLockOn.new()
 	lock.player = self
 	add_child(lock)
+	spar = CatSpar.new()
+	spar.player = self
+	spar.dummy = spar_dummy
+	add_child(spar)
 
 	cam_pivot = Node3D.new()
 	cam_pivot.position.y = EYE_STAND
@@ -609,6 +623,9 @@ var _int_drop := false         # e pressed while carrying: dropped, so this hold
 ## (stamina is everywhere). everywhere else the cat just moves, swats and explores. bots always get
 ## the full set (tests + preview films drive those systems directly)
 var combat_zone := false
+## cat vision button held (q / LB): cat_vision.gd lights up what's worth a look
+var vision_held := false
+var vision: CatVision
 
 
 func combat_on() -> bool:
@@ -620,6 +637,7 @@ var _turn_factor := 1.0
 
 func _read_input() -> Dictionary:
 	if not bot.is_empty():
+		vision_held = bot.get("vision", false)
 		return bot
 	# hold shift = canter. double tap shift (and keep holding) = full gallop
 	var shift := CatKeys.down("run")
@@ -644,6 +662,7 @@ func _read_input() -> Dictionary:
 		"move": mv,
 		"canter": shift and not _galloping,
 		"sprint": shift and _galloping,
+		"stroll": mv != Vector2.ZERO and not shift,   # keys alone = stroll, shift = run
 		"crouch": CatKeys.down("crouch"),
 		"jump": CatKeys.down("jump"),
 		"swat": CatKeys.down("swat"),
@@ -652,6 +671,7 @@ func _read_input() -> Dictionary:
 		"toggle_view": CatKeys.down("toggle_view"),
 		"dash": CatKeys.down("dash"),
 		"lock_on": CatKeys.down("lock_on"),   # press = lock / unlock (cat_lock_on.gd)
+		"vision": CatKeys.down("vision"),     # hold = cat vision (cat_vision.gd)
 	}
 	# gamepad (cat_pad.gd): every action has a button, the left stick's tilt picks the speed
 	var pad := CatPad.read()
@@ -661,6 +681,8 @@ func _read_input() -> Dictionary:
 	if not vrd.is_empty():
 		d = CatPad.merge(d, vrd)
 	_human_buttons(d)
+	vision_held = d.get("vision", false) and not CatKeys.blocked
+	d.erase("vision")
 	if CatKeys.blocked:
 		# pause menu open (online the game keeps running): the cat stands still
 		for k in d:
@@ -680,6 +702,7 @@ func _read_input() -> Dictionary:
 func _human_buttons(d: Dictionary) -> void:
 	var sw: bool = d.get("swat", false)
 	d.erase("swat")
+	d.swat_raw = sw     # the deflect (cat_parry.gd) reads the button itself: dodge held + swat
 	if sw and not _swat_prev:
 		_swat_paw = 1 - _swat_paw
 	_swat_prev = sw
@@ -697,8 +720,8 @@ func _human_buttons(d: Dictionary) -> void:
 	_int_prev = it
 	d.drop = it and _int_drop
 	d.scratch = it and not _int_drop
-	if not combat_on():
-		d.lock_on = false
+	if not combat_on() and not (spar and spar.playmate_near()):
+		d.lock_on = false   # lock on is for the rat pit, and for play fighting other cats
 
 
 ## space / A on the ground: hop when it's let go (higher the longer it was held), or held past
@@ -749,6 +772,22 @@ func space_charge() -> float:
 	return clampf(_sp_t / POUNCE_HOLD, 0.0, 1.0) if _sp_state == 1 else 0.0
 
 
+## the jump bar under the crosshair (souls_hud.gd): while space is held on the ground it fills
+## with how high the hop will go, once it turns into a leap it shows how far the leap lands.
+## {on, fill 0..1, text, leap}
+func jump_meter() -> Dictionary:
+	if combat != null and combat.aiming() and combat.pounce.has("point"):
+		var pt: Vector3 = combat.pounce.point
+		var d := Vector2(pt.x - global_position.x, pt.z - global_position.z).length()
+		return {"on": true, "fill": clampf(d / CatCombat.POUNCE_RANGE, 0.05, 1.0), "text": "leap %.1f m" % d, "leap": true}
+	if _sp_state == 1:
+		var c := clampf((_sp_t - HOP_TAP) / (POUNCE_HOLD - HOP_TAP), 0.0, 1.0)
+		var h := HOP_HEIGHT * lerpf(HOP_TAP_MUL, HOP_CHARGE_MUL, c)
+		var txt := ("hop %d cm" % int(round(h * 100.0))) if h < 1.0 else ("hop %.1f m" % h)
+		return {"on": true, "fill": h / (HOP_HEIGHT * HOP_CHARGE_MUL), "text": txt, "leap": false}
+	return {"on": false, "fill": 0.0, "text": "", "leap": false}
+
+
 var log_events := false
 
 
@@ -764,10 +803,11 @@ func _physics_process(dt: float) -> void:
 	_sc_off_prev = step_cam_off
 	_vis_prev = global_position + _vis_off()
 	var inp := _read_input()
+	inp = spar.filter(inp, dt)     # play fighting: practice cat brain, tags landing, flinches (cat_spar.gd)
 	if combat.locks_move():
 		# both fore paws are holding something: a cat can't walk, hop or dodge on its hind legs alone
 		inp = inp.duplicate()
-		for k in ["jump", "aim", "dash", "scratch", "sprint", "canter", "crouch"]:
+		for k in ["jump", "aim", "dash", "deflect", "scratch", "sprint", "canter", "crouch"]:
 			inp[k] = false
 		inp["move"] = Vector2.ZERO
 	# the dodge reads the real stick even mid attack (a roll out of a recovery goes where you hold)
@@ -883,7 +923,10 @@ func _physics_process(dt: float) -> void:
 	stamina.infinite = not bot.is_empty() and not bot.get("stamina", false)
 	dash.tick(dt)
 	var dash_in: bool = inp.get("dash", false)
-	if dash_in and not prev_dash and combat.dodge_pressed():
+	# dodge + swat = deflect (cat_parry.gd). the dodge press still goes through; its gather waits
+	# out the chord window and is called off if a swat comes in it
+	var dash_rise := parry.input(dt, dash_in, inp.get("swat_raw", false) or (inp.get("swat", false) and not bot.is_empty() and dash_in), inp.get("deflect", false))
+	if dash_rise and combat.dodge_pressed():
 		dash.press()      # mid attack it waits for the move's cancel point (combat._atk_step)
 	prev_dash = dash_in
 	var raw_mv: Vector2 = dodge_mv
@@ -895,6 +938,7 @@ func _physics_process(dt: float) -> void:
 
 	var sprint: bool = inp.get("sprint", false)
 	var canter: bool = inp.get("canter", false)
+	var stroll: bool = inp.get("stroll", false)
 	# running only happens straight ahead
 	if mv.y < 0.5 or absf(mv.x) > 0.3:
 		sprint = false
@@ -913,6 +957,10 @@ func _physics_process(dt: float) -> void:
 	# paws: left mouse = left paw, right mouse = right paw ("swat" = left paw for old bot scripts)
 	var paw_l: bool = inp.get("paw_l", false) or inp.get("swat", false)
 	var paw_r: bool = inp.get("paw_r", false)
+	if parry.eat_swat:
+		# dodge key held: the swat button is the deflect (cat_parry.gd), the paws stay put
+		paw_l = false
+		paw_r = false
 	combat.tick(dt, paw_l, paw_r, inp.get("grab", false), inp.get("pounce", false))
 	if _swat_hit_t >= 0.0:
 		_swat_hit_t -= dt
@@ -927,19 +975,7 @@ func _physics_process(dt: float) -> void:
 	if drop_in and not prev_drop and carried:
 		_drop_carried()
 	prev_drop = drop_in
-	# auto swat: anything loose (or prey) right under the crosshair and in paw reach gets swatted
-	_auto_t -= dt
-	_auto_last_t += dt
-	if bot.is_empty() and _auto_t <= 0.0 and not clawing and not combat.any_down() and not combat.busy() and _swat_hit_t < 0.0 and not (climbing or clambering or mantling or scratching or charging):
-		_auto_t = 0.1
-		var at := _paw_target(SWAT_RANGE * 0.85, 0.17)
-		if not at.is_empty():
-			var who: Object = at.get("prey") if at.get("prey") else at.get("rb")
-			if who != carried and (who != _auto_last or _auto_last_t > 1.4):
-				_auto_last = who
-				_auto_last_t = 0.0
-				_auto_t = 0.55
-				combat.auto_swat()
+	# (no auto swat: the cat only swats when you press swat. user asked 2026-11-22)
 	_update_surface()
 	var tv: bool = inp.get("toggle_view", false)
 	if tv and not prev_v:
@@ -1138,6 +1174,8 @@ func _physics_process(dt: float) -> void:
 		target_speed = SPRINT_SPEED
 	elif canter and wish_len > 0.8:
 		target_speed = CANTER_SPEED
+	elif stroll:
+		target_speed = minf(target_speed, STROLL_SPEED)
 	if _backing:
 		target_speed = minf(target_speed, BACKUP_SPEED)
 	if charging:
@@ -1476,11 +1514,17 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	var dland := smoothstep(0.0, 0.05, _dodge_land_t) * (1.0 - smoothstep(0.08, 0.3, _dodge_land_t))
 	crouch_t = maxf(crouch_t, 0.6 * dland)
 	rig.dodge = move_toward(rig.dodge, 1.0 if dash.state == CatDash.AIR else 0.0, (16.0 if dash.state == CatDash.AIR else 7.0) * dt)
+	var rinv := global_transform.basis.inverse()
 	if dash.state == CatDash.AIR:
 		rig.dodge_kind = dash.kind
 		rig.dodge_u = clampf(dash.air_t / dash.air_total, 0.0, 1.0)
-		var ld := global_transform.basis.inverse() * dash.dir
+		var ld := rinv * dash.dir
 		rig.dodge_lat = clampf(ld.x * 1.4, -1.0, 1.0)
+	# procedural dodge (cat_rig _dodge_proc_body): the real motion drives the pose
+	rig.dodge_vel = rig.dodge_vel.lerp(rinv * velocity, clampf(dt * 30.0, 0.0, 1.0)) if dash.state == CatDash.AIR else rig.dodge_vel.lerp(Vector3.ZERO, clampf(dt * 8.0, 0.0, 1.0))
+	rig.dodge_gather = dash.gather
+	if dash.state != CatDash.IDLE:
+		rig.dodge_dir = rinv * dash.dir
 	rig.dodge_land = dland
 	rig.crouch = move_toward(rig.crouch, crouch_t, (16.0 if dland > 0.0 else 10.0) * dt) if soft_air else crouch_t
 	rig.charge = charge
@@ -1527,6 +1571,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.clamber_pull = clampf(clamber_t / 0.55, 0.0, 1.0) if (clambering and clamber_phase == 2) else (1.0 if not clambering else 0.0)
 	rig.ledge_world = ledge_point
 	rig.rear = maxf(w_scratch, w_kick * 0.85)
+	# fighting (enemy close / locked on / just hurt): threat pose, fur up, ears back, hisses
+	rig.fight = CatFightAnim.level(self, rig.fight, dt)
 	rig.scratch = w_scratch
 	if "grip" in rig:
 		rig.grip = combat.grip_w
@@ -1570,7 +1616,7 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.gravity = G
 	# multiplayer: hand this tick's rig inputs to the network (no-op when nobody else is here)
 	var net := get_node_or_null("/root/Net")
-	if net:
+	if net and not spar_dummy:
 		net.capture(self, dt)
 
 
@@ -1730,6 +1776,8 @@ func _orient_rig() -> void:
 	var voff := _vis_off()
 	if voff != Vector3.ZERO:
 		rig.global_position += voff
+	if spar:
+		spar.orient(rig)   # play fight flinches (goes over the wire with the rig)
 
 
 func _orient_rig_base() -> void:
@@ -2597,6 +2645,8 @@ func fall_hurts() -> bool:
 
 func _on_land() -> void:
 	var dodge_land := dash.state == CatDash.AIR
+	if dodge_land:
+		rig.dodge_touch(global_transform.basis.inverse() * Vector3(velocity.x, prev_vy, velocity.z))
 	dash.on_land()
 	var impact := -prev_vy
 	land_dip_v -= clampf(impact * 0.12, 0.0, 0.9)
@@ -2654,6 +2704,7 @@ func _on_land() -> void:
 		rig.pin = 1.0
 		paws.pin()
 		_pin_check()
+		spar.pounce_land()   # came down on the cat you're playing with: bowled over
 
 
 ## the four spots a pounce's paws come down on (the same ones the aim circles show)
@@ -2717,6 +2768,7 @@ func _prey_name(n: Object) -> String:
 
 ## caught something: it stops struggling and goes in the mouth
 func _catch(n: Object) -> void:
+	NetWorld.touch(n)
 	if n.has_method("pin_hit"):
 		n.call("pin_hit", self)   # too big to carry (arena rats): the pounce lands as a heavy hit
 		if n is Node3D:
@@ -2734,7 +2786,7 @@ func _catch(n: Object) -> void:
 	catches += 1
 	rig.pin = 1.0
 	paws.pin()
-	_event("caught a %s! (%d caught · e to drop)" % [_prey_name(n), catches])
+	_event("caught a %s! (%d caught · %s to drop)" % [_prey_name(n), catches, CatKeys.describe("interact").get_slice(" / ", 0)])
 
 
 func _drop_carried() -> void:
@@ -3072,10 +3124,11 @@ func _paw_target(reach: float, cone: float) -> Dictionary:
 var _swat_rake := false
 var _swat_pt := Vector3.ZERO      # world point the paw strikes (for the slash fx)
 
-## paw 0 = left, 1 = right, -1 = random (auto swat). rake = one of a held paw's repeated rakes
+## paw 0 = left, 1 = right, -1 = random. rake = one of a held paw's repeated rakes
 func _do_swat(paw := -1, rake := false) -> void:
 	if paw < 0:
 		paw = randi() % 2
+	spar.strike_start()
 	_swat_rake = rake
 	_swat_side = -1.0 if paw == 0 else 1.0
 	var t := _paw_target(SWAT_RANGE, 0.5)
@@ -3095,7 +3148,7 @@ func _do_swat(paw := -1, rake := false) -> void:
 	# the real foreleg swats too (seen in third person / orbit, and in the shadow)
 	if rig.has_method("swat"):
 		var sh := global_transform * Vector3((-0.04 if paw == 0 else 0.04), 0.17, -0.13)
-		rig.swat(paw, sh + (wt - sh).limit_length(0.27))
+		rig.swat(paw, sh + (wt - sh).limit_length(0.27), "rake" if rake else "")
 	_swat_pt = wt
 	if clawing and paw == paws.claw_i:
 		_claw_release()
@@ -3139,6 +3192,7 @@ func _swat_impact() -> void:
 	if prey_hit:
 		_hit_prey(_swat_prey)
 	_hit_bodies(hits, dir, sweep)
+	spar.swat_check(_swat_rake)   # locked on to a cat: a soft play bop if it's in the hitbox
 
 
 ## the hitbox is still out: anything the lunge carries it onto gets hit too (once per strike)
@@ -3154,6 +3208,7 @@ func _swat_sweep() -> void:
 	for rb in _box_bodies():
 		hits.append(rb)
 	_hit_bodies(hits, dir, sweep)
+	spar.swat_check(_swat_rake)
 
 
 ## rigid bodies inside the strike's hitbox (not hit yet this strike)
@@ -3197,6 +3252,7 @@ func _hit_prey(n: Node3D) -> void:
 	if _swat_done.has(n):
 		return
 	_swat_done.append(n)
+	NetWorld.touch(n)      # online: swatted prey runs in my game now (rats excepted, world_sync.gd)
 	if _swat_rake and n.has_method("take_hit"):
 		n.call("take_hit", CatCombat.RAKE_DMG, global_position, false, CatCombat.RAKE_POISE)
 	elif n.has_method("stun"):
@@ -3210,6 +3266,7 @@ func _hit_bodies(hits: Array[RigidBody3D], dir: Vector3, sweep: Vector3) -> void
 		if rb == carried or _swat_done.has(rb):
 			continue
 		_swat_done.append(rb)
+		NetWorld.touch(rb)     # online: I knocked it, my game runs it (unfreezes a puppet copy)
 		if rb.freeze:
 			if rb.is_in_group("prey"):
 				continue
@@ -3239,6 +3296,10 @@ func _slash_fx(dir: Vector3, sweep: Vector3, prey: Node3D, hits: Array[RigidBody
 		c = q + (eye - q).normalized() * 0.04
 	var a := c - sweep * 0.17 + Vector3.UP * 0.07
 	var b := c + sweep * 0.14 - Vector3.UP * 0.05
+	if spar.play_mode():
+		# locked on to a cat: no claws. one soft rounded line, no scratches (cat_spar.gd)
+		SlashFx.streak(self, a, b, -dir * 0.05 + Vector3.UP * 0.015, Color(0.85, 0.93, 1.0), self, 1)
+		return
 	SlashFx.streak(self, a, b, -dir * 0.05 + Vector3.UP * 0.015, Color(1.0, 0.82, 0.78) if prey != null else Color(1.0, 0.95, 0.85), self)
 	var n := (eye - c).normalized()
 	if prey != null:
@@ -3271,6 +3332,7 @@ func _claw_start(paw := -1) -> void:
 		return
 	if not t.is_empty() and t.rb:
 		claw_rb = t.rb
+		NetWorld.touch(claw_rb)
 		if claw_rb.freeze and not claw_rb.is_in_group("prey"):
 			claw_rb = null
 		else:
@@ -3417,4 +3479,6 @@ func _push_props() -> void:
 		var col := c.get_collider()
 		if col is RigidBody3D:
 			var rb: RigidBody3D = col
+			if Vector2(velocity.x, velocity.z).length() > 0.3:
+				NetWorld.touch(rb)   # online: pushing it = my game runs it
 			rb.apply_central_impulse(-c.get_normal() * 0.02 * Vector2(velocity.x, velocity.z).length())

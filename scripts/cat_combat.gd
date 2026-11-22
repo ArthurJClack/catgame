@@ -22,8 +22,8 @@ extends Node
 ##
 ## POUNCE: holding space past the hop drops the cat into the pounce crouch, winding up (bum
 ## wiggle) while you aim with the mouse; a dense dotted line shows the exact path. let go and it
-## launches: a free ballistic projectile, low and mostly forward (POUNCE_LIFT, the view pitch only
-## tilts it a little, capped at POUNCE_EL_MAX), speed from how long it wound up, no air steering.
+## launches: a free ballistic projectile along where you look (POUNCE_LIFT above the view line,
+## look up and it goes up, capped at POUNCE_EL_MAX), speed from how long it wound up, no air steering.
 ## it soft locks: prey / rats near where the arc comes down, the tab lock-on target
 ## (player.lock_target) and ledges the arc would smack into just under the top all bend the launch
 ## so it comes down exactly on them, and moving ones are LED (_lead_on: velocity x flight time,
@@ -63,9 +63,9 @@ const POUNCE_WIND_T := 0.7    # crouched this long = full power
 const POUNCE_SPD_MIN := 2.4   # m/s off the hind legs, no wind up
 const POUNCE_SPD_MAX := 6.2   # full wind up (~1.8 m up / ~3.6 m out, real cat numbers)
 const POUNCE_LIFT := 0.3      # rad: launch angle with the view level (mostly forward, a low arc)
-const POUNCE_PITCH := 0.35    # how much looking up / down tilts it
-const POUNCE_EL_MIN := 0.2
-const POUNCE_EL_MAX := 0.62   # never a high lob: that's the q leap's job
+const POUNCE_PITCH := 1.0     # the arc follows the view pitch: look up = leap up, look down = skim low
+const POUNCE_EL_MIN := 0.08
+const POUNCE_EL_MAX := 1.25   # ~72 deg: straight up a trunk / onto a shelf above you
 const POUNCE_RANGE := 3.6     # soft lock reach (horizontal)
 const MAGNET_R := 0.55        # prey this close to where the free arc lands gets locked
 
@@ -374,7 +374,8 @@ func _paw_step(i: int, dt: float, held: bool) -> void:
 		if mode[i] == NONE and age[i] >= HOLD_T:
 			var t: Dictionary = p._paw_target(p.SWAT_RANGE, 0.5)
 			# rakes are a rat pit thing: elsewhere a held paw always hooks (claw hold)
-			if not t.is_empty() and t.get("prey") != null and t.prey != p.carried and p.combat_on():
+			var play: bool = p.get("spar") != null and p.spar.play_mode() and CatSpar.pos_of(p.spar.playmate()).distance_to(p.global_position) < p.SWAT_RANGE + 0.2
+			if play or (not t.is_empty() and t.get("prey") != null and t.prey != p.carried and p.combat_on()):
 				mode[i] = RAKE
 				rake_t[i] = RAKE_EVERY   # first rake right away
 			else:
@@ -406,12 +407,6 @@ func _swat(i: int) -> void:
 		buf_t = BUFFER
 		return
 	_fire(i, false)
-
-
-## auto swat (crosshair on something loose): only when nothing else is going on
-func auto_swat() -> void:
-	if atk == "" and buf_paw < 0:
-		_fire(randi() % 2, false)
 
 
 func _fire(i: int, rake: bool) -> bool:
@@ -492,6 +487,8 @@ func _grip_step(dt: float) -> void:
 			grip_point = grip_target.global_position + Vector3.UP * 0.05
 		if grip_t >= GRIP_REACH_T:
 			var near: bool = valid and grip_target.global_position.distance_to(p.global_position) < GRAB_DIST + 0.16 * float(grip_target.get("s") if "s" in grip_target else 1.0)
+			if not near and p.get("spar") != null and p.spar.grab_reach():
+				near = true      # locked on to a cat: a hug tackle, paws stay down on it
 			if near:
 				p.stamina.spend(CatStamina.GRIP)
 				_slam(valid)
@@ -564,6 +561,7 @@ func _slam(valid: bool) -> void:
 		p._event("missed the grab")
 		return
 	if grip_target.has_method("take_hit"):
+		NetWorld.hold(grip_target)     # online: pinned under my paws = I run it (world_sync.gd)
 		grip_target.take_hit(GRIP_SLAM_DMG, p.global_position, true)
 		_slam_fx(grip_target)
 		if grip_target.has_method("grab") and (not grip_target.has_method("alive") or grip_target.alive()):
@@ -749,8 +747,8 @@ func _vel_of(n: Node) -> Vector3:
 		var e: Array = _seen.get(n.get_instance_id(), [])
 		if e.size() == 3 and e[2]:
 			v = e[1]
-	if n.has_method("pinned") and n.pinned():
-		return Vector3.ZERO
+	if "caught" in n and n.get("caught") == true:
+		return Vector3.ZERO   # (never call pinned() to ask: on prey that IS the catch)
 	v.y = 0.0               # land where it'll be on the ground, not where a hop would take it
 	return v
 

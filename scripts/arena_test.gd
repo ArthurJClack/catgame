@@ -76,6 +76,8 @@ func _reset_cat(pos: Vector3) -> void:
 ## rat at the origin facing +z (toward the cat in front cases)
 func _rat(yaw: float, size := 1.0) -> SoulsRat:
 	var r: SoulsRat = arena.spawn_rat(Vector3(0, 0.02, 0), size)
+	r.combos = ["snap"]     # these rules are about the single bite (combos: parry_test.gd)
+	r.leaps_on = false
 	r.yaw = yaw
 	r.rotation.y = yaw
 	return r

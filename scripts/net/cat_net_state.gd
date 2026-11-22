@@ -12,7 +12,7 @@ extends RefCounted
 const DIALS := [
 	"crouch", "charge", "look_yaw", "look_pitch", "scramble", "slip_claws", "climb", "clamber",
 	"clamber_pull", "rear", "scratch", "scratch_dist", "sit", "stretch", "groom", "loaf", "balance", "pin",
-	"grip", "slide",
+	"grip", "slide", "fight",
 ]
 
 const T_HELLO := 1
@@ -20,6 +20,8 @@ const T_SNAP := 2
 const T_BYE := 3
 const T_ROSTER := 9   # lan mode only: the host tells clients who's connected
 const T_INFO := 10    # dedicated server -> client: server name, map, message of the day
+const T_LOBBY := 11   # lobby room: ready, coat, host's level pick, match on (net.gd)
+const T_START := 12   # host -> everyone: load this level now
 
 const F_FLOOR := 1
 const F_CLAW := 2

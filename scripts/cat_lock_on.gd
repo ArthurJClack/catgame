@@ -23,7 +23,7 @@ const FLICK_PX := 75.0       # px of fast mouse x travel that counts as a flick
 const FLICK_DECAY := 520.0   # px/s the flick meter drains (slow drags never get there)
 const FLICK_COOL := 0.28
 const TURN_K := 14.0         # camera catch up rate (1/s)
-const TIER := {"enemy": 0, "prey": 1, "wild": 2}
+const TIER := {"enemy": 0, "spar": 0, "prey": 1, "wild": 2}   # spar = another cat to play fight (cat_spar.gd)
 
 var player: Node3D           # CatPlayer (untyped: no cycle)
 var target: Node3D = null
@@ -96,6 +96,8 @@ func point() -> Vector3:
 
 
 func point_of(n: Node3D) -> Vector3:
+	if n.is_in_group("spar_cat"):
+		return CatSpar.pos_of(n) + Vector3.UP * 0.17
 	if n.has_method("lock_point"):
 		return n.lock_point()
 	return n.global_position + Vector3.UP * _height(n)
@@ -227,9 +229,9 @@ func _candidates(rng: float) -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	var seen := {}
 	var eye := _eye()
-	for g in ["enemy", "prey", "wild"]:
+	for g in ["enemy", "spar_cat", "prey", "wild"]:
 		for n in player.get_tree().get_nodes_in_group(g):
-			if not n is Node3D or seen.has(n) or not _valid(n):
+			if not n is Node3D or n == player or seen.has(n) or not _valid(n):
 				continue
 			seen[n] = true
 			if (point_of(n) - eye).length() <= rng:
@@ -240,13 +242,15 @@ func _candidates(rng: float) -> Array[Node3D]:
 func _valid(n: Object) -> bool:
 	if n == null or not is_instance_valid(n) or not (n as Node).is_inside_tree():
 		return false
-	if not (n.is_in_group("enemy") or n.is_in_group("prey") or n.is_in_group("wild")):
+	if not (n.is_in_group("enemy") or n.is_in_group("prey") or n.is_in_group("wild") or n.is_in_group("spar_cat")):
 		return false
 	if n == player.get("carried"):
 		return false
 	if n.get("caught") == true:
 		return false
 	if n.has_method("alive") and not n.alive():
+		return false
+	if n is RemoteCat and not ((n as RemoteCat).rig and (n as RemoteCat).rig.visible):
 		return false
 	if n is Node3D and not (n as Node3D).is_visible_in_tree():
 		return false
@@ -256,6 +260,8 @@ func _valid(n: Object) -> bool:
 func _tier_of(n: Node) -> String:
 	if n.is_in_group("enemy"):
 		return "enemy"
+	if n.is_in_group("spar_cat"):
+		return "spar"
 	if n.is_in_group("prey"):
 		return "prey"
 	return "wild"
