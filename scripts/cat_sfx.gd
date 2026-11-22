@@ -74,7 +74,7 @@ func _ready() -> void:
 	scratch_loop = _player3d(1.6)
 	scratch_loop.stream = clips.scratch
 	if player.health:
-		player.health.hurt.connect(func(_a, _f): _one("yowl" if rng.randf() < 0.5 else "hiss", 0.75, rng.randf_range(0.95, 1.08)))
+		player.health.hurt.connect(_on_hurt)
 
 
 func _player3d(unit: float) -> AudioStreamPlayer3D:
@@ -213,8 +213,19 @@ func _process(dt: float) -> void:
 		purr.stop()
 
 
+func _on_hurt(_a: float, _f: Vector3) -> void:
+	if rng.randf() < 0.5 or player.rig == null:
+		_one("yowl", 0.75, rng.randf_range(0.95, 1.08))
+	else:
+		player.rig.soma.act("hiss")   # the face hisses with it (the act plays the sound, and syncs)
+
+
 func meow() -> void:
 	_meow_cool = 0.45
+	if player and player.rig and player.rig.fight > 0.4:
+		# in a fight the meow key hisses instead
+		player.rig.soma.act("hiss")
+		return
 	var sv := get_node_or_null("/root/Save")
 	if sv:
 		sv.add_stat("meows")

@@ -1560,6 +1560,8 @@ func _post(dt: float, _inp: Dictionary) -> void:
 	rig.clamber_pull = clampf(clamber_t / 0.55, 0.0, 1.0) if (clambering and clamber_phase == 2) else (1.0 if not clambering else 0.0)
 	rig.ledge_world = ledge_point
 	rig.rear = maxf(w_scratch, w_kick * 0.85)
+	# fighting (enemy close / locked on / just hurt): threat pose, fur up, ears back, hisses
+	rig.fight = CatFightAnim.level(self, rig.fight, dt)
 	rig.scratch = w_scratch
 	if "grip" in rig:
 		rig.grip = combat.grip_w
@@ -3128,7 +3130,7 @@ func _do_swat(paw := -1, rake := false) -> void:
 	# the real foreleg swats too (seen in third person / orbit, and in the shadow)
 	if rig.has_method("swat"):
 		var sh := global_transform * Vector3((-0.04 if paw == 0 else 0.04), 0.17, -0.13)
-		rig.swat(paw, sh + (wt - sh).limit_length(0.27))
+		rig.swat(paw, sh + (wt - sh).limit_length(0.27), "rake" if rake else "")
 	_swat_pt = wt
 	if clawing and paw == paws.claw_i:
 		_claw_release()
