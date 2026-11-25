@@ -25,6 +25,8 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	film = args.has("--film")
 	_box(Vector3(0, -0.5, -10), Vector3(40, 1, 40), "dirt")
+	if film:
+		_box(Vector3(-40, -0.5, -10), Vector3(40, 1, 40), "wood")   # flat wood for the film lanes
 	# lane 0: 1.2 m ledge (trot at it and keep pushing)
 	_box(Vector3(0, LEDGE_H * 0.5, 0), Vector3(2.0, LEDGE_H, 8.0), "wood")
 	# lane 1: 0.3 m kerb (walk off it)
@@ -56,6 +58,28 @@ func _ready() -> void:
 		{"name": "bed_trot", "x": -6.0, "y": 0.7, "z": 1.0, "dur": 4.0, "bot": {"move": Vector2(0, 1), "edge_sense": true}, "text": "trot off a 70 cm bed"},
 		{"name": "ramp_down", "x": 18.0, "y": 1.2, "z": 3.5, "dur": 3.0, "bot": {"move": Vector2(0, 1), "edge_sense": true}, "text": "trot down a 20 deg ramp (a slope is not a drop)"},
 	]
+	if film or args.has("--all"):
+		# film lanes (the rest of the "real cat" pass): a steep tile slope, a standing start
+		# flat out, a slow turn round
+		var sa := deg_to_rad(35.0)
+		var sl := StaticBody3D.new()
+		var scs := CollisionShape3D.new()
+		var sbx := BoxShape3D.new()
+		sbx.size = Vector3(2.0, 0.2, 7.0)
+		scs.shape = sbx
+		sl.add_child(scs)
+		sl.position = Vector3(-30, 2.0, -2.0)
+		sl.rotation = Vector3(-sa, 0, 0)
+		sl.set_meta("surface", "tile")
+		add_child(sl)
+		if film:
+			_mesh(sl, sbx.size, Color(0.75, 0.78, 0.8))
+		var top: Vector3 = sl.position + Vector3(0, cos(sa), -sin(sa)) * 0.11 + Vector3(0, sin(sa), cos(sa)) * 1.5
+		scen.append({"name": "steep", "x": top.x, "y": top.y, "z": top.z, "dur": 3.0, "bot": {"move": Vector2.ZERO}, "text": "standing on 35 deg tile (paws hold 24 deg)"})
+		scen.append({"name": "start", "x": -36.0, "y": 0.0, "z": 2.0, "dur": 2.6, "bot": {"move": Vector2(0, 1), "canter": true}, "text": "flat out from a stand: a bound start"})
+		scen.append({"name": "pivot", "x": -42.0, "y": 0.0, "z": -2.0, "dur": 3.4, "t2": 1.0, "bot": {"move": Vector2(0, 1), "stroll": true}, "bot2": {"move": Vector2(0, -1), "stroll": true}, "text": "walk, then turn round: the forepaws pivot"})
+		if film and not args.has("--all"):
+			scen = scen.filter(func(x): return x.name in ["ledge_trot", "bed_trot", "kerb_walk", "steep", "start", "pivot"])
 	player = CatPlayer.new()
 	add_child(player)
 	if film:
@@ -146,7 +170,7 @@ func _next() -> void:
 	t = -0.5
 	lg = {"min_v_lip": INF, "fell_t": -1.0, "events": [], "max_v": 0.0, "impact": 0.0, "hang": false, "lip_v": -1.0, "stopped_at": INF}
 	if film:
-		cap.text = s.text + ("\nbefore" if not CatPlayer.edge_sense else "\nedge sense")
+		cap.text = s.text + ("\nbefore" if not CatPlayer.edge_sense else "\nafter")
 
 
 func _physics_process(dt: float) -> void:
@@ -155,7 +179,7 @@ func _physics_process(dt: float) -> void:
 	var s: Dictionary = scen[si]
 	t += dt
 	if t >= 0.0:
-		player.bot = (s.bot as Dictionary).duplicate()
+		player.bot = ((s.bot2 if s.has("t2") and t > float(s.t2) else s.bot) as Dictionary).duplicate()
 		player.bot["pitch"] = -0.25
 		var hv := Vector2(player.velocity.x, player.velocity.z).length()
 		lg.max_v = maxf(lg.max_v, hv)
