@@ -20,7 +20,7 @@ extends CharacterBody3D
 
 const G := 9.8
 const STALK_SPEED := 0.7
-const TROT_SPEED := 3.2
+const TROT_SPEED := 2.8     # real cats trot ~1-3 m/s and switch to the gallop near 3 (cat_gait GALLOP_UP)
 const SPRINT_SPEED := 11.0
 const CANTER_SPEED := 6.0
 const DOUBLE_TAP := 0.3
@@ -191,6 +191,46 @@ var _air_left := AIR_BUDGET
 var _launch_hv := Vector3.ZERO   # the way the push sent it (a face it brushed on the way up doesn't cancel that)
 var _hard_ask := false        # this tick the cat asked for more than the footing holds on purpose
 const WALL_BRAKE := 9.0
+## edge sense: a cat sees a drop coming and never walks off one by accident. it slows so it gets
+## to the lip at a walk, a small drop (<= EDGE_STEP) it steps down, a bigger one it stops at
+## and peers over, and keeps pushing (EDGE_LOWER s) to turn round and lower itself off by the
+## forepaws (let down, cat_climb.gd). a gallop / a jump off is on purpose: no brake.
+## humans always, bots only with bot.edge_sense (tests and labs keep the old run offs)
+static var edge_sense := true
+## stamina drains with the work the legs do (pace, speeding up, uphill) instead of a flat rate
+## per gait (false = old)
+static var effort_stamina := true
+## steep low grip slopes can't be stood on (they skid you down), steep descents are taken at a
+## braking pace (false = old: stands on anything floor_max_angle allows)
+static var slopes := true
+const DESCENT_RATE := 2.4     # m/s straight down a cat runs a steep slope / stairs at, most
+var slope_sliding := false
+## bound starts: flat out from a stand the hinds drive together, near what the paws hold, and
+## the first strides are a bound. tight turns at low speed pivot on the forepaws: the hind end
+## swings round the shoulders (a visual offset the body walks back in)
+static var bound_start := true
+## pounces / dodges arrive on their traced spot in the touch down tick (false = old: slide past,
+## then pulled back onto it)
+static var exact_touch := true
+## a wall slide peels off by when the floor will be there, not how high it is (false = old)
+static var slide_peel := true
+const BOUND_T := 0.4
+var bound_t := 0.0
+var _pivot_off := Vector3.ZERO
+const PIVOT_REACH := 0.11      # shoulders ahead of the capsule centre (the turn's pivot)
+var _steep_t := 0.0
+var effort := 0.0             # stamina per second this tick (tests / hud)
+const EDGE_STEP := 0.45       # drops up to this are stepped down at a walk
+const EDGE_STEP_V := 1.1      # speed it steps off a small drop at
+const EDGE_LOWER := 0.35      # s pushing at the lip of a big drop before it lowers itself off
+const EDGE_HOP := 1.0         # drops up to this (a bed, a table) it hops down after a short look
+const EDGE_PEER := 0.18       # s it looks down before hopping off
+var _edge_hop := false
+var edge_gap := INF           # m to the next drop ahead (tests / rig peer)
+var edge_drop := 0.0          # how far down it goes
+var _edge_push := 0.0
+var _edge_pt := Vector3.ZERO
+var _edge_dir := Vector3.ZERO
 const LIFT_UP_ACC := 60.0     # hardest the legs shove the body up / stop it, m/s^2 (~6 g)
 const LIFT_DN_ACC := 40.0
 const LIFT_REACH := 0.09      # legs reach down this far to meet the ground before a landing
@@ -618,6 +658,8 @@ func _unhandled_input(event: InputEvent) -> void:
 var _shift_prev := false
 var _shift_last_tap := -10.0
 var _galloping := false
+var _gallop_t := 0.0
+const GALLOP_BUILD := 1.4      # s of held gallop before it opens into the flat out sprint
 var _swat_prev := false
 var _swat_paw := 1             # the swat button alternates paws: this is the one it used last
 var _int_prev := false
@@ -661,11 +703,18 @@ func _read_input() -> Dictionary:
 	# walks with a half tilt
 	if mv != Vector2.ZERO:
 		CatPad.last_used_pad = false
+	# real cat gaits on keys: wasd = walk, hold shift = trot, double tap shift = gallop. a gallop
+	# held flat out with w opens up into the full sprint after GALLOP_BUILD s (a cat bursts)
+	if _galloping and mv.y > 0.5 and absf(mv.x) <= 0.3:
+		_gallop_t += get_physics_process_delta_time()
+	else:
+		_gallop_t = 0.0
+	var flat_out := _galloping and _gallop_t >= GALLOP_BUILD
 	var kb := {
 		"move": mv,
-		"canter": shift and not _galloping,
-		"sprint": shift and _galloping,
-		"stroll": mv != Vector2.ZERO and not shift,   # keys alone = stroll, shift = run
+		"canter": _galloping and not flat_out,
+		"sprint": flat_out,
+		"stroll": mv != Vector2.ZERO and not shift,   # keys alone = walk, shift = trot
 		"crouch": CatKeys.down("crouch"),
 		"jump": CatKeys.down("jump"),
 		"swat": CatKeys.down("swat"),
@@ -917,6 +966,20 @@ func _physics_process(dt: float) -> void:
 	if pounce_air and leap_lock and not is_on_floor():
 		# a pounce flies straight: the body squares to the flight (fast) and stays on it
 		yaw += clampf(wrapf(pounce_yaw - yaw, -PI, PI), -18.0 * dt, 18.0 * dt)
+	if bound_start and real_move:
+		# a slow tight turn pivots on the forepaws: keep the shoulders where they were and let the
+		# hind end swing (the body then walks back over the capsule)
+		var dyaw := wrapf(yaw - rotation.y, -PI, PI)
+		var spd_p := Vector2(velocity.x, velocity.z).length()
+		var pw := (1.0 - smoothstep(0.8, 2.2, spd_p)) if is_on_floor() and not (climbing or clambering or mantling) else 0.0
+		if pw > 0.0 and absf(dyaw) > 0.0005:
+			var f0 := Basis(Vector3.UP, rotation.y) * Vector3(0, 0, -PIVOT_REACH)
+			var f1 := Basis(Vector3.UP, yaw) * Vector3(0, 0, -PIVOT_REACH)
+			_pivot_off += (f0 - f1) * pw
+		_pivot_off = _pivot_off.limit_length(0.09)
+		_pivot_off = _pivot_off.move_toward(Vector3.ZERO, (0.25 + _pivot_off.length() * 4.0) * dt)
+	else:
+		_pivot_off = Vector3.ZERO
 	rotation.y = yaw
 	last_event_t += dt
 	toast_t += dt
@@ -1203,6 +1266,9 @@ func _physics_process(dt: float) -> void:
 			var grade := _grade_v / maxf(hv.length(), 1.0)
 			if grade > 0.15:
 				target_speed = minf(target_speed, maxf(CLIMB_RATE / grade, TROT_SPEED * 0.8))
+			elif grade < -0.3 and slopes and real_move:
+				# steep down: the forelegs take every landing, so it brakes to a pace they can hold
+				target_speed = minf(target_speed, maxf(DESCENT_RATE / -grade, TROT_SPEED * 0.8))
 			_grade_y = by
 	else:
 		_grade_y = global_position.y + _soft_off.y
@@ -1224,6 +1290,16 @@ func _physics_process(dt: float) -> void:
 		else:
 			accel = minf(PUSH_ACCEL, PUSH_POWER / maxf(cur, 0.5))
 			speeding = true
+		if bound_start and real_move:
+			bound_t = maxf(bound_t - dt, 0.0)
+			if speeding and cur < 1.0 and target_speed > CANTER_SPEED - 0.5 and wish_len > 0.8 and bound_t <= 0.0 and ground_time > 0.1:
+				bound_t = BOUND_T
+				if rig and rig.gait:
+					rig.gait.bound_t = BOUND_T
+				_event("bound start")
+			if bound_t > 0.0 and speeding:
+				# the push is both hind legs at once, as hard as the footing takes
+				accel = maxf(accel, 1.15 * grip_now())
 		if wall_brake and cur > 0.6 and not charging:
 			# a cat doesn't run its face into a wall: it sees it coming and digs in so the nose
 			# gets there at a walk. (only real walls, head on: not steps, ledges to hop onto,
@@ -1235,13 +1311,26 @@ func _physics_process(dt: float) -> void:
 				if cap < cur - 0.05:
 					accel = maxf(accel, BRAKE_DECEL)
 					speeding = false
+		if _edge_on() and wish_len > 0.01 and not charging and not (sprint or canter):
+			var ecap := _edge_cap(wish_dir, cur, dt)
+			if ecap < target_speed:
+				target_speed = ecap
+				target = wish_dir * target_speed
+				if ecap < cur - 0.05:
+					accel = maxf(accel, BRAKE_DECEL)
+					speeding = false
+		else:
+			edge_gap = INF
+			_edge_push = 0.0
 		var lat_ask := TURN_ASK
 		var g_now := grip_now()
 		if real_move:
 			# the cat knows its footing: easing off, a normal start and a steady turn ask for just
 			# under what the paws hold. a flat out start, a thrown brake (stick back / crouch / a wall
 			# coming) and a yanked turn ask for more than that, and slide
-			var hard := accel >= BRAKE_DECEL - 0.01 or (speeding and target_speed > CANTER_SPEED + 0.5 and cur < 2.0)
+			var hard := accel >= BRAKE_DECEL - 0.01 or (speeding and target_speed > CANTER_SPEED + 0.5 and cur < 2.0 and bound_t <= 0.0)
+			if bound_t > 0.0 and speeding:
+				accel = minf(accel, minf(0.97 * g_now, 0.92 * G))   # (legs top out near 1 g however grippy)
 			if not hard:
 				accel = minf(accel, 0.95 * g_now)
 			var off := wish_dir.angle_to(hv / cur) if (cur > 0.5 and wish_len > 0.01) else 0.0
@@ -1261,7 +1350,9 @@ func _physics_process(dt: float) -> void:
 			_drive_avg = lerpf(_drive_avg, down, 1.0 - exp(-2.5 * dt))
 			_drive = lerpf(_drive, 0.6 + 0.4 * clampf(down / maxf(_drive_avg, 0.15), 0.0, 2.2), 1.0 - exp(-30.0 * dt))
 			# slowing down keeps its tuned rates and only pulses a little with the paws
-			if speeding:
+			if speeding and bound_t > 0.0:
+				pass   # (a bound is one big push of both hinds, not paw by paw)
+			elif speeding:
 				accel = minf(accel, DRIVE_MAX) * _drive
 			else:
 				accel *= lerpf(1.0, _drive, 0.35)
@@ -1318,6 +1409,17 @@ func _physics_process(dt: float) -> void:
 				hv += wish_dir * minf(add, AIR_ACCEL * dt * wishspeed)
 		hv *= 1.0 - 0.02 * dt
 
+	if _edge_hop:
+		_edge_hop = false
+		if grounded:
+			hv = _edge_dir * 1.4
+			velocity.y = 1.5
+			grounded = false
+			jumped_this_air = true
+			_hopped_now = true
+			_launch_hv = hv
+			_event("hop down")
+
 	# ---------------- grip ----------------
 	# the paws can only push so hard on what's underfoot. ask for more (hard starts, stops,
 	# tight turns at speed) and they slip: the cat drifts, scrabbles, and tears up soft ground
@@ -1342,6 +1444,38 @@ func _physics_process(dt: float) -> void:
 			_slip_fx(dt, hv)
 	else:
 		slip = LowPoly.damp(slip, 0.0, 10.0, dt)
+
+	# ---------------- slopes ----------------
+	# a paw holds a slope while tan(slope) < its grip: 24 deg on tile, 29 on wood, 45 on grass.
+	# steeper and the cat skids down it, claws out, whatever it asks for (it can still crouch,
+	# turn and hop). gentle hills it runs, steep ones down it takes at a braking walk
+	if grounded and slopes and real_move:
+		var fnorm := get_floor_normal()
+		var sl := acos(clampf(fnorm.y, -1.0, 1.0))
+		var mu_e := float(MU.get(surface, MU.default)) * GRIP_REAL
+		if tan(sl) > mu_e * 1.05 and sl > deg_to_rad(12.0):
+			_steep_t += dt
+		else:
+			_steep_t = 0.0
+		if _steep_t > 0.08:
+			var down := Vector3(fnorm.x, 0.0, fnorm.z).normalized()
+			var a := G * (sin(sl) - mu_e * SKID * cos(sl))
+			# the paws are skidding: what the legs ask for only shades the slide (a bit across,
+			# never up it), and nothing stops it but flatter ground
+			hv = hv_before + (hv - hv_before) * 0.2
+			var up_part := hv.dot(-down)
+			if up_part > 0.0:
+				hv += down * minf(up_part, 6.0 * dt)
+			hv += down * maxf(a, 0.5) * dt
+			slip = LowPoly.damp(slip, 1.0, 20.0, dt)
+			if slip > 0.2:
+				_slip_fx(dt, hv)
+			slope_sliding = true
+		else:
+			slope_sliding = false
+	else:
+		_steep_t = 0.0
+		slope_sliding = false
 
 	# ---------------- wall scramble ----------------
 	scramble_t = maxf(scramble_t - dt, 0.0)
@@ -1382,7 +1516,20 @@ func _physics_process(dt: float) -> void:
 			velocity.x = 0.0
 			velocity.z = 0.0
 	prev_vy = velocity.y
-	if grounded and wish_len > 0.3 and hv.length() > TROT_SPEED + 0.3:
+	if grounded and effort_stamina and real_move:
+		# stamina = work: holding a fast pace, speeding up and running uphill cost, a trot, a
+		# coast or a gallop rolling to a stop don't (souls costs kept: steady 6 m/s ~14/s, 11 ~30/s)
+		var v := hv.length()
+		var a_fwd := maxf((hv - hv_before).dot(hv / v) / dt, 0.0) if v > 0.3 else 0.0
+		var cost := 6.0 * pow(maxf(v - TROT_SPEED - 0.3, 0.0), 0.8)
+		cost += 0.4 * v * minf(a_fwd, 12.0)
+		cost += 8.0 * maxf(_grade_v - 0.6, 0.0)
+		if wish_len < 0.3:
+			cost = 0.0
+		effort = cost
+		if cost > 0.5:
+			stamina.drain(minf(cost, 45.0), dt)
+	elif grounded and wish_len > 0.3 and hv.length() > TROT_SPEED + 0.3:
 		if sprint:
 			stamina.drain(CatStamina.GALLOP, dt)
 		elif canter:
@@ -1393,6 +1540,14 @@ func _physics_process(dt: float) -> void:
 			_soft_off -= RunAssist.step_onto(self, hv, dt)   # steps, kerbs, stairs: taken in stride
 		else:
 			RunAssist.step_up(self, hv, dt)   # roots, branches, stone lips: glide up, paws step
+	if exact_touch and stick_armed and not grounded and pounce_land != Vector3.INF and velocity.y < 0.0:
+		# coming down this tick on a traced landing spot (pounce / dodge): arrive on it. the
+		# touch down is only seen next tick, so the floor would otherwise slide the capsule
+		# past the spot for a tick and the landing would then pull it back (a pop of the whole cat)
+		var to := pounce_land - global_position
+		if global_position.y + velocity.y * dt <= pounce_land.y + 0.01 and Vector2(to.x, to.z).length() < hv.length() * dt * 1.6 + 0.01:
+			velocity.x = to.x / dt
+			velocity.z = to.z / dt
 	# just put on top of a step, ahead of where the visible cat is: wait there while it walks up
 	var step_wait := grounded and _soft_off.length_squared() > 4e-6
 	if step_wait:
@@ -1564,9 +1719,11 @@ func _post(dt: float, _inp: Dictionary) -> void:
 		# slide the cat peels off the wall to land on its feet instead of lying on it into the ground
 		var st := 1.0 if sliding else 0.0
 		if sliding:
-			var fh := _ray(global_position + Vector3.UP * 0.05, global_position + Vector3.DOWN * 0.45)
+			var fh := _ray(global_position + Vector3.UP * 0.05, global_position + Vector3.DOWN * 0.8)
 			if not fh.is_empty() and fh.normal.y > 0.7:
-				st = smoothstep(0.03, 0.4, global_position.y - fh.position.y)
+				# (by when it gets there, not just how high: the spring needs ~0.15 s to peel off)
+				var lead := maxf(-velocity.y, 0.0) * 0.18 if slide_peel else 0.0
+				st = smoothstep(0.03, 0.4, global_position.y - fh.position.y - lead)
 		_w_slide_m = LowPoly.damp(_w_slide_m, st, 24.0, dt)
 		_w_slide_v += (16.0 * 16.0 * (_w_slide_m - w_slide) - 32.0 * _w_slide_v) * dt
 		w_slide = clampf(w_slide + _w_slide_v * dt, 0.0, 1.0)
@@ -1704,8 +1861,84 @@ func _wall_cap(dir: Vector3, cur: float) -> float:
 	return sqrt(2.0 * wb * maxf(gap - 0.03, 0.0)) + 0.5
 
 
+func _edge_on() -> bool:
+	if not edge_sense or not real_move:
+		return false
+	if not bot.is_empty() and not bot.get("edge_sense", false):
+		return false
+	return not (lock.active() or combat.committed())
+
+
+## floor height under a point (-INF = nothing within 3 m)
+func _floor_at(pt: Vector3, top: float) -> float:
+	var hit := _ray(Vector3(pt.x, top, pt.z), Vector3(pt.x, top - 3.2, pt.z))
+	if hit.is_empty() or (hit.normal as Vector3).y < 0.55:
+		return -INF
+	return (hit.position as Vector3).y
+
+
+## the speed that still stops at the lip of a drop ahead (INF = no drop). also stands the cat
+## at the lip of a big one and, pushed on, lowers it off (climber.let_down)
+func _edge_cap(dir: Vector3, cur: float, dt: float) -> float:
+	var feet := global_position
+	var top := feet.y + 0.3
+	var wb := SKID * 0.9 * grip_now()
+	var look := RADIUS + 0.06 + cur * cur / (2.0 * wb) + cur * 0.08
+	look = clampf(look, 0.22, 2.2)
+	# coarse march for the first spot with no floor near the feet' height, then bisect the lip
+	# (measured from the last floor seen, not the feet: a slope down is not a drop)
+	var n := 6
+	var ok_d := 0.0
+	var ok_y := feet.y
+	var bad_d := -1.0
+	var drop := 0.0
+	for k in range(1, n + 1):
+		var d := look * float(k) / n
+		var fy := _floor_at(feet + dir * d, top)
+		if fy < ok_y - 0.2 - 0.8 * (d - ok_d):
+			bad_d = d
+			drop = ok_y - fy if fy > -INF else 3.5
+			break
+		ok_d = d
+		ok_y = fy
+	if bad_d < 0.0:
+		edge_gap = INF
+		_edge_push = 0.0
+		return INF
+	for _i in 4:
+		var m := (ok_d + bad_d) * 0.5
+		var fy := _floor_at(feet + dir * m, top)
+		if fy < ok_y - 0.2 - 0.8 * (m - ok_d):
+			bad_d = m
+		else:
+			ok_d = m
+			ok_y = fy
+	edge_gap = ok_d - RADIUS
+	edge_drop = drop
+	if drop <= EDGE_STEP:
+		# a kerb / a low wall top: step down off it at a walk, front paws reaching down first
+		return sqrt(2.0 * wb * maxf(edge_gap, 0.0)) + EDGE_STEP_V
+	# a real drop: get to the lip at nothing and stand there (the head peers over)
+	var cap := sqrt(2.0 * wb * maxf(edge_gap - 0.02, 0.0))
+	if edge_gap < 0.05:
+		_edge_push += dt
+		_edge_pt = feet + dir * (ok_d + bad_d) * 0.5
+		_edge_pt.y = ok_y
+		_edge_dir = dir
+		if drop <= EDGE_HOP:
+			if _edge_push > EDGE_PEER:
+				_edge_push = 0.0
+				_edge_hop = true   # a bed / a chair: a look, then a hop down, forepaws first
+		elif _edge_push > EDGE_LOWER and stamina.can_run():
+			_edge_push = 0.0
+			climber.let_down(_edge_pt, dir)
+	else:
+		_edge_push = 0.0
+	return cap
+
+
 func _vis_off() -> Vector3:
-	return _soft_off + Vector3(_lag.x, _lift, _lag.z)
+	return _soft_off + Vector3(_lag.x, _lift, _lag.z) + _pivot_off
 
 
 ## vertical inertia of the visible cat (see `_lift`). the capsule's speed changes in one tick
