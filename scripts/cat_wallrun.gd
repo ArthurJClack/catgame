@@ -14,7 +14,7 @@ extends RefCounted
 
 static var off := false
 
-const MIN_SPEED := 2.8      # m/s across the floor coming in (a trot is 3.2)
+const MIN_SPEED := 2.5      # m/s across the floor coming in (a trot is 2.8)
 const MIN_ALONG := 1.9      # of that, along the face
 const MAX_ANGLE := 1.05     # rad off the face (60 deg). more head on than that = kick / climb / scramble
 const MIN_INTO := 0.25      # m/s into the face: has to actually be going at it, not brushing past
