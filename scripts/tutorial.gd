@@ -33,7 +33,7 @@ const STEPS := [
 	["swat", "{swat} swat (hold it to hook things with your claws)", "RT swat (hold to hook with your claws)"],
 	["climb", "jump at it holding {forward} to climb", "jump at it holding forward to climb"],
 	["scratch", "{interact} here: scratch. it also drops whatever's in your mouth", "hold X here: scratch. X also drops what's in your mouth"],
-	["run", "hold {run} to run, double tap it and hold for a full gallop", "click L3 to run, again to gallop"],
+	["run", "hold {run} to trot, double tap it and hold to gallop (keep holding and it opens up flat out)", "click L3 to run, again to gallop"],
 	["meow", "{meow} meow", "Y meow"],
 	["explore", "that's it. esc opens the menu (it counts the puzzles you've found), the gaps in the yard fence lead out to other places", "start opens the menu (it counts the puzzles you've found). the gaps in the yard fence lead out to other places"],
 ]

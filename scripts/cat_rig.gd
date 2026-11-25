@@ -161,6 +161,9 @@ static var smooth_ref := true
 ## the leg, and the knee never comes up over the hip. false = legs may fold through the body
 static var leg_limits := true
 static var phys := true
+## a swinging paw re-aiming at a higher step (stairs at a run) only pushes its end of the body up,
+## it never snaps it there: only planted paws hard stop the body (false = old snap)
+static var soft_fold := true
 ## pose changes in the air and at landings are eased, never switched in one frame
 static var soft_pose := true
 var _dive := 0.0
@@ -1969,6 +1972,7 @@ func _girdle_phys(h: int, y: float, yt: float, fl: Array, homes: Array, glo: flo
 	for _k in n:
 		var sup := 0.0
 		var ymin := -INF
+		var ymin_hard := -INF   # (a swinging paw re-aiming at a higher step only pushes: no snap)
 		var s_st := 0.0
 		var s_w := 0.0
 		for k in 2:
@@ -1991,7 +1995,10 @@ func _girdle_phys(h: int, y: float, yt: float, fl: Array, homes: Array, glo: flo
 			# lifts that end of its body, it doesn't put a paw up beside its shoulder)
 			# (a swinging leg hangs longer than that: the paw is held off the ground and the
 			# hips tip with the stride, so the same body height folds it more)
-			ymin = maxf(ymin, py - h0 + maxf(sqrt(maxf(lmin * lmin - d2, 0.0)), full * (LEG_HANG if planted else LEG_HANG + 0.09)))
+			var ym := py - h0 + maxf(sqrt(maxf(lmin * lmin - d2, 0.0)), full * (LEG_HANG if planted else LEG_HANG + 0.09))
+			ymin = maxf(ymin, ym)
+			if planted or not soft_fold or speed_s < 2.0:
+				ymin_hard = maxf(ymin_hard, ym)
 		_sup[h] = sup
 		var S := clampf(sup, 0.0, 1.0)
 		var ww := w1 * clampf(sup, 0.5, 2.0)
@@ -2012,8 +2019,8 @@ func _girdle_phys(h: int, y: float, yt: float, fl: Array, homes: Array, glo: flo
 			a += ease * clampf(4.0 * w1 * (ymin - y) - 4.0 * sqrt(w1) * v, 0.0, 9.81 * 5.0)
 		v += a * sdt
 		y += v * sdt
-		if y < ymin - 0.012:
-			y = ymin - 0.012   # bottomed out (a hard landing): belly nearly on the paws
+		if y < ymin_hard - 0.012:
+			y = ymin_hard - 0.012   # bottomed out (a hard landing): belly nearly on the paws
 			v = maxf(v, 0.0)
 		if y < glo:
 			y = glo

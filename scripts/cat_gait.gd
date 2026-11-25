@@ -8,7 +8,7 @@ extends RefCounted
 ## timing is distance driven: the gait clock advances by distance / stride length, and
 ## stride length, duty factor and the fore-hind phase lag come from speed curves measured
 ## off real cats (walk -> trot is a continuous lag change, trot -> gallop is a snap with hysteresis.
-## real cats break into a gallop near 2.7 m/s; it is held back to 3.9 here so the default 3.2 m/s run is a trot).
+## real cats break into a gallop near 2.7-3 m/s: the trot (shift, 2.8 m/s) stays a trot, anything faster gallops).
 
 enum { PLANTED, SWING, FREE }
 
@@ -27,8 +27,8 @@ const STANCE_BIAS := [-0.06, -0.06, -0.2, -0.2]
 # fraction of the stride each paw spends on the ground
 const DUTY_V := [0.0, 0.3, 0.5, 0.9, 1.5, 2.4, 3.2, 6.0, 11.0]
 const DUTY_D := [0.80, 0.76, 0.70, 0.62, 0.48, 0.40, 0.36, 0.28, 0.20]
-const GALLOP_UP := 3.9
-const GALLOP_DOWN := 3.4
+const GALLOP_UP := 3.2
+const GALLOP_DOWN := 2.7
 ## rough ground footwork (longer reach rays, foothold picking, swing clearance, girdles
 ## tilting with the ground). false = the old flat ground behaviour (before / after renders)
 static var rough := true
@@ -42,6 +42,8 @@ static var solid_rays := true
 static var wall_stop := true
 ## one paw of each pair (fore, hind) stays on the ground below a run
 static var support_rule := true
+## trot <-> gallop blends over a stride instead of 0.2 s (false = old snap)
+static var smooth_shift := true
 var _ref_y := NAN
 var _ref_vy := 0.0
 const REACH_LIFT := 1.03
@@ -309,12 +311,23 @@ func _clearance(a: Vector3, b: Vector3, root_y: float) -> float:
 
 
 ## timing numbers for this speed
+## a standing start flat out: the first strides are already a bound (both hinds drive together)
+var bound_t := 0.0
+
+
 func plan(speed: float, dt: float) -> void:
+	bound_t = maxf(bound_t - dt, 0.0)
+	if bound_t > 0.0 and speed > 0.3:
+		_gal_on = true
+		gallop = move_toward(gallop, 1.0, dt * 8.0)
 	if speed > GALLOP_UP:
 		_gal_on = true
 	elif speed < GALLOP_DOWN:
 		_gal_on = false
-	gallop = move_toward(gallop, 1.0 if _gal_on else 0.0, dt * 5.0)
+	# a real cat changes gait over about one stride (the lead paws re-time step by step), not in
+	# one snap: blend at the stride rate (~0.3-0.6 s round the switch speed)
+	var rate := clampf(freq, 1.6, 4.0) if smooth_shift else 5.0
+	gallop = move_toward(gallop, 1.0 if _gal_on else 0.0, dt * rate)
 	stride = _curve(STRIDE_V, STRIDE_L, speed)
 	duty = _curve(DUTY_V, DUTY_D, speed)
 	var ms := lerpf(max_stance, max_stance_gallop, gallop)

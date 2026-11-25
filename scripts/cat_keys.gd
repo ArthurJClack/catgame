@@ -12,7 +12,7 @@ const ACTIONS := [
 	["back", "move back"],
 	["left", "move left"],
 	["right", "move right"],
-	["run", "run (double tap = gallop)"],
+	["run", "trot (double tap = gallop)"],
 	["crouch", "crouch / sneak"],
 	["jump", "hop (tap) / leap + pounce (hold, aim, let go)"],
 	["swat", "swat (hold = hook with your claws)"],

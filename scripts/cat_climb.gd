@@ -70,6 +70,8 @@ var _tan_v := Vector3.ZERO   # climbing velocity along the face last tick
 var _cv := Vector2.ZERO      # climbing speed along the face (x across, y up): eases toward what's asked
 var _edge := Vector3.ZERO    # ledge edge point / normal for the move in progress
 var _edge_n := Vector3.ZERO
+var _lower_yaw := [0.0, 0.0]   # let down: the body turns round from / to over the move
+var _lowered := false          # this hang came from a let down (holding on over it = drop after a beat)
 
 static var dbg := false
 
@@ -107,7 +109,7 @@ func _over_kind() -> bool:
 
 ## hanging / hauling up off a hang (the rig's rear up + pull pose)
 func is_clambering() -> bool:
-	return (mode == HANG or (mode == MOVE and (kind == "grab" or kind == "haul" or kind == "lip"))) and not from_climb
+	return (mode == HANG or (mode == MOVE and (kind == "grab" or kind == "haul" or kind == "lip" or kind == "lower"))) and not from_climb
 
 
 ## a quick hop up (low ledge, curb), or a top out straight off a climb (the body tips over
@@ -226,6 +228,43 @@ func try_ledge(into: Vector3, step := false) -> bool:
 	return true
 
 
+## let down: standing at the lip of a drop, pushing on over it. the cat turns round, reaches
+## its hind end down the face and hangs off the edge by its forepaws (HANG), so the fall is
+## a body length shorter. from the hang: keep pushing away (or crouch) = drop, push back =
+## haul up again. `edge` = the lip (top height), `out` = the way over it
+func let_down(edge: Vector3, out: Vector3) -> bool:
+	if mode != NONE:
+		return false
+	var n := Vector3(out.x, 0.0, out.z).normalized()
+	if n == Vector3.ZERO:
+		return false
+	# the face under the lip: find it so the hang hugs it (a ray back in under the edge)
+	var below := edge + n * 0.25 + Vector3.DOWN * (p.HANG * 0.6)
+	var hit: Dictionary = p._ray(below, below - n * 0.5)
+	if not hit.is_empty() and absf((hit.normal as Vector3).y) < 0.5:
+		var hn := Vector3((hit.normal as Vector3).x, 0.0, (hit.normal as Vector3).z).normalized()
+		if hn.dot(n) > 0.6:
+			n = hn
+			var face: Vector3 = hit.position
+			edge = edge - n * (edge - face).dot(n)
+	var feet: Vector3 = p.global_position
+	var hang := _hang_pos(edge, n, feet)
+	var over := Vector3(hang.x, edge.y + 0.03, hang.z)
+	var keys := [_key(feet, _calm(p.velocity, -n) * 0.5, 0.0), _key(over, n * 0.25 + Vector3.DOWN * 0.3, 0.32), _key(hang, Vector3.ZERO, 0.62)]
+	if not _valid(keys) or not p._fits(hang):
+		return false
+	from_climb = false
+	_edge = edge
+	_edge_n = n
+	_haul = _plan_over("haul", edge, n, edge.y, Vector3.ZERO, -n * 0.25, hang)
+	_lower_yaw = [p.yaw, atan2(n.x, n.z)]
+	_start("lower", keys, HANG)
+	hang_t = 0.0
+	p.stamina.spend(CatStamina.CLAMBER * 0.5)
+	p._event("let down")
+	return true
+
+
 # ================================================================== tick
 
 func step(dt: float, mv: Vector2, wish_dir: Vector3, jump_pressed: bool, want_crouch: bool) -> void:
@@ -319,6 +358,9 @@ func _run(dt: float) -> void:
 	if from_climb:
 		_head_tick(dt, Vector2.ZERO, false, BODY_SIDE + p.RADIUS)
 	var end: float = _keys[-1].t
+	if kind == "lower":
+		p.yaw = lerp_angle(float(_lower_yaw[0]), float(_lower_yaw[1]), smoothstep(0.0, 0.8, _pt / end))
+		p.rotation.y = p.yaw
 	var sv := _sample(_keys, minf(_pt, end))
 	var to: Vector3 = sv[0]
 	var motion: Vector3 = to - p.global_position
@@ -335,6 +377,7 @@ func _run(dt: float) -> void:
 		p.velocity = _keys[-1].v
 		match _then:
 			HANG:
+				_lowered = kind == "lower"
 				mode = HANG
 				hang_t = 0.0
 				p.velocity = Vector3.ZERO
@@ -472,13 +515,19 @@ func _try_lip(n: Vector3, ceil_y: float) -> bool:
 
 func _hang(dt: float, wish_dir: Vector3, jump_pressed: bool, want_crouch: bool) -> void:
 	hang_t += dt
+	var lowered := kind == "lower" or _lowered
+	if lowered and not p.climb_mv.is_zero_approx():
+		# let down: the body faces the wall but you're still looking out over the drop, so the
+		# keys go by the camera (on over the edge = drop, back toward the top = haul up)
+		var mv: Vector2 = p.climb_mv
+		wish_dir = (Basis(Vector3.UP, p.orb_yaw) * Vector3(mv.x, 0, -mv.y)).normalized()
 	p.velocity = Vector3.ZERO
 	var n := _edge_n
 	var into := -n
 	if from_climb:
 		# came off a climb: the camera can be anywhere round a trunk, w / s mean up / down
 		wish_dir = into * p.climb_mv.y
-	if want_crouch or wish_dir.dot(n) > 0.5:
+	if want_crouch or (wish_dir.dot(n) > 0.5 and (hang_t > 0.3 or not lowered)):
 		mode = NONE
 		p.velocity = n * 0.8 + Vector3.DOWN * 0.3
 		p.climb_cool = 0.4
