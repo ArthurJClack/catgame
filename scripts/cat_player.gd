@@ -209,6 +209,9 @@ var slope_sliding := false
 ## the first strides are a bound. tight turns at low speed pivot on the forepaws: the hind end
 ## swings round the shoulders (a visual offset the body walks back in)
 static var bound_start := true
+## pounces / dodges arrive on their traced spot in the touch down tick (false = old: slide past,
+## then pulled back onto it)
+static var exact_touch := true
 const BOUND_T := 0.4
 var bound_t := 0.0
 var _pivot_off := Vector3.ZERO
@@ -1535,6 +1538,14 @@ func _physics_process(dt: float) -> void:
 			_soft_off -= RunAssist.step_onto(self, hv, dt)   # steps, kerbs, stairs: taken in stride
 		else:
 			RunAssist.step_up(self, hv, dt)   # roots, branches, stone lips: glide up, paws step
+	if exact_touch and stick_armed and not grounded and pounce_land != Vector3.INF and velocity.y < 0.0:
+		# coming down this tick on a traced landing spot (pounce / dodge): arrive on it. the
+		# touch down is only seen next tick, so the floor would otherwise slide the capsule
+		# past the spot for a tick and the landing would then pull it back (a pop of the whole cat)
+		var to := pounce_land - global_position
+		if global_position.y + velocity.y * dt <= pounce_land.y + 0.01 and Vector2(to.x, to.z).length() < hv.length() * dt * 1.6 + 0.01:
+			velocity.x = to.x / dt
+			velocity.z = to.z / dt
 	# just put on top of a step, ahead of where the visible cat is: wait there while it walks up
 	var step_wait := grounded and _soft_off.length_squared() > 4e-6
 	if step_wait:
