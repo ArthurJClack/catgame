@@ -212,6 +212,8 @@ static var bound_start := true
 ## pounces / dodges arrive on their traced spot in the touch down tick (false = old: slide past,
 ## then pulled back onto it)
 static var exact_touch := true
+## a wall slide peels off by when the floor will be there, not how high it is (false = old)
+static var slide_peel := true
 const BOUND_T := 0.4
 var bound_t := 0.0
 var _pivot_off := Vector3.ZERO
@@ -1717,9 +1719,11 @@ func _post(dt: float, _inp: Dictionary) -> void:
 		# slide the cat peels off the wall to land on its feet instead of lying on it into the ground
 		var st := 1.0 if sliding else 0.0
 		if sliding:
-			var fh := _ray(global_position + Vector3.UP * 0.05, global_position + Vector3.DOWN * 0.45)
+			var fh := _ray(global_position + Vector3.UP * 0.05, global_position + Vector3.DOWN * 0.8)
 			if not fh.is_empty() and fh.normal.y > 0.7:
-				st = smoothstep(0.03, 0.4, global_position.y - fh.position.y)
+				# (by when it gets there, not just how high: the spring needs ~0.15 s to peel off)
+				var lead := maxf(-velocity.y, 0.0) * 0.18 if slide_peel else 0.0
+				st = smoothstep(0.03, 0.4, global_position.y - fh.position.y - lead)
 		_w_slide_m = LowPoly.damp(_w_slide_m, st, 24.0, dt)
 		_w_slide_v += (16.0 * 16.0 * (_w_slide_m - w_slide) - 32.0 * _w_slide_v) * dt
 		w_slide = clampf(w_slide + _w_slide_v * dt, 0.0, 1.0)
